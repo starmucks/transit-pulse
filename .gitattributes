@@ -1,0 +1,4 @@
+# LF line endings everywhere (repository and working copy) so diffs and CI on Linux match
+* text=auto eol=lf
+# Windows PowerShell 5.1 scripts expect CRLF
+*.ps1 text eol=crlf
