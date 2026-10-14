@@ -2,7 +2,7 @@
 
 > Обновляется в конце каждой сессии. Не длиннее одного экрана.
 
-**Обновлено:** 2026-10-09 · **Этап:** 0 «Фундамент» — [спецификация](stages/stage-0.md) утверждена
+**Обновлено:** 2026-10-14 · **Этап:** 0 «Фундамент» — [спецификация](stages/stage-0.md) утверждена
 
 ## Сделано
 - Спецификация этапа 0 утверждена.
@@ -10,12 +10,13 @@
 - Лейблы, milestones этапов 0–9, issues этапа 0: #1–#5.
 - Окружение: .NET SDK 10.0.401, Docker 29.8, git 2.55, `gh` 2.102.
 - Сервер для сборщика (фаза A): 1 vCPU / 1 ГБ RAM / 10 ГБ NVMe.
+- #1 закрыт (PR #6, squash-merge): каркас, `VehiclePosition` с инвариантами, 19 тестов (xUnit v3 на Microsoft.Testing.Platform), CI build/test/format — зелёный.
 
 ## В работе
-- #1 «Repository skeleton and solution» (задача 0.1).
+- #2 «GitHub: CI workflow, branch protection, templates» (задача 0.2): CI уже есть.
 
 ## Следующий шаг
-- #1, шаг 2: ветка `feature/1-repo-skeleton` → `LICENSE`, `.gitignore`, `global.json`, `Directory.Build.props`, `Directory.Packages.props`, `.editorconfig`.
+- #2: ветка `feature/2-github-templates` (в неё — эти правки статуса) → шаблоны PR/issue → PR → после мержа автор включает защиту `main` (обязательный check `build`).
 
 ## Открытые вопросы
 - Диск сервера 10 ГБ: способ запуска сборщика — решить в этапе 1.
