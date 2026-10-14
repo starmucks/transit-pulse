@@ -1,2 +1,28 @@
 # Personal Claude Code settings
 .claude/settings.local.json
+
+# .NET build output and IDE state
+bin/
+obj/
+artifacts/
+.vs/
+*.user
+TestResults/
+coverage*/
+
+# Web (web/)
+node_modules/
+dist/
+
+# Python / ML (ml/)
+__pycache__/
+.venv/
+.ipynb_checkpoints/
+
+# Local data: raw archives, training sets, models in progress
+/data/
+
+# Secrets: never committed, only *.example templates are
+.env
+*.local.json
+rclone.conf

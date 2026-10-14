@@ -14,7 +14,7 @@
 Порядок выбран так, чтобы как можно раньше появились CI и hooks: они проверяют все последующие шаги.
 
 ### 0.1 Каркас репозитория и solution
-- [ ] `git init`, первый коммит в `main` — только документы (бриф, CLAUDE.md, docs). Это единственный коммит без PR; дальше всё через PR.
+- [x] `git init`, первый коммит в `main` — только документы (бриф, CLAUDE.md, docs). Это единственный коммит без PR; дальше всё через PR.
 - [ ] `LICENSE` (MIT), `.gitignore` (dotnet + node + python), `.gitattributes` (line endings).
 - [ ] `global.json` (фиксирует SDK 10.0.x), `Directory.Build.props` (net10.0, nullable, `TreatWarningsAsErrors`, анализаторы), `Directory.Packages.props` (Central Package Management), `.editorconfig`.
 - [ ] `TransitPulse.slnx` + проекты, которые нужны уже сейчас: `TransitPulse.Domain`, `TransitPulse.Domain.Tests` (xUnit), чтобы CI было что собирать и тестировать.
@@ -23,10 +23,10 @@
 **Готово, когда:** `dotnet build` и `dotnet test` зелёные локально, `dotnet format --verify-no-changes` проходит.
 
 ### 0.2 GitHub: репозиторий, CI, шаблоны
-- [ ] Публичный репозиторий на GitHub (создаёт автор), push `main`, защита ветки `main` (merge только через PR с зелёным CI).
+- [x] Публичный репозиторий на GitHub, push `main`, лейблы, milestones этапов 0–9, issues этапа 0 (#1–#5).
+- [ ] Защита ветки `main`: merge только через PR с зелёным CI.
 - [ ] `.github/workflows/ci.yml`: restore → build → test → format check на каждый PR и push в `main`.
 - [ ] `.github/pull_request_template.md` (что / зачем / как проверить / скриншоты / чек-лист самопроверки), шаблон issue.
-- [ ] Лейблы (`domain`, `infra`, `ml`, `ai`, `web`, `perf`, `docs`), milestones = этапы 0–9, issues этапа 0.
 
 **Готово, когда:** первый PR (задача 0.1 или 0.3) прошёл CI и влит через squash-merge.
 
