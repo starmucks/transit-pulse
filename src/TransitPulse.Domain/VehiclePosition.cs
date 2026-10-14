@@ -4,7 +4,8 @@ namespace TransitPulse.Domain;
 
 /// <summary>
 /// One observed position of a vehicle: the single model every feed adapter normalizes into.
-/// Construction fails on values that can only come from an adapter bug.
+/// Construction fails on values that can only come from an adapter bug. Speed, bearing and delay
+/// are not validated here: their plausible ranges differ per source and are normalized by adapters.
 /// </summary>
 /// <param name="FeedId">Source feed, e.g. <c>hsl</c>, <c>entur-sky</c>, <c>mbta</c>.</param>
 /// <param name="VehicleId">Vehicle identifier, unique within the feed.</param>
@@ -58,8 +59,11 @@ public sealed record VehiclePosition(
             : throw new ArgumentOutOfRangeException(name, value, $"Must be within [{min}, {max}].");
 
     // Local source time zones are normalized in adapters; a non-zero offset means one was missed.
+    // default (0001-01-01) also has offset zero: it means the timestamp was never parsed.
     private static DateTimeOffset RequireUtc(DateTimeOffset value, [CallerArgumentExpression(nameof(value))] string? name = null) =>
-        value.Offset == TimeSpan.Zero
-            ? value
-            : throw new ArgumentException($"Must be UTC, got offset {value.Offset}.", name);
+        value == default
+            ? throw new ArgumentException("Must be set.", name)
+            : value.Offset == TimeSpan.Zero
+                ? value
+                : throw new ArgumentException($"Must be UTC, got offset {value.Offset}.", name);
 }
