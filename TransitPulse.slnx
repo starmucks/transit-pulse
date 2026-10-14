@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TransitPulse.Domain/TransitPulse.Domain.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TransitPulse.Domain.Tests/TransitPulse.Domain.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -90,3 +90,7 @@ dotnet_style_prefer_is_null_check_over_reference_equality_method = true:suggesti
 
 csharp_style_prefer_primary_constructors = true:suggestion
 dotnet_style_prefer_collection_expression = when_types_loosely_match:suggestion
+
+[tests/**.cs]
+# Test names read as sentences: Latitude_out_of_range_is_rejected.
+dotnet_diagnostic.CA1707.severity = none
