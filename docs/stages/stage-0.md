@@ -31,10 +31,10 @@
 **Готово, когда:** первый PR (задача 0.1 или 0.3) прошёл CI и влит через squash-merge.
 
 ### 0.3 Инструменты Claude Code (бриф §11.3)
-- [ ] `.claude/settings.json`: permissions (без подтверждения — `dotnet build/test/format`, `git status/diff/log`), hooks (после правки `.cs` — build; после правки тестов — тесты; перед коммитом — format check).
-- [ ] Skills: `new-adr`, `start-stage`, `close-stage`; `new-adapter` — заготовка, наполняется в этапе 1.
-- [ ] Subagents: `reviewer`, `test-writer`.
-- [ ] `docs/adr/0000-template.md` + ADR-0001 «Record architecture decisions».
+- [x] `.claude/settings.json`: permissions (без подтверждения — `dotnet build/test/format`, `git status/diff/log`), hooks (после правки `.cs` — build; после правки тестов — тесты; перед коммитом — format check).
+- [x] Skills: `new-adr`, `start-stage`, `close-stage`; `new-adapter` — заготовка, наполняется в этапе 1.
+- [x] Subagents: `reviewer`, `test-writer`.
+- [x] `docs/adr/0000-template.md` + ADR-0001 «Record architecture decisions».
 
 **Готово, когда:** правка `.cs` автоматически запускает сборку; `/new-adr` создаёт ADR по шаблону; `reviewer` запускается на тестовом diff.
 
