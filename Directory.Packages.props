@@ -1,0 +1,9 @@
+<Project>
+  <!-- Central Package Management: every NuGet version lives here; .csproj files reference packages without versions. -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup>
+  </ItemGroup>
+</Project>
