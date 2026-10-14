@@ -15,17 +15,17 @@
 
 ### 0.1 Каркас репозитория и solution
 - [x] `git init`, первый коммит в `main` — только документы (бриф, CLAUDE.md, docs). Это единственный коммит без PR; дальше всё через PR.
-- [ ] `LICENSE` (MIT), `.gitignore` (dotnet + node + python), `.gitattributes` (line endings).
-- [ ] `global.json` (фиксирует SDK 10.0.x), `Directory.Build.props` (net10.0, nullable, `TreatWarningsAsErrors`, анализаторы), `Directory.Packages.props` (Central Package Management), `.editorconfig`.
-- [ ] `TransitPulse.slnx` + проекты, которые нужны уже сейчас: `TransitPulse.Domain`, `TransitPulse.Domain.Tests` (xUnit), чтобы CI было что собирать и тестировать.
-- [ ] Короткий `README.md` (что это, статус «в разработке», ссылка на бриф).
+- [x] `LICENSE` (MIT), `.gitignore` (dotnet + node + python), `.gitattributes` (line endings).
+- [x] `global.json` (фиксирует SDK 10.0.x), `Directory.Build.props` (net10.0, nullable, `TreatWarningsAsErrors`, анализаторы), `Directory.Packages.props` (Central Package Management), `.editorconfig`.
+- [x] `TransitPulse.slnx` + проекты, которые нужны уже сейчас: `TransitPulse.Domain`, `TransitPulse.Domain.Tests` (xUnit), чтобы CI было что собирать и тестировать.
+- [x] Короткий `README.md` (что это, статус «в разработке», ссылка на бриф).
 
 **Готово, когда:** `dotnet build` и `dotnet test` зелёные локально, `dotnet format --verify-no-changes` проходит.
 
 ### 0.2 GitHub: репозиторий, CI, шаблоны
 - [x] Публичный репозиторий на GitHub, push `main`, лейблы, milestones этапов 0–9, issues этапа 0 (#1–#5).
 - [ ] Защита ветки `main`: merge только через PR с зелёным CI.
-- [ ] `.github/workflows/ci.yml`: restore → build → test → format check на каждый PR и push в `main`.
+- [x] `.github/workflows/ci.yml`: restore → build → test → format check на каждый PR и push в `main` (сделано в PR #6).
 - [ ] `.github/pull_request_template.md` (что / зачем / как проверить / скриншоты / чек-лист самопроверки), шаблон issue.
 
 **Готово, когда:** первый PR (задача 0.1 или 0.3) прошёл CI и влит через squash-merge.
