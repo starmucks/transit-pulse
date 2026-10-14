@@ -24,9 +24,9 @@
 
 ### 0.2 GitHub: репозиторий, CI, шаблоны
 - [x] Публичный репозиторий на GitHub, push `main`, лейблы, milestones этапов 0–9, issues этапа 0 (#1–#5).
-- [ ] Защита ветки `main`: merge только через PR с зелёным CI.
+- [x] Защита ветки `main`: merge только через PR с зелёным CI.
 - [x] `.github/workflows/ci.yml`: restore → build → test → format check на каждый PR и push в `main` (сделано в PR #6).
-- [ ] `.github/pull_request_template.md` (что / зачем / как проверить / скриншоты / чек-лист самопроверки), шаблон issue.
+- [x] `.github/pull_request_template.md` (что / зачем / как проверить / скриншоты / чек-лист самопроверки), шаблон issue.
 
 **Готово, когда:** первый PR (задача 0.1 или 0.3) прошёл CI и влит через squash-merge.
 
