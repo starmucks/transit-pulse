@@ -25,6 +25,12 @@ public sealed partial class IngestionPipeline(
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        var feeds = sources.ToList();
+        if (feeds.Count == 0)
+        {
+            LogNoSources();
+        }
+
         var channel = Channel.CreateBounded<RawRecord>(new BoundedChannelOptions(ChannelCapacity)
         {
             FullMode = BoundedChannelFullMode.Wait,
@@ -36,7 +42,7 @@ public sealed partial class IngestionPipeline(
         var writing = WriteAllAsync(channel.Reader, sourcesStop);
         try
         {
-            await Task.WhenAll(sources.Select(source => RunSourceAsync(source, channel.Writer, sourcesStop.Token)));
+            await Task.WhenAll(feeds.Select(source => RunSourceAsync(source, channel.Writer, sourcesStop.Token)));
         }
         finally
         {
@@ -105,6 +111,9 @@ public sealed partial class IngestionPipeline(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Feed {FeedId} stopped without a shutdown request; restarting in {Delay}")]
     private partial void LogSourceReturned(string feedId, TimeSpan delay);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "No feeds configured; the pipeline has nothing to collect")]
+    private partial void LogNoSources();
 
     [LoggerMessage(Level = LogLevel.Critical, Message = "Raw sink failed; stopping all feeds")]
     private partial void LogSinkFailed(Exception exception);
