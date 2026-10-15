@@ -39,7 +39,7 @@
 **Готово, когда:** правка `.cs` автоматически запускает сборку; `/new-adr` создаёт ADR по шаблону; `reviewer` запускается на тестовом diff.
 
 ### 0.4 Локальная инфраструктура на .NET Aspire
-- [ ] `TransitPulse.AppHost` + `TransitPulse.ServiceDefaults` (OpenTelemetry, health checks, resilience).
+- [ ] `TransitPulse.AppHost`. `TransitPulse.ServiceDefaults` (OpenTelemetry, health checks, resilience) перенесён в этап 1 вместе с Ingestor — решение автора 2026-10-15 (проекты по мере надобности).
 - [ ] Ресурсы: Redpanda (Kafka API) + Redpanda Console, PostgreSQL с TimescaleDB и PostGIS, Redis. Volumes для данных, лимиты памяти.
 - [ ] ADR-0002 «Redpanda instead of Apache Kafka» (ADR 2 из брифа §8).
 

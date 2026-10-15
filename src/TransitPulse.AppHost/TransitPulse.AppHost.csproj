@@ -1,0 +1,16 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.6.1">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- Keeps the generated Postgres password stable across runs, so the persistent data volume stays usable. -->
+    <UserSecretsId>transit-pulse-apphost</UserSecretsId>
+    <!-- Orchestration (DCP, dashboard) comes from NuGet packages, so dotnet run and CI need no installed Aspire CLI. -->
+    <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+    <PackageReference Include="Aspire.Hosting.Redis" />
+  </ItemGroup>
+
+</Project>
