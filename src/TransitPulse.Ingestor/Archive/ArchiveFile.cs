@@ -39,6 +39,9 @@ internal sealed class ArchiveFile : IAsyncDisposable
     /// <summary>Final path the file gets after <see cref="CompleteAsync"/>.</summary>
     public string Path { get; }
 
+    /// <summary>Records added so far.</summary>
+    public long RecordCount { get; private set; }
+
     /// <summary>Starts a new file; fails if a file with the same temporary name already exists.</summary>
     /// <param name="path">Final path of the <c>.parquet</c> file.</param>
     /// <param name="rowGroupMaxBytes">Buffered payload size that triggers writing a row group; bounds memory use.</param>
@@ -69,6 +72,7 @@ internal sealed class ArchiveFile : IAsyncDisposable
         _topics.Add(record.Topic);
         _payloads.Add(record.Payload);
         _bufferedBytes += record.Payload.Length;
+        RecordCount++;
 
         if (_bufferedBytes >= _rowGroupMaxBytes)
         {
