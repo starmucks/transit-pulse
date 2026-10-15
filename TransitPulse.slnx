@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/TransitPulse.AppHost/TransitPulse.AppHost.csproj" />
     <Project Path="src/TransitPulse.Domain/TransitPulse.Domain.csproj" />
   </Folder>
   <Folder Name="/tests/">

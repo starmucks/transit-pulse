@@ -39,9 +39,9 @@
 **Готово, когда:** правка `.cs` автоматически запускает сборку; `/new-adr` создаёт ADR по шаблону; `reviewer` запускается на тестовом diff.
 
 ### 0.4 Локальная инфраструктура на .NET Aspire
-- [ ] `TransitPulse.AppHost` + `TransitPulse.ServiceDefaults` (OpenTelemetry, health checks, resilience).
-- [ ] Ресурсы: Redpanda (Kafka API) + Redpanda Console, PostgreSQL с TimescaleDB и PostGIS, Redis. Volumes для данных, лимиты памяти.
-- [ ] ADR-0002 «Redpanda instead of Apache Kafka» (ADR 2 из брифа §8).
+- [x] `TransitPulse.AppHost`. `TransitPulse.ServiceDefaults` (OpenTelemetry, health checks, resilience) перенесён в этап 1 вместе с Ingestor — решение автора 2026-10-15 (проекты по мере надобности).
+- [x] Ресурсы: Redpanda (Kafka API) + Redpanda Console, PostgreSQL с TimescaleDB и PostGIS, Redis. Volumes для данных, лимиты памяти.
+- [x] [ADR-0002](../adr/0002-use-redpanda-instead-of-apache-kafka.md) «Use Redpanda instead of Apache Kafka» (ADR 2 из брифа §8).
 
 **Готово, когда:** `dotnet run --project src/TransitPulse.AppHost` поднимает все контейнеры, в Aspire Dashboard они «Running», к Postgres подключаются расширения `timescaledb` и `postgis`.
 
@@ -53,14 +53,14 @@
 **Готово, когда:** атрибуция записана; VPS доступен по SSH и готов принять сборщик этапа 1.
 
 ## Критерии приёмки этапа (бриф §10)
-- [ ] `dotnet run` в AppHost поднимает инфраструктуру (Redpanda, Postgres+Timescale+PostGIS, Redis).
+- [x] `dotnet run` в AppHost поднимает инфраструктуру (Redpanda, Postgres+Timescale+PostGIS, Redis).
 - [ ] CI зелёный.
 - [ ] Первый PR влит через ревью-процесс (reviewer-сабагент → PR с описанием → CI → squash-merge).
 - [ ] Дополнительно: VPS фазы A готов, лицензии проверены — иначе этап 1 не стартует вовремя.
 
 ## ADR этапа
 - ADR-0001 — Record architecture decisions (формат, процесс).
-- ADR-0002 — Redpanda instead of Apache Kafka.
+- [ADR-0002](../adr/0002-use-redpanda-instead-of-apache-kafka.md) — Use Redpanda instead of Apache Kafka (Accepted).
 - ADR 1 (модульный монолит) по брифу пишется на этапе 2, но структура закладывается сейчас — можно написать раньше, если решим.
 
 ## Решения, принятые в этой спецификации (проверьте)
