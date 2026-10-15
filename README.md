@@ -21,7 +21,9 @@ Early development — stage 0 "Foundation". Progress is tracked in [milestones](
 | Bergen | Entur / Skyss | SIRI-VM XML | Incremental HTTP pull |
 | Boston | MBTA | GTFS-Realtime protobuf | Full-snapshot HTTP pull |
 
-All three are normalized into one model, so a new city means a new adapter only. Licenses and attribution are being verified ([#5](https://github.com/starmucks/transit-pulse/issues/5)).
+All three are normalized into one model, so a new city means a new adapter only. Licences, attribution and access rules: [docs/data-sources.md](docs/data-sources.md).
+
+Transit data: © HSL ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)) · contains data under the Norwegian licence for Open Government data ([NLOD](https://data.norge.no/nlod/en/2.0)) distributed by Entur · MassDOT/MBTA (not affiliated or endorsed) · Fintraffic / digitraffic.fi (CC BY 4.0) · weather data by Open-Meteo.com (CC BY 4.0). Data has been processed and normalized by Transit Pulse.
 
 ## Build and test
 
