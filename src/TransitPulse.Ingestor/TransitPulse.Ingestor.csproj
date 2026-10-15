@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <!-- The collector server has 1 GB RAM and no .NET installed: one native binary, fast start, small footprint. -->
+    <PublishAot>true</PublishAot>
+    <!-- Parses machine formats only; dropping ICU culture data keeps the binary smaller. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TransitPulse.Domain\TransitPulse.Domain.csproj" />
+    <ProjectReference Include="..\TransitPulse.ServiceDefaults\TransitPulse.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+</Project>

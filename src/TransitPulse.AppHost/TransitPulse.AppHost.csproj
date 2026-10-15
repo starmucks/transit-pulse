@@ -13,4 +13,8 @@
     <PackageReference Include="Aspire.Hosting.Redis" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\TransitPulse.Ingestor\TransitPulse.Ingestor.csproj" />
+  </ItemGroup>
+
 </Project>

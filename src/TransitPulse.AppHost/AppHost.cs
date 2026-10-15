@@ -54,4 +54,6 @@ builder.AddContainer("redpanda-console", "redpandadata/console", "v3.12.0")
     .WithLifetime(ContainerLifetime.Persistent)
     .WaitFor(redpanda);
 
+builder.AddProject<Projects.TransitPulse_Ingestor>("ingestor");
+
 await builder.Build().RunAsync();
