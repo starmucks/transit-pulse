@@ -1,3 +1,6 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using TransitPulse.Ingestor.Pipeline;
@@ -121,6 +124,36 @@ public sealed class IngestionPipelineTests
 
         await Assert.ThrowsAsync<IOException>(() => pipeline.ExecuteTask!.WaitAsync(_timeout, Ct));
         Assert.True(sourceCancelled.Task.IsCompleted);
+    }
+
+    [Fact]
+    public async Task Host_exits_with_1_when_sink_fails()
+    {
+        var host = CreateHost(ScriptedSource.Writing("a", count: 1), new RecordingSink { WriteFailure = new IOException("Disk full.") });
+
+        Assert.Equal(1, await IngestionPipeline.RunHostAsync(host).WaitAsync(_timeout, Ct));
+    }
+
+    [Fact]
+    public async Task Host_exits_with_0_on_requested_shutdown()
+    {
+        // Not disposed here: RunHostAsync runs the host, and running disposes it.
+        var host = CreateHost(ScriptedSource.Writing("a", count: 1), new RecordingSink());
+        var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
+        lifetime.ApplicationStarted.Register(lifetime.StopApplication);
+
+        Assert.Equal(0, await IngestionPipeline.RunHostAsync(host).WaitAsync(_timeout, Ct));
+    }
+
+    private static IHost CreateHost(IFeedSource source, RecordingSink sink)
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Logging.ClearProviders();
+        builder.Services.AddSingleton(source);
+        builder.Services.AddSingleton<IRawSink>(sink);
+        builder.Services.AddSingleton(TimeProvider.System);
+        builder.Services.AddHostedService<IngestionPipeline>();
+        return builder.Build();
     }
 
     private static IngestionPipeline Create(IFeedSource[] sources, RecordingSink sink, TimeProvider? time = null) =>

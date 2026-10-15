@@ -27,6 +27,9 @@ builder.Services.AddSingleton<IRawSink>(services =>
 });
 builder.Services.AddHostedService<IngestionPipeline>();
 
+// The default 30 s may not cover draining the channel and closing every open hour; an unclosed file is lost.
+// The service manager's stop timeout must be longer than this.
+builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(60));
+
 using var host = builder.Build();
-await host.RunAsync();
-return 0;
+return await IngestionPipeline.RunHostAsync(host);

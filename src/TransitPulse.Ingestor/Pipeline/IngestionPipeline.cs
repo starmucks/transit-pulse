@@ -22,6 +22,21 @@ public sealed partial class IngestionPipeline(
 
     internal static readonly TimeSpan SourceRestartDelay = TimeSpan.FromSeconds(5);
 
+    /// <summary>Runs the host until shutdown and turns the pipeline outcome into the process exit code.</summary>
+    /// <param name="host">Built host with this pipeline registered as a hosted service.</param>
+    /// <returns>1 when the pipeline failed (the host stops but would otherwise exit with 0), else 0.</returns>
+    /// <remarks>
+    /// A failed pipeline must look like a failure to the service manager, or systemd's
+    /// <c>Restart=on-failure</c> treats it as a clean stop and collection silently ends.
+    /// </remarks>
+    internal static async Task<int> RunHostAsync(IHost host)
+    {
+        // Resolved before running: RunAsync disposes the host and its service provider when it returns.
+        var pipeline = host.Services.GetServices<IHostedService>().OfType<IngestionPipeline>().Single();
+        await host.RunAsync();
+        return pipeline.ExecuteTask is { IsFaulted: true } ? 1 : 0;
+    }
+
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
