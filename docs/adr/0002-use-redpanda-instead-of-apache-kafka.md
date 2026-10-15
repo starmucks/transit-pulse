@@ -7,7 +7,7 @@
 
 The pipeline needs a durable log with partitions, per-key ordering and consumer groups: positions keyed by `vehicleId` (brief §6.3), replay of retained data, at-least-once consumers. The Kafka protocol is the de facto standard for this and has a mature .NET client (`Confluent.Kafka`).
 
-Constraints: production is a single VPS with ~4 GB RAM shared by Ingestor, Processor, API, Worker, Postgres, Redis and the broker (brief §5.1, phase B). Development runs locally in .NET Aspire. Expected load is ~1 000 messages/s live and ≥ 7 000/s in replay ×10 (goal C2) — far below what one broker node of either product handles.
+Constraints: production is a single VPS with ~4 GB RAM shared by Ingestor, Processor, API, Worker, Postgres, Redis and the broker (brief §5.1, phase B). Development runs locally in .NET Aspire. Expected load is ~1 000 messages/s live and ≥ 7 000/s in replay ×10 (goal C2); a single broker node is expected to handle this, to be confirmed by the replay load test (stage 8).
 
 ## Decision
 
@@ -16,11 +16,12 @@ Use **Redpanda** (single node) as the Kafka-API broker; all application code tal
 - Started with `--smp 1 --memory 1G` both locally and in production; the container limit is 1.5 GB to leave headroom above Redpanda's own allocation.
 - Measured locally (Redpanda v26.2.4, idle, no topics): 277 MiB container memory.
 - Redpanda Console is a development tool only; it is not deployed to the VPS.
+- `--mode dev-container` (no fsync) is local only; production uses the same `--smp`/`--memory` without it.
 
 ## Alternatives considered
 
 - **Apache Kafka (KRaft mode).** The reference implementation, no ZooKeeper since 4.0. Rejected: a JVM process whose heap and page cache must be tuned to fit next to six other services on 4 GB, and the extra tuning buys nothing at our load.
-- **Redis Streams.** Already in the stack, so zero extra containers. Rejected: storage is bounded by RAM (24 h retention of positions does not fit), consumer-group semantics differ from Kafka, and the project would not use the Kafka protocol the brief targets.
+- **Redis Streams.** Already in the stack, so zero extra containers. Rejected: storage is bounded by RAM, and 24 h of positions (~86 million per day, brief §5; ~25 GB/day raw for HSL alone, brief §5.1) cannot fit into 4 GB, consumer-group semantics differ from Kafka, and the project would not use the Kafka protocol the brief targets.
 - **RabbitMQ / NATS JetStream.** Lightweight and mature. Rejected: different protocols and semantics (queues/subjects instead of a partitioned log), so per-vehicle ordering via partition keys and offset-based replay would need to be rebuilt.
 
 ## Consequences

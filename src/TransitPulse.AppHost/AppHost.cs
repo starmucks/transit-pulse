@@ -30,6 +30,7 @@ builder.AddRedis("redis", port: 16379, password: redisPassword)
 var redpanda = builder.AddContainer("redpanda", "redpandadata/redpanda", "v26.2.4")
     .WithArgs(
         "redpanda", "start",
+        // dev-container disables fsync and is local only; production keeps --smp/--memory but not this mode.
         "--mode", "dev-container",
         // Same limits as on the production VPS (brief §6.10).
         "--smp", "1", "--memory", "1G",

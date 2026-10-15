@@ -32,6 +32,19 @@ dotnet build TransitPulse.slnx
 dotnet test --solution TransitPulse.slnx
 ```
 
+## Run locally
+
+Requires Docker. The AppHost starts PostgreSQL (TimescaleDB + PostGIS), Redis, Redpanda and Redpanda Console; the dashboard opens at https://localhost:17100.
+
+```shell
+dotnet dev-certs https --trust
+dotnet user-secrets set "Parameters:postgres-password" "<value>" --project src/TransitPulse.AppHost
+dotnet user-secrets set "Parameters:redis-password" "<value>" --project src/TransitPulse.AppHost
+dotnet run --project src/TransitPulse.AppHost
+```
+
+The Postgres password is written into the data volume on first start. To change it later, also remove the volume: `docker volume rm transit-pulse-postgres` (this deletes local data).
+
 ## Documentation
 
 - [Project brief](PROJECT_BRIEF.md) (in Russian): goals, architecture, work plan.

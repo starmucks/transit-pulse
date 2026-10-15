@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <!-- Keeps the generated Postgres password stable across runs, so the persistent data volume stays usable. -->
+    <!-- Stores the postgres-password and redis-password parameter values outside the repository. -->
     <UserSecretsId>transit-pulse-apphost</UserSecretsId>
     <!-- Orchestration (DCP, dashboard) comes from NuGet packages, so dotnet run and CI need no installed Aspire CLI. -->
     <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
