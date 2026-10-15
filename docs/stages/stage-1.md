@@ -19,10 +19,10 @@ IFeedSource ──► Channel<RawRecord> (bounded) ──► ArchiveSink (Parque
 Порядок: сначала то, что запускает сбор (1.1–1.3), потом нормализация (1.4–1.7), потом инструменты (1.8–1.9).
 
 ### 1.1 Каркас Ingestor и архив сырья (#13)
-- [ ] `TransitPulse.Ingestor` (Worker SDK, Native AOT), `TransitPulse.ServiceDefaults` (OpenTelemetry, health checks), `tests/TransitPulse.Ingestor.Tests`.
-- [ ] `RawRecord` (feed, received at, payload bytes, метаданные), `IFeedSource`, ограниченный `Channel<T>` между источником и записью.
-- [ ] `ArchiveSink`: Parquet + zstd, файл на час и фид, row group сбрасывается по размеру/времени (весь час в памяти не держим — 1 ГБ RAM), атомарное закрытие файла (`.tmp` → rename).
-- [ ] Ingestor в AppHost.
+- [x] `TransitPulse.Ingestor` (Worker SDK, Native AOT), `TransitPulse.ServiceDefaults` (OpenTelemetry; health checks перенесены в 1.8), `tests/TransitPulse.Ingestor.Tests`.
+- [x] `RawRecord` (feed, received at, payload bytes, метаданные), `IFeedSource`, ограниченный `Channel<T>` между источником и записью.
+- [x] `ArchiveSink`: Parquet + zstd, файл на час и фид, row group сбрасывается по размеру (16 МиБ; по времени — бессмысленно: без footer файл всё равно нечитаем), атомарное закрытие файла (`.tmp` → rename).
+- [x] Ingestor в AppHost.
 
 **Готово, когда:** юнит-тесты на ротацию по часам и запись/чтение Parquet зелёные; `dotnet publish -r linux-x64 -p:PublishAot=true` проходит без AOT-предупреждений.
 
@@ -99,8 +99,8 @@ IFeedSource ──► Channel<RawRecord> (bounded) ──► ArchiveSink (Parque
 - [ ] Контрактные тесты JSON, XML, protobuf зелёные в CI.
 
 ## ADR этапа
-- ADR-0003 — Unified `VehiclePosition` model and feed adapter pattern (бриф §8 п. 6; в брифе — этап 2, но решение принимается здесь).
-- ADR-0004 — Phase-A collector: Native AOT + systemd, raw archive in Parquet+zstd (почему не Docker на диске 10 ГБ; почему сырьё, а не нормализованные данные).
+- ADR-0004 — Unified `VehiclePosition` model and feed adapter pattern (бриф §8 п. 6; в брифе — этап 2, но решение принимается здесь).
+- [ADR-0003](../adr/0003-run-the-collector-as-native-aot-with-a-raw-parquet-archive.md) — Phase-A collector: Native AOT + systemd, raw archive in Parquet+zstd (принят 2026-10-15).
 - ADR 6a (push vs pull) — по брифу этап 4; черновик можно начать после 1.7, когда все три протокола реализованы.
 
 ## Решения, принятые в этой спецификации (проверьте)
@@ -115,7 +115,7 @@ IFeedSource ──► Channel<RawRecord> (bounded) ──► ArchiveSink (Parque
 ## Риски
 | Риск | Мера |
 |---|---|
-| Библиотеки (MQTT, Parquet, Kafka) несовместимы с Native AOT | Проверить в 1.1 первым шагом; запасной вариант — self-contained single-file без AOT (ADR-0004 фиксирует) |
+| Библиотеки (MQTT, Parquet, Kafka) несовместимы с Native AOT | Проверить в 1.1 первым шагом; запасной вариант — self-contained single-file без AOT (ADR-0003 фиксирует) |
 | 1 ГБ RAM: буфер Parquet переполняет память | Row group сбрасывается по размеру (порядка десятков МБ), лимит памяти в systemd, метрика памяти |
 | Диск 10 ГБ заполняется, если выгрузка сломалась | Удаление только выгруженного + аварийное удаление самого старого при > 90 %; предупреждение > 80 % |
 | Entur истекает/сбрасывает `requestorId` | Детект полного снимка, восстановление состояния; контрактный тест |
