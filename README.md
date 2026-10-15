@@ -4,7 +4,7 @@ Real-time public transport monitoring on open data from Helsinki (HSL), Bergen (
 
 ## Status
 
-Early development — stage 0 "Foundation". Progress is tracked in [milestones](https://github.com/starmucks/transit-pulse/milestones).
+Early development. Stage 0 "Foundation" is done (repository, CI, local infrastructure); next is stage 1 — collecting live data from the three cities. Progress is tracked in [milestones](https://github.com/starmucks/transit-pulse/milestones) and [docs/progress.md](docs/progress.md).
 
 ## What it will do
 
