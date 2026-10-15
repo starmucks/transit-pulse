@@ -9,8 +9,8 @@
 - Локальный запуск: README → «Run locally». Порты: dashboard 17100, Postgres 15432, Redis 16379, Kafka 19092, Console 18080.
 - Сервер сборщика: 1 vCPU / 1 ГБ / 10 ГБ, доступен по SSH, дополнительная настройка не требуется (решение автора).
 
-## Ждёт автора
-- Тег `v0.0` и GitHub Release (черновик заметок — в PR закрытия этапа); закрыть milestone «Stage 0 — Foundation».
+## Закрытие этапа 0
+- Релиз [`v0.0`](https://github.com/starmucks/transit-pulse/releases/tag/v0.0), milestone «Stage 0 — Foundation» закрыт.
 
 ## Следующий шаг
 - `Начинаем этап 1` (`/start-stage 1`): спецификация `stage-1.md` и issues. Первая задача — «сырой» сборщик на сервере, чтобы история копилась как можно раньше.
