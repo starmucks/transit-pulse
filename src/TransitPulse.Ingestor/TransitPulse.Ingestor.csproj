@@ -12,6 +12,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="TransitPulse.Ingestor.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\TransitPulse.Domain\TransitPulse.Domain.csproj" />
     <ProjectReference Include="..\TransitPulse.ServiceDefaults\TransitPulse.ServiceDefaults.csproj" />
   </ItemGroup>
