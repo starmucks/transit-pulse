@@ -2,6 +2,12 @@ using Microsoft.Extensions.Options;
 using TransitPulse.Ingestor.Archive;
 using TransitPulse.Ingestor.Pipeline;
 
+// Checked before the host is built: the self-test needs no configuration, telemetry or feeds.
+if (args.Contains("--self-test"))
+{
+    return await ArchiveSelfTest.RunAsync();
+}
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.AddServiceDefaults();
@@ -23,3 +29,4 @@ builder.Services.AddHostedService<IngestionPipeline>();
 
 using var host = builder.Build();
 await host.RunAsync();
+return 0;
