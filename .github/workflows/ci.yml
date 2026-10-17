@@ -36,3 +36,18 @@ jobs:
       - run: dotnet test --solution TransitPulse.slnx -c Release --no-build
 
       - run: dotnet format TransitPulse.slnx --verify-no-changes --no-restore
+
+  # The collector ships as a Native AOT binary; build and test do not run trim analysis or the native code.
+  aot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - run: dotnet publish src/TransitPulse.Ingestor -r linux-x64 -c Release -o publish
+
+      - run: ./publish/TransitPulse.Ingestor --self-test

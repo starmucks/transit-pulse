@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <!-- The collector server has 1 GB RAM and no .NET installed: one native binary, fast start, small footprint. -->
+    <PublishAot>true</PublishAot>
+    <!-- Parses machine formats only; dropping ICU culture data keeps the binary smaller. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!--
+      Parquet.Net reflects over CLR types when a DataField<T> is built (IL2070, IL3050 in ParquetClrSchemaExtensions).
+      Our fixed schema (long, string, byte[]) is verified to write and read back in a native linux-x64 build.
+      Every assembly reports detailed warnings, so a new trim problem in any other library still fails the publish;
+      only Parquet is collapsed into the IL2104/IL3053 summaries, and only those summaries are suppressed.
+    -->
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+    <NoWarn>$(NoWarn);IL2104;IL3053</NoWarn>
+  </PropertyGroup>
+
+  <Target Name="CollapseParquetTrimWarnings" BeforeTargets="WriteIlcRspFileForCompilation">
+    <ItemGroup>
+      <ManagedAssemblyToLink Update="@(ManagedAssemblyToLink)" Condition="'%(Filename)' == 'Parquet'" TrimmerSingleWarn="true" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Parquet.Net" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TransitPulse.Ingestor.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TransitPulse.Domain\TransitPulse.Domain.csproj" />
+    <ProjectReference Include="..\TransitPulse.ServiceDefaults\TransitPulse.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+</Project>

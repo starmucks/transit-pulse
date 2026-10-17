@@ -54,4 +54,8 @@ builder.AddContainer("redpanda-console", "redpandadata/console", "v3.12.0")
     .WithLifetime(ContainerLifetime.Persistent)
     .WaitFor(redpanda);
 
+// The process runs from its project folder; point the archive at the git-ignored /data/ at the repository root instead.
+builder.AddProject<Projects.TransitPulse_Ingestor>("ingestor")
+    .WithEnvironment("Archive__RootDirectory", Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", "..", "data", "archive")));
+
 await builder.Build().RunAsync();

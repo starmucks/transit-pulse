@@ -2,8 +2,11 @@
   <Folder Name="/src/">
     <Project Path="src/TransitPulse.AppHost/TransitPulse.AppHost.csproj" />
     <Project Path="src/TransitPulse.Domain/TransitPulse.Domain.csproj" />
+    <Project Path="src/TransitPulse.Ingestor/TransitPulse.Ingestor.csproj" />
+    <Project Path="src/TransitPulse.ServiceDefaults/TransitPulse.ServiceDefaults.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/TransitPulse.Domain.Tests/TransitPulse.Domain.Tests.csproj" />
+    <Project Path="tests/TransitPulse.Ingestor.Tests/TransitPulse.Ingestor.Tests.csproj" />
   </Folder>
 </Solution>
