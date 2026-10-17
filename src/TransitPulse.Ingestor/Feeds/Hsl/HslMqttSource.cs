@@ -1,7 +1,7 @@
-using System.Buffers;
+using System.Net.Security;
+using System.Net.Sockets;
 using System.Threading.Channels;
 using Microsoft.Extensions.Options;
-using MQTTnet;
 using TransitPulse.Ingestor.Pipeline;
 
 namespace TransitPulse.Ingestor.Feeds.Hsl;
@@ -12,18 +12,31 @@ namespace TransitPulse.Ingestor.Feeds.Hsl;
 /// A connection that drops after working for a while is re-opened at once, so a drop costs about a second of data;
 /// failing to connect, or dropping right after connecting, ends the run and the pipeline retries after its delay.
 /// </summary>
+/// <remarks>
+/// A minimal MQTT 3.1.1 client (<see cref="MqttWire"/>) instead of MQTTnet: on the 1 vCPU collector server MQTTnet
+/// received ~200 messages/s of the ~780/s HSL sends, the broker's queue for us grew and the connection dropped every
+/// ~20 s; a plain read loop over large blocks keeps up (measured 2026-10-17).
+/// </remarks>
 /// <param name="options">Broker and topic settings.</param>
-/// <param name="timeProvider">Clock for receive times and the silence check.</param>
+/// <param name="timeProvider">Clock for receive times, pings and the silence check.</param>
 /// <param name="logger">Feed log.</param>
 internal sealed partial class HslMqttSource(
     IOptions<HslMqttOptions> options,
     TimeProvider timeProvider,
     ILogger<HslMqttSource> logger) : IFeedSource
 {
-    private static readonly TimeSpan _disconnectTimeout = TimeSpan.FromSeconds(5);
+    private const ushort KeepAliveSeconds = 60;
+
+    // HFP messages are about 0.5 KB; the buffer only has to hold the largest single packet plus one read.
+    private const int BufferSize = 256 * 1024;
+
+    // Pinging at half the keep-alive leaves the broker's 1.5x grace period untouched by network jitter.
+    private static readonly TimeSpan _pingInterval = TimeSpan.FromSeconds(KeepAliveSeconds / 2);
 
     // Shorter-lived connections count as a failure, so a broker that keeps dropping us is not hammered in a loop.
     private static readonly TimeSpan _healthyConnection = TimeSpan.FromSeconds(10);
+
+    private static readonly byte[] _pingReq = MqttWire.PingReq.ToArray();
 
     /// <inheritdoc />
     public string FeedId => "hsl";
@@ -50,75 +63,100 @@ internal sealed partial class HslMqttSource(
     private async Task<string> RunConnectionAsync(ChannelWriter<RawRecord> output, CancellationToken cancellationToken)
     {
         var settings = options.Value;
-        using var client = new MqttClientFactory().CreateMqttClient();
-
-        var disconnected = new TaskCompletionSource<MqttClientDisconnectedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
-        client.DisconnectedAsync += e =>
-        {
-            disconnected.TrySetResult(e);
-            return Task.CompletedTask;
-        };
-
-        var lastMessage = timeProvider.GetTimestamp();
-
-        // Awaiting the bounded channel here holds MQTTnet's receive loop, so a slow sink slows reading from the socket.
-        client.ApplicationMessageReceivedAsync += async e =>
-        {
-            Volatile.Write(ref lastMessage, timeProvider.GetTimestamp());
-            var message = e.ApplicationMessage;
-            var record = new RawRecord(FeedId, timeProvider.GetUtcNow(), message.Payload.ToArray(), message.Topic);
-            try
-            {
-                await output.WriteAsync(record, cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                // Shutting down: messages still arriving are dropped.
-            }
-        };
+        using var tcp = new TcpClient();
+        await tcp.ConnectAsync(settings.Host, settings.Port, cancellationToken);
+        await using var tls = new SslStream(tcp.GetStream());
+        await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = settings.Host }, cancellationToken);
 
         // Clean session with a random id: HFP is QoS 0, so there is nothing for the broker to keep between connections.
-        var clientOptions = new MqttClientOptionsBuilder()
-            .WithTcpServer(settings.Host, settings.Port)
-            .WithTlsOptions(tls => tls.UseTls())
-            .WithClientId($"transitpulse-{Guid.NewGuid():N}")
-            .WithCleanSession()
-            .Build();
+        await tls.WriteAsync(MqttWire.Connect($"transitpulse-{Guid.NewGuid():N}", KeepAliveSeconds), cancellationToken);
+        await tls.WriteAsync(MqttWire.Subscribe(1, settings.Topic), cancellationToken);
 
-        await client.ConnectAsync(clientOptions, cancellationToken);
-        await client.SubscribeAsync(new MqttClientSubscribeOptionsBuilder().WithTopicFilter(settings.Topic).Build(), cancellationToken);
-        LogSubscribed(settings.Host, settings.Topic);
-        Volatile.Write(ref lastMessage, timeProvider.GetTimestamp());
+        var buffer = new byte[BufferSize];
+        var filled = 0;
+        var records = new List<RawRecord>();
+        var lastPing = timeProvider.GetTimestamp();
+        var lastMessage = timeProvider.GetTimestamp();
 
-        try
+        // Re-armed before every read: bounds how long a dead socket can block the read.
+        using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        while (true)
         {
-            using var check = new PeriodicTimer(settings.SilenceTimeout / 6, timeProvider);
-            while (true)
+            readTimeout.CancelAfter(settings.SilenceTimeout);
+            int read;
+            try
             {
-                var tick = check.WaitForNextTickAsync(cancellationToken).AsTask();
-                await Task.WhenAny(disconnected.Task, tick);
-                if (disconnected.Task.IsCompleted)
+                read = await tls.ReadAsync(buffer.AsMemory(filled), readTimeout.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return $"nothing received for {settings.SilenceTimeout:g}";
+            }
+
+            if (read == 0)
+            {
+                return "closed by the broker";
+            }
+
+            filled += read;
+            var consumed = ReadPackets(buffer.AsSpan(0, filled), timeProvider.GetUtcNow(), records);
+            buffer.AsSpan(consumed, filled - consumed).CopyTo(buffer);
+            filled -= consumed;
+            if (filled == buffer.Length)
+            {
+                throw new InvalidDataException($"An MQTT packet is larger than the {BufferSize}-byte receive buffer.");
+            }
+
+            if (records.Count > 0)
+            {
+                lastMessage = timeProvider.GetTimestamp();
+                foreach (var record in records)
                 {
-                    var lost = await disconnected.Task;
-                    return $"disconnected ({lost.Reason}{(lost.Exception is null ? "" : $", {lost.Exception.Message}")})";
+                    // Waits when the bounded channel is full, which stops reading the socket: backpressure to the broker.
+                    await output.WriteAsync(record, cancellationToken);
                 }
 
-                await tick; // throws on shutdown
-                var silence = timeProvider.GetElapsedTime(Volatile.Read(ref lastMessage));
-                if (silence > settings.SilenceTimeout)
-                {
-                    return $"no message for {silence:g}";
-                }
+                records.Clear();
             }
-        }
-        finally
-        {
-            if (client.IsConnected)
+            else if (timeProvider.GetElapsedTime(lastMessage) > settings.SilenceTimeout)
             {
-                using var timeout = new CancellationTokenSource(_disconnectTimeout);
-                await client.DisconnectAsync(new MqttClientDisconnectOptionsBuilder().Build(), timeout.Token);
+                // Pings still answered but no data: the subscription is gone.
+                return $"no message for {settings.SilenceTimeout:g}";
+            }
+
+            if (timeProvider.GetElapsedTime(lastPing) >= _pingInterval)
+            {
+                await tls.WriteAsync(_pingReq, cancellationToken);
+                lastPing = timeProvider.GetTimestamp();
             }
         }
+    }
+
+    /// <summary>Consumes every complete packet at the start of <paramref name="data"/>.</summary>
+    /// <returns>Bytes consumed; an incomplete packet at the end stays for the next read.</returns>
+    private int ReadPackets(ReadOnlySpan<byte> data, DateTimeOffset receivedAt, List<RawRecord> records)
+    {
+        var consumed = 0;
+        while (MqttWire.TryReadPacket(data[consumed..], out var type, out var flags, out var body, out var length))
+        {
+            consumed += length;
+            switch (type)
+            {
+                case MqttWire.Publish:
+                    var topic = MqttWire.ReadPublish(flags, body, out var payload);
+                    records.Add(new RawRecord(FeedId, receivedAt, payload.ToArray(), topic));
+                    break;
+                case MqttWire.ConnAck when body.Length < 2 || body[1] != 0:
+                    throw new IOException($"HSL MQTT broker refused the connection (CONNACK code {(body.Length < 2 ? -1 : body[1])}).");
+                case MqttWire.SubAck when body.Length < 3 || body[2] == 0x80:
+                    throw new IOException($"HSL MQTT broker refused the subscription to {options.Value.Topic}.");
+                case MqttWire.SubAck:
+                    LogSubscribed(options.Value.Host, options.Value.Topic);
+                    break;
+            }
+        }
+
+        return consumed;
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Subscribed to {Topic} on {Host}")]

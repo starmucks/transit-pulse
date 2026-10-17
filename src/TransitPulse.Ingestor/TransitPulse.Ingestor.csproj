@@ -23,7 +23,6 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" />
-    <PackageReference Include="MQTTnet" />
     <PackageReference Include="Parquet.Net" />
   </ItemGroup>
 

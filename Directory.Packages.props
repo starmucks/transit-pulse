@@ -20,7 +20,6 @@
   </ItemGroup>
 
   <ItemGroup Label="Feeds and storage">
-    <PackageVersion Include="MQTTnet" Version="5.2.0.1603" />
     <PackageVersion Include="Parquet.Net" Version="6.1.0" />
   </ItemGroup>
 
