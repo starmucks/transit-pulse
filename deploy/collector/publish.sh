@@ -27,6 +27,6 @@ MSYS_NO_PATHCONV=1 docker run --rm \
     cp /work/publish/TransitPulse.Ingestor /work/publish/appsettings.json /out/
   '
 
-cp "$repo/deploy/collector/transitpulse-ingestor.service" "$repo/deploy/collector/install.sh" "$out/"
+cp "$repo"/deploy/collector/{install.sh,upload.sh,transitpulse-ingestor.service,transitpulse-upload.service,transitpulse-upload.timer} "$out/"
 git -C "$repo" rev-parse --short HEAD > "$out/VERSION"
 ls -la "$out"

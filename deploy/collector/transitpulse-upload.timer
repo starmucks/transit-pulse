@@ -1,0 +1,13 @@
+# Hourly, a few minutes after the hour: the previous hour's files close as soon as the first record of the new
+# hour arrives, so they are ready by then.
+
+[Unit]
+Description=Hourly Transit Pulse archive upload
+
+[Timer]
+OnCalendar=*-*-* *:05:00
+# Runs a missed upload after the server was down.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

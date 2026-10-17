@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Moves completed archive files from the collector to the cloud buffer (Yandex Disk, app-folder access only).
+# Run hourly by transitpulse-upload.timer. For each closed *.parquet file (never *.tmp):
+#   upload as <name>.partial -> compare the SHA-256 the cloud reports with the local one -> rename to <name>
+#   -> delete the local file.
+# A reader on the other side sees only finished names, and "upload.lock" in the buffer while a run is in progress.
+# A failed file stays on the server and is retried next hour.
+set -euo pipefail
+
+archive=${ARCHIVE_DIR:-/var/lib/transitpulse/archive}
+token_file=${TOKEN_FILE:-/etc/transitpulse/yandex.token}
+remote_root=app:/archive
+api=https://cloud-api.yandex.net/v1/disk
+
+# Calls the Disk API; prints the body, then the HTTP status on the last line. The token reaches curl as a header
+# on stdin, so it never shows up in the process list or the journal.
+call() {
+  local method=$1 url=$2
+  printf 'Authorization: OAuth %s\n' "$(tr -d '\r\n' < "$token_file")" |
+    curl -sS --retry 3 --max-time 120 -X "$method" -H @- -w '\n%{http_code}' "$api/$url"
+}
+
+status() { tail -n1 <<< "$1"; }
+json_field() { sed '$d' <<< "$1" | grep -o "\"$2\":\"[^\"]*\"" | head -1 | cut -d'"' -f4; }
+
+mkdir_remote() {
+  local code
+  code=$(status "$(call PUT "resources?path=$1")")
+  [[ $code == 201 || $code == 409 ]] || { echo "create folder $1: HTTP $code" >&2; return 1; }
+}
+
+# Uploads a local file (or stdin with "-") to a remote path, overwriting it.
+put_file() {
+  local source=$1 remote=$2 response code href
+  response=$(call GET "resources/upload?path=$remote&overwrite=true")
+  code=$(status "$response")
+  [[ $code == 200 ]] || { echo "upload link for $remote: HTTP $code" >&2; return 1; }
+  # The upload link is pre-signed: no token is sent with the data.
+  href=$(json_field "$response" href)
+  code=$(curl -sS --retry 3 --max-time 1800 -T "$source" -o /dev/null -w '%{http_code}' "$href")
+  [[ $code == 201 || $code == 202 ]] || { echo "upload $remote: HTTP $code" >&2; return 1; }
+}
+
+# The cloud may compute the hash shortly after the upload completes.
+remote_sha256() {
+  local hash attempt
+  for attempt in 1 2 3 4 5; do
+    hash=$(json_field "$(call GET "resources?path=$1&fields=sha256")" sha256)
+    [[ -n $hash ]] && { echo "$hash"; return 0; }
+    sleep 2
+  done
+  return 1
+}
+
+upload_one() {
+  local file=$1 relative remote local_hash cloud_hash code
+  relative=${file#"$archive"/}
+  remote=$remote_root/$relative
+
+  mkdir_remote "$remote_root/${relative%%/*}" || return 1
+  mkdir_remote "$(dirname "$remote")" || return 1
+  put_file "$file" "$remote.partial" || return 1
+
+  local_hash=$(sha256sum "$file" | cut -d' ' -f1)
+  cloud_hash=$(remote_sha256 "$remote.partial") || { echo "no checksum from the cloud for $relative" >&2; return 1; }
+  [[ $local_hash == "$cloud_hash" ]] || { echo "checksum mismatch for $relative" >&2; return 1; }
+
+  code=$(status "$(call POST "resources/move?from=$remote.partial&path=$remote&overwrite=true")")
+  [[ $code == 201 || $code == 202 ]] || { echo "rename $relative: HTTP $code" >&2; return 1; }
+
+  echo "uploaded $relative ($(stat -c %s "$file") bytes)"
+  rm -f "$file"
+}
+
+mapfile -t files < <(find "$archive" -type f -name '*.parquet' | sort)
+if (( ${#files[@]} == 0 )); then
+  exit 0
+fi
+
+mkdir_remote "$remote_root"
+date -u +%FT%TZ | put_file - "$remote_root/upload.lock"
+trap 'call DELETE "resources?path=$remote_root/upload.lock&permanently=true" > /dev/null || true' EXIT
+
+failed=0
+for file in "${files[@]}"; do
+  upload_one "$file" || failed=1
+done
+
+# Remove empty day folders left after their files were uploaded.
+find "$archive" -mindepth 2 -type d -empty -delete
+exit $failed
