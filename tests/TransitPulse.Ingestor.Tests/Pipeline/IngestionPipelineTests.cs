@@ -124,6 +124,23 @@ public sealed class IngestionPipelineTests
 
         await Assert.ThrowsAsync<IOException>(() => pipeline.ExecuteTask!.WaitAsync(_timeout, Ct));
         Assert.True(sourceCancelled.Task.IsCompleted);
+        Assert.Equal(1, sink.Completions);
+    }
+
+    [Fact]
+    public async Task Invalid_feed_id_fails_start_before_any_source_runs()
+    {
+        var good = ScriptedSource.Writing("hsl", count: 1);
+        var bad = ScriptedSource.Writing("HSL", count: 1);
+        var sink = new RecordingSink();
+        using var pipeline = Create([good, bad], sink);
+
+        await pipeline.StartAsync(Ct);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => pipeline.ExecuteTask!.WaitAsync(_timeout, Ct));
+
+        Assert.Contains("'HSL'", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, good.Runs);
+        Assert.Equal(0, sink.Completions);
     }
 
     [Fact]

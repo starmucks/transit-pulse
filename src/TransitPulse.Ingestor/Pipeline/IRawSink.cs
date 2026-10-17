@@ -13,7 +13,8 @@ public interface IRawSink
     ValueTask WriteAsync(RawRecord record, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Flushes buffered records and closes open files. Called once, after the last <see cref="WriteAsync"/> on shutdown.
+    /// Flushes buffered records and closes open files. Called once: after the last <see cref="WriteAsync"/> on shutdown,
+    /// or after a failed <see cref="WriteAsync"/> to save what is still intact.
     /// </summary>
     /// <param name="cancellationToken">Cancels the flush.</param>
     /// <returns>A task that completes when everything is durable.</returns>

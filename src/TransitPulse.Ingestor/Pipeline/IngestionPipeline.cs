@@ -41,6 +41,15 @@ public sealed partial class IngestionPipeline(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var feeds = sources.ToList();
+
+        // Checked before anything is opened: a bad id found at the first write would fail the sink
+        // with every other feed's hour still open.
+        var invalid = feeds.Where(source => !FeedIds.IsValid(source.FeedId)).Select(source => $"'{source.FeedId}'").ToList();
+        if (invalid.Count > 0)
+        {
+            throw new InvalidOperationException($"Feed ids {string.Join(", ", invalid)} are invalid; use {FeedIds.Rule}.");
+        }
+
         if (feeds.Count == 0)
         {
             LogNoSources();
@@ -68,6 +77,7 @@ public sealed partial class IngestionPipeline(
 
     private async Task WriteAllAsync(ChannelReader<RawRecord> reader, CancellationTokenSource sourcesStop)
     {
+        var completing = false;
         try
         {
             // No cancellation here on purpose: after shutdown starts, the channel is still drained and the files closed.
@@ -76,6 +86,7 @@ public sealed partial class IngestionPipeline(
                 await sink.WriteAsync(record, CancellationToken.None);
             }
 
+            completing = true;
             await sink.CompleteAsync(CancellationToken.None);
         }
         catch (Exception ex)
@@ -83,7 +94,25 @@ public sealed partial class IngestionPipeline(
             // A sink failure (disk full, I/O error) is fatal: stop everything and let the service manager restart the process.
             LogSinkFailed(ex);
             await sourcesStop.CancelAsync();
+            if (!completing)
+            {
+                await TryCompleteSinkAsync();
+            }
+
             throw;
+        }
+    }
+
+    /// <summary>After a failed write, closes what is still intact so other feeds keep their open hour.</summary>
+    private async Task TryCompleteSinkAsync()
+    {
+        try
+        {
+            await sink.CompleteAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            LogSinkCompleteFailed(ex);
         }
     }
 
@@ -132,4 +161,7 @@ public sealed partial class IngestionPipeline(
 
     [LoggerMessage(Level = LogLevel.Critical, Message = "Raw sink failed; stopping all feeds")]
     private partial void LogSinkFailed(Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Raw sink failed to close its files after a write failure")]
+    private partial void LogSinkCompleteFailed(Exception exception);
 }

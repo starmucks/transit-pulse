@@ -1,5 +1,5 @@
-using System.Buffers;
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 using TransitPulse.Ingestor.Pipeline;
 
 namespace TransitPulse.Ingestor.Archive;
@@ -14,9 +14,6 @@ namespace TransitPulse.Ingestor.Archive;
 /// <param name="logger">Archive log.</param>
 internal sealed partial class ArchiveSink(string rootDirectory, long rowGroupMaxBytes, ILogger<ArchiveSink> logger) : IRawSink
 {
-    // The feed id becomes a path segment: a restricted alphabet rules out "..", separators and case clashes.
-    private static readonly SearchValues<char> _feedIdChars = SearchValues.Create("abcdefghijklmnopqrstuvwxyz0123456789-");
-
     private readonly Dictionary<string, (ArchiveFile File, DateTimeOffset Hour)> _open = new(StringComparer.Ordinal);
     private DateTimeOffset _latestHour = DateTimeOffset.MinValue;
 
@@ -48,19 +45,40 @@ internal sealed partial class ArchiveSink(string rootDirectory, long rowGroupMax
 
     private async Task CompleteOlderThanAsync(DateTimeOffset hour, CancellationToken cancellationToken)
     {
+        // One file failing to close must not cost the other feeds their hour: close every file, then report.
+        List<Exception>? failures = null;
         foreach (var (feedId, open) in _open.Where(entry => entry.Value.Hour < hour).ToList())
         {
-            await open.File.CompleteAsync(cancellationToken);
+            // Removed first: a file that failed to close stays .tmp and is not retried.
             _open.Remove(feedId);
-            LogFileCompleted(open.File.Path, open.File.RecordCount);
+            try
+            {
+                await open.File.CompleteAsync(cancellationToken);
+                LogFileCompleted(open.File.Path, open.File.RecordCount);
+            }
+            catch (Exception ex)
+            {
+                LogFileFailed(ex, open.File.Path);
+                (failures ??= []).Add(ex);
+            }
+        }
+
+        if (failures is { Count: 1 })
+        {
+            ExceptionDispatchInfo.Throw(failures[0]);
+        }
+
+        if (failures is not null)
+        {
+            throw new AggregateException("Several archive files failed to close.", failures);
         }
     }
 
     private async Task<ArchiveFile> CreateFileAsync(string feedId, DateTimeOffset hour, CancellationToken cancellationToken)
     {
-        if (feedId.Length == 0 || feedId.AsSpan().ContainsAnyExcept(_feedIdChars))
+        if (!FeedIds.IsValid(feedId))
         {
-            throw new ArgumentException($"Feed id '{feedId}' must contain only a-z, 0-9 and '-'.", nameof(feedId));
+            throw new ArgumentException($"Feed id '{feedId}' must contain {FeedIds.Rule}.", nameof(feedId));
         }
 
         var directory = Path.Combine(rootDirectory, feedId, hour.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
@@ -85,4 +103,7 @@ internal sealed partial class ArchiveSink(string rootDirectory, long rowGroupMax
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Archive file {Path} completed with {RecordCount} records")]
     private partial void LogFileCompleted(string path, long recordCount);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Archive file {Path} failed to close; its records stay in the .tmp file")]
+    private partial void LogFileFailed(Exception exception, string path);
 }

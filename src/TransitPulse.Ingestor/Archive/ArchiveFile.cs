@@ -84,8 +84,15 @@ internal sealed class ArchiveFile : IAsyncDisposable
     /// <param name="cancellationToken">Cancels the final row group write.</param>
     public async Task CompleteAsync(CancellationToken cancellationToken)
     {
-        await FlushAsync(cancellationToken);
-        await DisposeAsync();
+        try
+        {
+            await FlushAsync(cancellationToken);
+        }
+        finally
+        {
+            await DisposeAsync();
+        }
+
         File.Move(_tmpPath, Path);
     }
 

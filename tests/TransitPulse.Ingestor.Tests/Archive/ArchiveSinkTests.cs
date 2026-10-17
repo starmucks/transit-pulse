@@ -77,6 +77,24 @@ public sealed class ArchiveSinkTests : IDisposable
         Assert.False(File.Exists(FilePath("mbta", 9, 0)));
     }
 
+    [Fact]
+    public async Task Closes_other_feeds_when_one_file_fails_to_close()
+    {
+        var sink = CreateSink();
+        await sink.WriteAsync(Record("hsl", 9, 10), Ct);
+        await sink.WriteAsync(Record("mbta", 9, 10), Ct);
+
+        // Something took the final name after the file was opened, so the rename on completion fails.
+        await File.WriteAllBytesAsync(FilePath("hsl", 9, 0), [], Ct);
+
+        await Assert.ThrowsAsync<IOException>(() => sink.CompleteAsync(Ct).AsTask());
+        Assert.Equal(1, await CountRowsAsync(FilePath("mbta", 9, 0)));
+        Assert.True(File.Exists(FilePath("hsl", 9, 0) + ".tmp"));
+
+        // The failed file is not retried.
+        await sink.CompleteAsync(Ct);
+    }
+
     [Theory]
     [InlineData("../x")]
     [InlineData("a/b")]
