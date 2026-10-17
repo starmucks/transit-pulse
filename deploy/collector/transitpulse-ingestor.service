@@ -1,0 +1,35 @@
+# Phase-A collector (ADR-0003): the Ingestor as a Native AOT binary, archiving raw feeds to Parquet.
+# Installed by install.sh to /etc/systemd/system/.
+
+[Unit]
+Description=Transit Pulse ingestor (raw feed collector)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+User=transitpulse
+Group=transitpulse
+WorkingDirectory=/opt/transitpulse/ingestor
+ExecStart=/opt/transitpulse/ingestor/TransitPulse.Ingestor
+Environment=DOTNET_ENVIRONMENT=Production
+Environment=Archive__RootDirectory=/var/lib/transitpulse/archive
+
+# Creates /var/lib/transitpulse owned by the service user; the only writable path below.
+StateDirectory=transitpulse
+
+# Restart on any exit: the process exits on a sink failure, and collection must never stop for long.
+Restart=always
+RestartSec=10
+# Longer than the host's 60 s shutdown timeout, which drains the channel and closes open hourly files.
+TimeoutStopSec=90
+# Idle use is ~20 MB; the cap protects the 1 GB server from a leak.
+MemoryMax=400M
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
