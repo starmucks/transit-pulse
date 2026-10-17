@@ -7,6 +7,8 @@
   <ItemGroup Label="Aspire hosting">
     <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.1" />
     <PackageVersion Include="Aspire.Hosting.Redis" Version="13.6.1" />
+    <!-- Pinned above the version Aspire 13.6.1 brings (2.5.302, GHSA-qhrr-8q5h-9q3h); drop once Aspire ships a fixed one. -->
+    <PackageVersion Include="MessagePack" Version="2.5.307" />
   </ItemGroup>
 
   <ItemGroup Label="Hosting and telemetry">
