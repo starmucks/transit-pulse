@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using TransitPulse.Ingestor.Archive;
+using TransitPulse.Ingestor.Feeds.Hsl;
 using TransitPulse.Ingestor.Pipeline;
 
 // Checked before the host is built: the self-test needs no configuration, telemetry or feeds.
@@ -25,6 +26,9 @@ builder.Services.AddSingleton<IRawSink>(services =>
     var options = services.GetRequiredService<IOptions<ArchiveOptions>>().Value;
     return new ArchiveSink(options.RootDirectory, options.RowGroupMaxBytes, services.GetRequiredService<ILogger<ArchiveSink>>());
 });
+builder.Services.AddOptions<HslMqttOptions>().BindConfiguration(HslMqttOptions.SectionName);
+builder.Services.AddSingleton<IFeedSource, HslMqttSource>();
+
 builder.Services.AddHostedService<IngestionPipeline>();
 
 // The default 30 s may not cover draining the channel and closing every open hour; an unclosed file is lost.
