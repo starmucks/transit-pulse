@@ -70,6 +70,8 @@ public sealed partial class IngestionPipeline(
         }
         finally
         {
+            // Shutdown phases are logged so the time a stop takes can be attributed (it is bounded by the host timeout).
+            LogSourcesStopped(channel.Reader.Count);
             channel.Writer.Complete();
             await writing;
         }
@@ -87,6 +89,7 @@ public sealed partial class IngestionPipeline(
             }
 
             completing = true;
+            LogChannelDrained();
             await sink.CompleteAsync(CancellationToken.None);
         }
         catch (Exception ex)
@@ -155,6 +158,12 @@ public sealed partial class IngestionPipeline(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Feed {FeedId} stopped without a shutdown request; restarting in {Delay}")]
     private partial void LogSourceReturned(string feedId, TimeSpan delay);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "All feeds stopped; {Pending} records left in the channel to write")]
+    private partial void LogSourcesStopped(int pending);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Channel drained; closing open archive files")]
+    private partial void LogChannelDrained();
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "No feeds configured; the pipeline has nothing to collect")]
     private partial void LogNoSources();

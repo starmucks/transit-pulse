@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using Parquet;
 using Parquet.Schema;
 using TransitPulse.Ingestor.Pipeline;
@@ -52,7 +53,9 @@ internal sealed class ArchiveFile : IAsyncDisposable
         var stream = new FileStream(tmpPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read, bufferSize: 81_920, useAsync: true);
         try
         {
-            var options = new ParquetOptions { CompressionMethod = CompressionMethod.Zstd };
+            // Parquet.Net defaults to SmallestSize (maximum zstd level): on the collector's vCPU it compressed an hour
+            // of HSL in more than an hour. Optimal is ~100x faster for half the ratio (9x instead of 19x on real HFP).
+            var options = new ParquetOptions { CompressionMethod = CompressionMethod.Zstd, CompressionLevel = CompressionLevel.Optimal };
             var writer = await ParquetWriter.CreateAsync(_schema, stream, options, cancellationToken: cancellationToken);
             return new ArchiveFile(path, tmpPath, stream, writer, rowGroupMaxBytes);
         }
