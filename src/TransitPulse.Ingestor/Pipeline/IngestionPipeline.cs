@@ -50,6 +50,13 @@ public sealed partial class IngestionPipeline(
             throw new InvalidOperationException($"Feed ids {string.Join(", ", invalid)} are invalid; use {FeedIds.Rule}.");
         }
 
+        // Two sources with one id would interleave their records in the same hourly archive file.
+        var duplicates = feeds.GroupBy(source => source.FeedId).Where(group => group.Count() > 1).Select(group => $"'{group.Key}'").ToList();
+        if (duplicates.Count > 0)
+        {
+            throw new InvalidOperationException($"Feed ids {string.Join(", ", duplicates)} are used by more than one source.");
+        }
+
         if (feeds.Count == 0)
         {
             LogNoSources();

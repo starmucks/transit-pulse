@@ -144,6 +144,22 @@ public sealed class IngestionPipelineTests
     }
 
     [Fact]
+    public async Task Duplicate_feed_id_fails_start_before_any_source_runs()
+    {
+        var first = ScriptedSource.Writing("hsl", count: 1);
+        var second = ScriptedSource.Writing("hsl", count: 1);
+        var sink = new RecordingSink();
+        using var pipeline = Create([first, second], sink);
+
+        await pipeline.StartAsync(Ct);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => pipeline.ExecuteTask!.WaitAsync(_timeout, Ct));
+
+        Assert.Contains("'hsl'", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, first.Runs + second.Runs);
+        Assert.Equal(0, sink.Completions);
+    }
+
+    [Fact]
     public async Task Host_exits_with_1_when_sink_fails()
     {
         var host = CreateHost(ScriptedSource.Writing("a", count: 1), new RecordingSink { WriteFailure = new IOException("Disk full.") });

@@ -82,6 +82,20 @@ public sealed class HttpPollingSourceTests
         Assert.False(run.Task.IsCompleted);
     }
 
+    [Fact]
+    public async Task Replaces_requestor_id_placeholder_with_one_id_per_run()
+    {
+        await using var run = PollingRun.Start(
+            [_ => Ok("a")],
+            new HttpFeedOptions { FeedId = "test", Url = "https://example.test/vm?requestorId={requestorId}" });
+
+        await run.PollsAsync(2);
+
+        var urls = run.Handler.Requests.Select(r => r.RequestUri!.ToString()).ToList();
+        Assert.Matches(@"^https://example\.test/vm\?requestorId=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", urls[0]);
+        Assert.Equal(urls[0], urls[1]);
+    }
+
     private static HttpResponseMessage Ok(string body, string? etag = null, DateTimeOffset? lastModified = null)
     {
         var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) };

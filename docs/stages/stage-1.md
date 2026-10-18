@@ -28,7 +28,7 @@ IFeedSource ──► Channel<RawRecord> (bounded) ──► ArchiveSink (Parque
 
 ### 1.2 Сырые источники: HSL MQTT и опрос HTTP-фидов (#14)
 - [x] `HslMqttSource`: MQTT over TLS `mqtt.hsl.fi:8883`, `/hfp/v2/journey/ongoing/vp/#`, переподключение. Свой минимальный клиент MQTT 3.1.1: MQTTnet на сервере принимал ~200 из ~780 сообщ./с.
-- [ ] `HttpPollingRawSource` — один класс, фиды задаются конфигурацией (URL, интервал, заголовки, `ETag`/`If-Modified-Since`, постоянный `requestorId` для SIRI):
+- [ ] `HttpPollingSource` — один класс, фиды задаются конфигурацией (URL, интервал, заголовки, `ETag`/`If-Modified-Since`, постоянный `requestorId` для SIRI):
   - Entur: SIRI-VM (10–30 с), SIRI-ET, SIRI-SX — инкрементально через `requestorId`;
   - MBTA: VehiclePositions, TripUpdates (60 с), Alerts (при изменении);
   - HSL: TripUpdates (60 с), Alerts (при изменении);
@@ -107,7 +107,7 @@ IFeedSource ──► Channel<RawRecord> (bounded) ──► ArchiveSink (Parque
 1. **Native AOT + systemd** на сервере, не Docker: меньше RAM/диска, нет демона; Docker остаётся для фазы B (compose).
 2. **Сырьё как получено**, а не нормализованные данные: ошибку нормализатора можно исправить и переиграть архив. Сжатие zstd + Parquet даёт компактность с первого дня.
 3. **Вспомогательные фиды (прогнозы, объявления, погода) — сразу в 1.2**, а не в «дни 5–7»: это тот же HTTP-опрос конфигурацией, а прогнозы нужны для сравнения в C5 за тот же период, что и позиции.
-4. **Один `HttpPollingRawSource` на все pull-фиды**; различия форматов — только в нормализаторах (1.5–1.7).
+4. **Один `HttpPollingSource` на все pull-фиды**; различия форматов — только в нормализаторах (1.5–1.7).
 5. **Infrastructure-проект пока не создаём:** Parquet и Kafka-код живут в Ingestor и выносятся в `TransitPulse.Infrastructure` на этапе 2, когда появится второй потребитель (Processor/Worker).
 6. **Replay — режим Ingestor**, а не отдельный сервис (четыре деплоймент-единицы).
 7. **`tests/TransitPulse.Ingestor.Tests`** — новый тестовый проект для адаптеров (в брифе §9 его нет, но контрактные тесты адаптеров не доменные).

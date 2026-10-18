@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using TransitPulse.Ingestor.Archive;
 using TransitPulse.Ingestor.Feeds.Hsl;
+using TransitPulse.Ingestor.Feeds.Http;
 using TransitPulse.Ingestor.Pipeline;
 
 // Checked before the host is built: the self-test needs no configuration, telemetry or feeds.
@@ -28,6 +29,7 @@ builder.Services.AddSingleton<IRawSink>(services =>
 });
 builder.Services.AddOptions<HslMqttOptions>().BindConfiguration(HslMqttOptions.SectionName);
 builder.Services.AddSingleton<IFeedSource, HslMqttSource>();
+builder.Services.AddHttpFeeds(builder.Configuration);
 
 builder.Services.AddHostedService<IngestionPipeline>();
 

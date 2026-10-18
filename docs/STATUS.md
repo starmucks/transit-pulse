@@ -12,7 +12,7 @@
 - 50 тестов зелёные.
 
 ## Следующий шаг
-- `HttpPollingRawSource` (Entur SIRI-VM/ET/SX, MBTA, HSL TripUpdates/Alerts, погода) → деплой.
+- `HttpPollingSource` (Entur SIRI-VM/ET/SX, MBTA, HSL TripUpdates/Alerts, погода) → деплой.
 - Скрипт на ПК: забор из буфера (с пережатием до максимального zstd) — буфер сейчас ~7–8 дней.
 
 ## Известные проблемы

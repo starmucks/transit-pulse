@@ -16,7 +16,11 @@ namespace TransitPulse.Ingestor.Feeds.Http;
 /// </remarks>
 internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
 {
+    /// <summary>Placeholder in <see cref="HttpFeedOptions.Url"/> replaced by an id unique to this process run.</summary>
+    public const string RequestorIdPlaceholder = "{requestorId}";
+
     private readonly HttpFeedOptions _feed;
+    private readonly string _url;
     private readonly HttpClient _client;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<HttpPollingSource> _logger;
@@ -33,6 +37,10 @@ internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
     public HttpPollingSource(HttpFeedOptions feed, HttpMessageHandler handler, TimeProvider timeProvider, ILogger<HttpPollingSource> logger)
     {
         _feed = feed;
+
+        // SIRI incremental requests: the first poll with a new id returns a full snapshot, later ones only changes.
+        // A fresh id per run puts a full snapshot into the archive after every restart, so state can be rebuilt from it.
+        _url = feed.Url.Replace(RequestorIdPlaceholder, Guid.NewGuid().ToString(), StringComparison.Ordinal);
         _timeProvider = timeProvider;
         _logger = logger;
         _client = new HttpClient(handler)
@@ -77,7 +85,7 @@ internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
     /// <returns>The response as a record, or <see langword="null"/> when nothing changed or the poll failed.</returns>
     private async Task<RawRecord?> PollAsync(CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, _feed.Url);
+        using var request = new HttpRequestMessage(HttpMethod.Get, _url);
         if (_etag is not null)
         {
             request.Headers.IfNoneMatch.Add(_etag);
