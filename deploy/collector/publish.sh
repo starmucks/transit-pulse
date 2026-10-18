@@ -15,13 +15,14 @@ mkdir -p "$out"
 host_path() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else echo "$1"; fi; }
 
 # The source is copied inside the container so host bin/obj folders never mix with Linux builds.
+# deploy/collector/local holds untracked per-machine tools and secrets; the build never needs them.
 MSYS_NO_PATHCONV=1 docker run --rm \
   -v "$(host_path "$repo"):/src:ro" \
   -v "$(host_path "$out"):/out" \
   "$image" bash -c '
     set -euo pipefail
     mkdir /work
-    tar -C /src --exclude=./data --exclude=./artifacts --exclude=./.git --exclude="*/bin" --exclude="*/obj" -cf - . | tar -C /work -xf -
+    tar -C /src --exclude=./data --exclude=./artifacts --exclude=./.git --exclude=./deploy/collector/local --exclude="*/bin" --exclude="*/obj" -cf - . | tar -C /work -xf -
     dotnet publish /work/src/TransitPulse.Ingestor -r linux-x64 -c Release -o /work/publish
     /work/publish/TransitPulse.Ingestor --self-test
     cp /work/publish/TransitPulse.Ingestor /work/publish/appsettings.json /out/
