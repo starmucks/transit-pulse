@@ -10,6 +10,11 @@ if (args.Contains("--self-test"))
     return await ArchiveSelfTest.RunAsync();
 }
 
+if (args is ["--repair", var repairInput, var repairOutput])
+{
+    return await ArchiveRepair.RunAsync(repairInput, repairOutput, Console.Out);
+}
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.AddServiceDefaults();
