@@ -95,6 +95,28 @@ public sealed class ArchiveSinkTests : IDisposable
         await sink.CompleteAsync(Ct);
     }
 
+    [Fact]
+    public async Task Failed_write_costs_other_feeds_nothing_and_never_gets_a_final_name()
+    {
+        // Every 3-byte record fills a row group, so each write flushes.
+        FailingStream? hslStream = null;
+        var sink = new ArchiveSink(_dir.FullName, rowGroupMaxBytes: 3, NullLogger<ArchiveSink>.Instance, s =>
+            s is FileStream { Name: var name } && name.Contains("hsl", StringComparison.Ordinal) ? hslStream = new FailingStream(s) : s);
+        await sink.WriteAsync(Record("mbta", 9, 10), Ct);
+        await sink.WriteAsync(Record("hsl", 9, 10), Ct);
+
+        // A transient failure: the next flush fails, a retry of the same buffer would succeed.
+        hslStream!.FailNextWrite = true;
+        await Assert.ThrowsAsync<IOException>(() => sink.WriteAsync(Record("hsl", 9, 11), Ct).AsTask());
+
+        // What the pipeline does after a write failure: close everything that is still open.
+        await sink.CompleteAsync(Ct);
+
+        Assert.Equal(1, await CountRowsAsync(FilePath("mbta", 9, 0)));
+        Assert.False(File.Exists(FilePath("hsl", 9, 0)), "a file with a broken row group must stay .tmp");
+        Assert.True(File.Exists(FilePath("hsl", 9, 0) + ".tmp"));
+    }
+
     [Theory]
     [InlineData("../x")]
     [InlineData("a/b")]

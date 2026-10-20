@@ -12,7 +12,9 @@ namespace TransitPulse.Ingestor.Archive;
 /// <param name="rootDirectory">Archive root.</param>
 /// <param name="rowGroupMaxBytes">Passed to every <see cref="ArchiveFile"/>.</param>
 /// <param name="logger">Archive log.</param>
-internal sealed partial class ArchiveSink(string rootDirectory, long rowGroupMaxBytes, ILogger<ArchiveSink> logger) : IRawSink
+/// <param name="wrapFileStream">Test hook passed to every <see cref="ArchiveFile"/>, e.g. to inject a write failure.</param>
+internal sealed partial class ArchiveSink(
+    string rootDirectory, long rowGroupMaxBytes, ILogger<ArchiveSink> logger, Func<Stream, Stream>? wrapFileStream = null) : IRawSink
 {
     private readonly Dictionary<string, (ArchiveFile File, DateTimeOffset Hour)> _open = new(StringComparer.Ordinal);
     private DateTimeOffset _latestHour = DateTimeOffset.MinValue;
@@ -36,7 +38,27 @@ internal sealed partial class ArchiveSink(string rootDirectory, long rowGroupMax
             _open.Add(record.FeedId, open);
         }
 
-        await open.File.AddAsync(record, cancellationToken);
+        try
+        {
+            await open.File.AddAsync(record, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // Closed now rather than with the other files: it can never be completed, and keeping it open
+            // would hold its writer while the pipeline closes the intact files of the other feeds.
+            _open.Remove(record.FeedId);
+            LogWriteFailed(ex, open.File.Path);
+            try
+            {
+                await open.File.DisposeAsync();
+            }
+            catch (Exception disposeEx)
+            {
+                LogFileFailed(disposeEx, open.File.Path);
+            }
+
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -90,7 +112,7 @@ internal sealed partial class ArchiveSink(string rootDirectory, long rowGroupMax
             var path = Path.Combine(directory, string.Create(CultureInfo.InvariantCulture, $"{feedId}-{hour:yyyyMMdd'T'HH'Z'}-{n}.parquet"));
             if (!File.Exists(path) && !File.Exists(path + ".tmp"))
             {
-                return await ArchiveFile.CreateAsync(path, rowGroupMaxBytes, cancellationToken);
+                return await ArchiveFile.CreateAsync(path, rowGroupMaxBytes, wrapFileStream, cancellationToken);
             }
         }
     }
@@ -103,6 +125,9 @@ internal sealed partial class ArchiveSink(string rootDirectory, long rowGroupMax
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Archive file {Path} completed with {RecordCount} records")]
     private partial void LogFileCompleted(string path, long recordCount);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Archive file {Path} failed to write a row group; it stays .tmp, earlier row groups are recoverable with --repair")]
+    private partial void LogWriteFailed(Exception exception, string path);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Archive file {Path} failed to close; its records stay in the .tmp file")]
     private partial void LogFileFailed(Exception exception, string path);
