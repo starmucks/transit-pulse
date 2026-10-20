@@ -22,6 +22,7 @@ install -m 644 "$src/$unit" "/etc/systemd/system/$unit"
 
 # Hourly upload to the cloud buffer; the token is installed separately and is never part of the package.
 install -m 755 "$src/upload.sh" /opt/transitpulse/upload.sh
+install -m 755 "$src/health.sh" /opt/transitpulse/health.sh
 install -m 644 "$src/transitpulse-upload.service" "$src/transitpulse-upload.timer" /etc/systemd/system/
 [[ -s /etc/transitpulse/yandex.token ]] || echo "WARNING: /etc/transitpulse/yandex.token is missing; uploads will fail." >&2
 
