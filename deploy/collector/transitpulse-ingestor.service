@@ -14,6 +14,11 @@ WorkingDirectory=/opt/transitpulse/ingestor
 ExecStart=/opt/transitpulse/ingestor/TransitPulse.Ingestor
 Environment=DOTNET_ENVIRONMENT=Production
 Environment=Archive__RootDirectory=/var/lib/transitpulse/archive
+# Peak during a row group flush is ~3x the buffer per feed (payloads + encoded column + zstd output);
+# 16 MiB with ten feeds hit the 300 MiB GC heap limit (75% of MemoryMax) at weekday HSL peaks.
+Environment=Archive__RowGroupMaxBytes=4194304
+# Lets the GC compact the large object heap when it fragments (flush buffers are LOH-sized).
+Environment=DOTNET_GCConserveMemory=5
 
 # Creates /var/lib/transitpulse owned by the service user; the only writable path below.
 StateDirectory=transitpulse
