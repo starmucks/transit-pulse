@@ -8,12 +8,17 @@ src="$(cd "$(dirname "$0")" && pwd)"
 app=/opt/transitpulse/ingestor
 unit=transitpulse-ingestor.service
 
+# gtfs-snapshot.sh checks every downloaded zip with python3; without it every export would be rejected as corrupt.
+command -v python3 >/dev/null || { echo "python3 is required (gtfs-snapshot.sh checks the zips with it)" >&2; exit 1; }
+
 id transitpulse >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin transitpulse
 
 # Checked before touching the running service: a binary that cannot write and read an archive is never installed.
 install -m 755 "$src/TransitPulse.Ingestor" /tmp/TransitPulse.Ingestor.new
 runuser -u transitpulse -- /tmp/TransitPulse.Ingestor.new --self-test
 
+# No new upload starts while files are swapped; one already running finishes. The timer is set again below.
+systemctl stop transitpulse-upload.timer 2>/dev/null || true
 systemctl stop "$unit" 2>/dev/null || true
 install -d -m 755 "$app"
 mv /tmp/TransitPulse.Ingestor.new "$app/TransitPulse.Ingestor"

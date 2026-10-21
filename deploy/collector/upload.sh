@@ -5,7 +5,7 @@
 #   -> delete the local file.
 # A reader on the other side sees only finished names, and "upload.lock" in the buffer while a run is in progress.
 # A failed file stays on the server and is retried next hour.
-# During peak hours the run is skipped: the collector needs the single vCPU (see the settings below).
+# During peak hours the run is skipped: the collector needs the CPU (see the settings below).
 set -euo pipefail
 
 archive=${ARCHIVE_DIR:-/var/lib/transitpulse/archive}
@@ -13,8 +13,8 @@ token_file=${TOKEN_FILE:-/etc/transitpulse/yandex.token}
 remote_root=app:/archive
 api=https://cloud-api.yandex.net/v1/disk
 
-# UTC hour windows "start-end" (end exclusive, may wrap past midnight) with no upload. Measured CPU use there is
-# 50-85% from the collector alone; an upload burst on top saturated the vCPU and stalled the HSL feed.
+# UTC hour windows "start-end" (end exclusive, may wrap past midnight) with no upload. Measured on the 1-vCPU server:
+# 50-85% CPU from the collector alone there, and an upload burst on top saturated it and stalled the HSL feed.
 pause_hours=${UPLOAD_PAUSE_HOURS_UTC:-04-08 12-16}
 # Above this disk use the upload runs even in a pause: a full disk loses more data than a slow hour.
 force_disk_percent=${UPLOAD_FORCE_DISK_PERCENT:-75}
@@ -74,7 +74,13 @@ upload_one() {
   cloud_hash=$(remote_sha256 "$remote.partial") || { echo "no checksum from the cloud for $relative" >&2; return 1; }
   [[ $local_hash == "$cloud_hash" ]] || { echo "checksum mismatch for $relative" >&2; return 1; }
 
-  code=$(status "$(call POST "resources/move?from=$remote.partial&path=$remote&overwrite=true")")
+  # Never overwrite: a file of the same name in the buffer is an earlier upload whose number the collector reused
+  # after it was deleted here. Replacing it would lose that hour; keeping this file on the server loses nothing.
+  code=$(status "$(call POST "resources/move?from=$remote.partial&path=$remote&overwrite=false")")
+  if [[ $code == 409 ]]; then
+    echo "rename $relative: a different file with this name is already in the buffer; kept on the server" >&2
+    return 1
+  fi
   [[ $code == 201 || $code == 202 ]] || { echo "rename $relative: HTTP $code" >&2; return 1; }
 
   echo "uploaded $relative ($(stat -c %s "$file") bytes)"
@@ -118,6 +124,7 @@ for file in "${files[@]}"; do
   upload_one "$file" || failed=1
 done
 
-# Remove empty day folders left after their files were uploaded.
-find "$archive" -mindepth 2 -type d -empty -delete
+# Remove empty day folders left after their files were uploaded, except today's: the collector creates it before the
+# hour's first file, and deleting it in between would fail that write.
+find "$archive" -mindepth 2 -maxdepth 2 -type d -empty ! -name "$(date -u +%F)" -delete
 exit $failed
