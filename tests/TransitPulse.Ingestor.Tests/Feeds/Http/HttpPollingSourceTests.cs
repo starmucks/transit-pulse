@@ -101,7 +101,7 @@ public sealed class HttpPollingSourceTests
     {
         await using var run = PollingRun.Start(
             [
-                _ => Ok("a"),
+                _ => Ok("a", "\"v1\""),
                 _ => throw new HttpRequestException("connection reset"),
                 _ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable),
                 _ => Ok("b"),
@@ -115,6 +115,10 @@ public sealed class HttpPollingSourceTests
         Assert.NotEqual(urls[1], urls[2]);
         Assert.NotEqual(urls[2], urls[3]);
         Assert.Equal(urls[3], urls[4]);
+
+        // The first response's ETag goes with the old id only.
+        Assert.Equal("\"v1\"", Assert.Single(run.Handler.Requests.ElementAt(1).Headers.IfNoneMatch).Tag);
+        Assert.Empty(run.Handler.Requests.ElementAt(2).Headers.IfNoneMatch);
     }
 
     [Fact]

@@ -156,6 +156,10 @@ internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
         if (_feed.Url.Contains(RequestorIdPlaceholder, StringComparison.Ordinal))
         {
             _url = NewRequestorUrl();
+
+            // Validators belong to the old URL's responses; the new subscription starts without them.
+            _etag = null;
+            _lastModified = null;
             LogRequestorIdRenewed(FeedId);
         }
     }
