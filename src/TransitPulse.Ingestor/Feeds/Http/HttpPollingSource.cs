@@ -16,7 +16,10 @@ namespace TransitPulse.Ingestor.Feeds.Http;
 /// </remarks>
 internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
 {
-    /// <summary>Placeholder in <see cref="HttpFeedOptions.Url"/> replaced by an id unique to this process run.</summary>
+    /// <summary>
+    /// Placeholder in <see cref="HttpFeedOptions.Url"/> replaced by a new id at start and after a poll whose response
+    /// may have been lost.
+    /// </summary>
     public const string RequestorIdPlaceholder = "{requestorId}";
 
     private readonly HttpFeedOptions _feed;
