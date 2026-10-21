@@ -64,13 +64,7 @@ internal sealed partial class HslMqttSource(
     {
         var settings = options.Value;
         using var tcp = new TcpClient();
-        await tcp.ConnectAsync(settings.Host, settings.Port, cancellationToken);
-        await using var tls = new SslStream(tcp.GetStream());
-        await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = settings.Host }, cancellationToken);
-
-        // Clean session with a random id: HFP is QoS 0, so there is nothing for the broker to keep between connections.
-        await tls.WriteAsync(MqttWire.Connect($"transitpulse-{Guid.NewGuid():N}", KeepAliveSeconds), cancellationToken);
-        await tls.WriteAsync(MqttWire.Subscribe(1, settings.Topic), cancellationToken);
+        await using var tls = await ConnectAsync(tcp, settings, cancellationToken);
 
         var buffer = new byte[BufferSize];
         var filled = 0;
@@ -126,9 +120,58 @@ internal sealed partial class HslMqttSource(
 
             if (timeProvider.GetElapsedTime(lastPing) >= _pingInterval)
             {
-                await tls.WriteAsync(_pingReq, cancellationToken);
+                // A peer that stopped reading fills the send buffer, and then even a 2-byte write never completes.
+                readTimeout.CancelAfter(settings.SilenceTimeout);
+                try
+                {
+                    await tls.WriteAsync(_pingReq, readTimeout.Token);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    return $"ping not sent within {settings.SilenceTimeout:g}";
+                }
+
                 lastPing = timeProvider.GetTimestamp();
             }
+        }
+    }
+
+    /// <summary>Opens TLS to the broker and subscribes, all within <see cref="HslMqttOptions.ConnectTimeout"/>.</summary>
+    /// <returns>The TLS stream, subscription sent; the caller owns it.</returns>
+    /// <exception cref="TimeoutException">The setup did not finish in time; the pipeline retries after its delay.</exception>
+    private static async Task<SslStream> ConnectAsync(TcpClient tcp, HslMqttOptions settings, CancellationToken cancellationToken)
+    {
+        // The read loop's silence check starts only after this setup, so the setup needs a deadline of its own.
+        using var setupTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        setupTimeout.CancelAfter(settings.ConnectTimeout);
+        SslStream? tls = null;
+        try
+        {
+            await tcp.ConnectAsync(settings.Host, settings.Port, setupTimeout.Token);
+            tls = new SslStream(tcp.GetStream());
+            await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = settings.Host }, setupTimeout.Token);
+
+            // Clean session with a random id: HFP is QoS 0, so there is nothing for the broker to keep between connections.
+            await tls.WriteAsync(MqttWire.Connect($"transitpulse-{Guid.NewGuid():N}", KeepAliveSeconds), setupTimeout.Token);
+            await tls.WriteAsync(MqttWire.Subscribe(1, settings.Topic), setupTimeout.Token);
+            return tls;
+        }
+        catch (Exception ex)
+        {
+            if (tls is not null)
+            {
+                await tls.DisposeAsync();
+            }
+
+            // Thrown, not returned as a reason: a setup that hangs for the whole timeout must not count as a healthy
+            // connection and be retried at once in a loop.
+            if (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    $"HSL MQTT connection to {settings.Host}:{settings.Port} was not set up within {settings.ConnectTimeout:g}.", ex);
+            }
+
+            throw;
         }
     }
 

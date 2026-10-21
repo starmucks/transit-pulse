@@ -21,4 +21,10 @@ internal sealed class HslMqttOptions
     /// of silence is a real fault.
     /// </summary>
     public TimeSpan SilenceTimeout { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Deadline for setting a connection up: TCP connect, TLS handshake, MQTT CONNECT and SUBSCRIBE. Without it a
+    /// handshake stalled on a starved CPU or a broken network blocks the feed for good (50 min on 2026-10-21).
+    /// </summary>
+    public TimeSpan ConnectTimeout { get; set; } = TimeSpan.FromSeconds(30);
 }
