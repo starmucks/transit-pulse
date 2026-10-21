@@ -36,10 +36,14 @@ internal sealed class ScriptedSource(string feedId, Func<int, ChannelWriter<RawR
 internal sealed class RecordingSink : IRawSink
 {
     private readonly ConcurrentQueue<RawRecord> _records = new();
+    private readonly TaskCompletionSource _writeStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _completions;
 
     /// <summary>Every write waits for this task first.</summary>
     public Task? Gate { get; init; }
+
+    /// <summary>Completes when the first write starts, before it waits on <see cref="Gate"/>.</summary>
+    public Task WriteStarted => _writeStarted.Task;
 
     /// <summary>Every write throws this exception.</summary>
     public Exception? WriteFailure { get; init; }
@@ -58,6 +62,7 @@ internal sealed class RecordingSink : IRawSink
             throw WriteFailure;
         }
 
+        _writeStarted.TrySetResult();
         if (Gate is not null)
         {
             await Gate;

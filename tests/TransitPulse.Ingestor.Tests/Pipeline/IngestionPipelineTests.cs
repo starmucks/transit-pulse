@@ -61,6 +61,8 @@ public sealed class IngestionPipelineTests
 
         await pipeline.StartAsync(Ct);
         await allWritten.Task.WaitAsync(_timeout, Ct);
+        // Without this wait the deadline can pass before the writer takes the first record, and nothing is written.
+        await sink.WriteStarted.WaitAsync(_timeout, Ct);
 
         // The sink is stuck on the first record when shutdown starts and moves again only after the budget is gone.
         var stopping = pipeline.StopAsync(Ct);
