@@ -118,11 +118,14 @@ else
   report OK disk "$used% used"
 fi
 
-# --- upload to the cloud buffer (hourly timer)
+# --- upload to the cloud buffer (hourly timer), optional: without it the archive stays on the server.
 result=$(show transitpulse-upload.service Result)
 last=$(show transitpulse-upload.timer LastTriggerUSec)
 last_epoch=$(date -d "$last" +%s 2>/dev/null || echo 0)
-if [[ $result != success ]]; then
+uploading=$(systemctl is-enabled transitpulse-upload.timer 2>/dev/null || true)
+if [[ $uploading != enabled ]]; then
+  report INFO upload "disabled: files stay in $archive until copied to the PC"
+elif [[ $result != success ]]; then
   report FAIL upload "last run: $result (journalctl -u transitpulse-upload)"
 elif (( now - last_epoch > 70 * 60 )); then
   report WARN upload "last run at '${last:-never}', more than 70 min ago"
@@ -130,7 +133,16 @@ else
   report OK upload "last run at $last"
 fi
 
-# --- volume uploaded in 24 h, per feed: the measured daily size of the archive.
+# --- volume of 24 h, per feed: the measured daily size of the archive (from the files when nothing is uploaded).
+if [[ $uploading != enabled ]]; then
+  find "$archive" -name '*.parquet' -mmin -1440 -printf '%s %P\n' 2>/dev/null |
+    awk '{ split($2, p, "/"); bytes[p[1]] += $1; total += $1 }
+         END {
+           line = ""
+           for (f in bytes) line = line sprintf("%s %.1f MiB, ", f, bytes[f] / 1048576)
+           printf "INFO  volume    24 h: %.0f MiB archived (%s)\n", total / 1048576, (line == "" ? "nothing" : substr(line, 1, length(line) - 2))
+         }'
+else
 journalctl -u transitpulse-upload --since -24h -o cat --no-pager 2>/dev/null |
   awk '$1 == "uploaded" { split($2, p, "/"); gsub(/[(]/, "", $3); bytes[p[1]] += $3; total += $3 }
        END {
@@ -138,6 +150,7 @@ journalctl -u transitpulse-upload --since -24h -o cat --no-pager 2>/dev/null |
          for (f in bytes) line = line sprintf("%s %.1f MiB, ", f, bytes[f] / 1048576)
          printf "INFO  volume    24 h: %.0f MiB uploaded (%s)\n", total / 1048576, (line == "" ? "nothing" : substr(line, 1, length(line) - 2))
        }'
+fi
 
 # --- errors logged in the last hour (Entur's HTTP 429 is a warning and is not counted).
 errors=$(journalctl -u "$unit" --since -1h -o cat --no-pager 2>/dev/null | grep -cE '^(fail|crit):' || true)

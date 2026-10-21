@@ -24,9 +24,15 @@ install -m 644 "$src/$unit" "/etc/systemd/system/$unit"
 install -m 755 "$src/upload.sh" /opt/transitpulse/upload.sh
 install -m 755 "$src/health.sh" /opt/transitpulse/health.sh
 install -m 644 "$src/transitpulse-upload.service" "$src/transitpulse-upload.timer" /etc/systemd/system/
-[[ -s /etc/transitpulse/yandex.token ]] || echo "WARNING: /etc/transitpulse/yandex.token is missing; uploads will fail." >&2
-
 systemctl daemon-reload
-systemctl enable --now "$unit" transitpulse-upload.timer
+systemctl enable --now "$unit"
+
+# The upload is optional: without a cloud token the archive stays on the server and the PC copies it over SSH.
+if [[ -s /etc/transitpulse/yandex.token ]]; then
+  systemctl enable --now transitpulse-upload.timer
+else
+  systemctl disable --now transitpulse-upload.timer 2>/dev/null || true
+  echo "No /etc/transitpulse/yandex.token: cloud upload disabled, files stay in the archive." >&2
+fi
 sleep 5
 systemctl --no-pager --lines=10 status "$unit"
