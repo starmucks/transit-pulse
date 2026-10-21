@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using TransitPulse.Ingestor.Feeds.Hsl;
 using TransitPulse.Ingestor.Pipeline;
 
@@ -97,6 +98,38 @@ public sealed class HslMqttSourceTests
         // A connection that did not last 10 s counts as a failure: the pipeline retries after its delay.
         var error = await Assert.ThrowsAsync<IOException>(() => run.WaitAsync(_timeout, Ct));
         Assert.Contains("closed by the broker", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Connection_reset_after_working_for_a_while_reconnects_at_once()
+    {
+        using var broker = new FakeBroker();
+        var time = new FakeTimeProvider();
+        var output = Channel.CreateUnbounded<RawRecord>();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        var run = broker.CreateSource(time).RunAsync(output.Writer, stop.Token);
+
+        using (var first = await broker.AcceptAsync())
+        {
+            byte[] hello = [.. ConnAck(0), .. _subAck, .. Publish("/t", "a")];
+            await first.SendAsync(hello, Ct);
+            await output.Reader.ReadAsync(Ct).AsTask().WaitAsync(_timeout, Ct);
+            time.Advance(TimeSpan.FromSeconds(11));
+
+            // Linger 0 makes the close send a reset instead of FIN, as a broker or a network device dropping us does.
+            first.LingerState = new LingerOption(true, 0);
+        }
+
+        // Without an immediate reconnect the source fails and nothing connects within the timeout.
+        using var second = await broker.AcceptAsync();
+        byte[] again = [.. ConnAck(0), .. _subAck, .. Publish("/t", "b")];
+        await second.SendAsync(again, Ct);
+        var record = await output.Reader.ReadAsync(Ct).AsTask().WaitAsync(_timeout, Ct);
+        Assert.Equal("b", Encoding.UTF8.GetString(record.Payload));
+        Assert.False(run.IsCompleted);
+
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
     }
 
     private static readonly byte[] _subAck = [0x90, 0x03, 0x00, 0x01, 0x00];

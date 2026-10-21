@@ -92,6 +92,11 @@ internal sealed partial class HslMqttSource(
             {
                 return $"nothing received for {settings.SilenceTimeout:g}";
             }
+            catch (IOException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                // A reset or a broken socket ends the connection like a close does: RunAsync judges it by how long it lasted.
+                return $"connection lost: {ex.Message}";
+            }
 
             if (read == 0)
             {
@@ -135,6 +140,10 @@ internal sealed partial class HslMqttSource(
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
                     return $"ping not sent within {settings.SilenceTimeout:g}";
+                }
+                catch (IOException ex) when (!cancellationToken.IsCancellationRequested)
+                {
+                    return $"connection lost while pinging: {ex.Message}";
                 }
 
                 lastPing = timeProvider.GetTimestamp();

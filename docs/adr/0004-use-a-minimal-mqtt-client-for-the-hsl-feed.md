@@ -38,9 +38,9 @@ Measured after the change: ~705 messages/s on Windows with no disconnects, idle 
 
 - The feed keeps up with the full HSL stream at a fraction of the memory, in the same AOT binary.
 - Protocol robustness is now our code: reconnects, timeouts and keep-alive are not inherited from a library.
-  Known gaps found in review and in production logs: a connection reset currently waits for the pipeline's 5 s
-  restart delay instead of reconnecting at once (two resets on 2026-10-20), and connect/TLS handshake has no timeout.
-  Both are tracked and must be fixed before this is considered done.
+  Gaps found in review and in production logs, both fixed and covered by tests against a fake broker on loopback
+  TCP: a connection reset waited for the pipeline's 5 s restart delay instead of reconnecting at once (two resets on
+  2026-10-20), and the connect/TLS handshake had no timeout.
 - Only QoS 0 is supported: messages the broker sends while we are disconnected are lost. Accepted — HFP repeats
   every vehicle's position each second, so a short gap costs seconds of data, not events.
 - If HSL changes the protocol (MQTT 5 only, authentication), the client must be extended; MQTTnet would be the
