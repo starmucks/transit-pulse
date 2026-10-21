@@ -6,7 +6,8 @@ namespace TransitPulse.Ingestor.Archive;
 /// <summary>
 /// Archive inventory, run as <c>TransitPulse.Ingestor --stats &lt;archive&gt;</c>: per feed and UTC day, the files,
 /// records, average rate, hours with data and gaps between consecutive receive times, plus every file that cannot be
-/// read. Only the receive-time column is read, so a whole archive is scanned without loading payloads.
+/// read or has a row group missing a column. Only the receive-time column is read, so a whole archive is scanned
+/// without loading payloads.
 /// </summary>
 /// <remarks>
 /// A gap is attributed to the day it ends in. Long gaps are a fault only for continuous feeds (vehicle positions);
@@ -94,10 +95,20 @@ internal static class ArchiveStats
     {
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 81_920, useAsync: true);
         await using var reader = await ParquetReader.CreateAsync(stream, cancellationToken: cancellationToken);
+        var columns = reader.Schema.GetDataFields().Length;
         var groups = new List<long[]>();
         for (var i = 0; i < reader.RowGroupCount; i++)
         {
             using var group = reader.OpenRowGroupReader(i);
+
+            // A flush that failed mid-way leaves a group listed without all its column chunks. This scan reads only the
+            // receive times and would pass it, but other readers (pyarrow) reject the whole file.
+            if (group.RowGroup.Columns.Count < columns)
+            {
+                throw new InvalidDataException(
+                    $"row group {i} has {group.RowGroup.Columns.Count} of {columns} columns; rewrite the file with --repair");
+            }
+
             var values = new long[checked((int)group.RowCount)];
             await group.ReadAsync(ArchiveFile.ReceivedAtField, values.AsMemory(), null, cancellationToken);
             groups.Add(values);
