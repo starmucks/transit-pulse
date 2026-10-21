@@ -1,0 +1,2 @@
+fastparquet==2026.9.0
+pyarrow==25.0.1
