@@ -154,7 +154,8 @@ fi
 
 # --- static schedule snapshots (twice a day): an unchanged export is not stored, so judge by the last run.
 gtfs_result=$(show transitpulse-gtfs.service Result)
-gtfs_last=$(show transitpulse-gtfs.timer LastTriggerUSec)
+# The service's own exit time, not the timer's: a manual run counts too.
+gtfs_last=$(show transitpulse-gtfs.service ExecMainExitTimestamp)
 gtfs_epoch=$(date -d "$gtfs_last" +%s 2>/dev/null || echo 0)
 latest=$(for d in /var/lib/transitpulse/gtfs/*/; do
            [[ -d $d ]] || continue
