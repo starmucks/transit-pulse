@@ -24,8 +24,11 @@ install -m 644 "$src/$unit" "/etc/systemd/system/$unit"
 install -m 755 "$src/upload.sh" /opt/transitpulse/upload.sh
 install -m 755 "$src/health.sh" /opt/transitpulse/health.sh
 install -m 644 "$src/transitpulse-upload.service" "$src/transitpulse-upload.timer" /etc/systemd/system/
+# Twice-daily snapshot of the static schedules.
+install -m 755 "$src/gtfs-snapshot.sh" /opt/transitpulse/gtfs-snapshot.sh
+install -m 644 "$src/transitpulse-gtfs.service" "$src/transitpulse-gtfs.timer" /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now "$unit"
+systemctl enable --now "$unit" transitpulse-gtfs.timer
 
 # The upload is optional: without a cloud token the archive stays on the server and the PC copies it over SSH.
 if [[ -s /etc/transitpulse/yandex.token ]]; then

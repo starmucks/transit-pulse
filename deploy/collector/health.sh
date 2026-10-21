@@ -152,6 +152,23 @@ journalctl -u transitpulse-upload --since -24h -o cat --no-pager 2>/dev/null |
        }'
 fi
 
+# --- static schedule snapshots (twice a day): an unchanged export is not stored, so judge by the last run.
+gtfs_result=$(show transitpulse-gtfs.service Result)
+gtfs_last=$(show transitpulse-gtfs.timer LastTriggerUSec)
+gtfs_epoch=$(date -d "$gtfs_last" +%s 2>/dev/null || echo 0)
+latest=$(for d in /var/lib/transitpulse/gtfs/*/; do
+           [[ -d $d ]] || continue
+           f=$(ls "$d" | grep -E '\.zip$' | sort | tail -1)
+           printf '%s %s, ' "$(basename "$d")" "${f%.zip}"
+         done)
+if [[ $gtfs_result != success ]]; then
+  report FAIL gtfs "last run: $gtfs_result (journalctl -u transitpulse-gtfs)"
+elif (( now - gtfs_epoch > 13 * 3600 )); then
+  report WARN gtfs "last run at '${gtfs_last:-never}', more than 13 h ago"
+else
+  report OK gtfs "last run at $gtfs_last; latest: ${latest%, }"
+fi
+
 # --- errors logged in the last hour (Entur's HTTP 429 is a warning and is not counted).
 errors=$(journalctl -u "$unit" --since -1h -o cat --no-pager 2>/dev/null | grep -cE '^(fail|crit):' || true)
 if (( errors > 0 )); then
