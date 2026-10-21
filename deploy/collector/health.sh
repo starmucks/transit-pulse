@@ -133,6 +133,21 @@ else
   report OK upload "last run at $last"
 fi
 
+# --- copy to the PC: the copying script writes the marker once every finished file is copied and verified.
+# Without the cloud upload the server holds the only copy, so an old marker is a warning.
+if [[ $uploading != enabled ]]; then
+  marker=/var/lib/transitpulse/last-pull
+  pulled=$(cat "$marker" 2>/dev/null || true)
+  pulled_epoch=$(date -d "$pulled" +%s 2>/dev/null || echo 0)
+  if (( pulled_epoch == 0 )); then
+    report WARN pull "never copied to the PC: the server holds the only copy"
+  elif (( now - pulled_epoch > 7 * 86400 )); then
+    report WARN pull "the PC has files up to $pulled, $(( (now - pulled_epoch) / 86400 )) days ago: copy soon"
+  else
+    report OK pull "the PC has files up to $pulled"
+  fi
+fi
+
 # --- volume of 24 h, per feed: the measured daily size of the archive (from the files when nothing is uploaded).
 if [[ $uploading != enabled ]]; then
   find "$archive" -name '*.parquet' -mmin -1440 -printf '%s %P\n' 2>/dev/null |
