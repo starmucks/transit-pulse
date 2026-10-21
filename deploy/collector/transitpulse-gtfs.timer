@@ -1,0 +1,14 @@
+# Twice a day: HSL publishes its export around 01:50 UTC, Entur around 12:50 UTC; unchanged exports cost one request.
+
+[Unit]
+Description=Twice-daily Transit Pulse GTFS snapshot
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 UTC
+OnCalendar=*-*-* 14:30:00 UTC
+RandomizedDelaySec=5min
+# Runs a missed snapshot after the server was down.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

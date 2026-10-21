@@ -51,6 +51,31 @@ public sealed class IngestionPipelineTests
     }
 
     [Fact]
+    public async Task Drops_records_left_after_the_drain_budget_and_still_closes_the_files()
+    {
+        var time = new FakeTimeProvider();
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sink = new RecordingSink { Gate = gate.Task };
+        using var pipeline = Create([ScriptedSource.Writing("a", 100, allWritten)], sink, time);
+
+        await pipeline.StartAsync(Ct);
+        await allWritten.Task.WaitAsync(_timeout, Ct);
+        // Without this wait the deadline can pass before the writer takes the first record, and nothing is written.
+        await sink.WriteStarted.WaitAsync(_timeout, Ct);
+
+        // The sink is stuck on the first record when shutdown starts and moves again only after the budget is gone.
+        var stopping = pipeline.StopAsync(Ct);
+        time.Advance(IngestionPipeline.DrainTimeout);
+        gate.SetResult();
+        await stopping.WaitAsync(_timeout, Ct);
+
+        Assert.Single(sink.Records);
+        Assert.Equal(1, sink.RecordsAtCompletion);
+        Assert.Equal(1, sink.Completions);
+    }
+
+    [Fact]
     public async Task Restarts_failed_source_after_delay()
     {
         var time = new FakeTimeProvider();
@@ -140,6 +165,22 @@ public sealed class IngestionPipelineTests
 
         Assert.Contains("'HSL'", error.Message, StringComparison.Ordinal);
         Assert.Equal(0, good.Runs);
+        Assert.Equal(0, sink.Completions);
+    }
+
+    [Fact]
+    public async Task Duplicate_feed_id_fails_start_before_any_source_runs()
+    {
+        var first = ScriptedSource.Writing("hsl", count: 1);
+        var second = ScriptedSource.Writing("hsl", count: 1);
+        var sink = new RecordingSink();
+        using var pipeline = Create([first, second], sink);
+
+        await pipeline.StartAsync(Ct);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => pipeline.ExecuteTask!.WaitAsync(_timeout, Ct));
+
+        Assert.Contains("'hsl'", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, first.Runs + second.Runs);
         Assert.Equal(0, sink.Completions);
     }
 

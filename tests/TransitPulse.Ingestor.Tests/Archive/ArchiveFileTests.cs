@@ -68,6 +68,36 @@ public sealed class ArchiveFileTests : IDisposable
         Assert.Equal(5, rows.Count);
     }
 
+    [Fact]
+    public async Task Failed_flush_faults_the_file_and_keeps_it_tmp()
+    {
+        var path = Path.Combine(_dir.FullName, "in", "hsl.parquet");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        FailingStream? stream = null;
+        var file = await ArchiveFile.CreateAsync(path, rowGroupMaxBytes: 3, s => stream = new FailingStream(s), Ct);
+        await file.AddAsync(new RawRecord("hsl", _at, [1, 2, 3], "/hfp/a"), Ct);
+
+        // One failed write midway through a row group, like the transient OutOfMemoryException on the collector.
+        stream!.FailNextWrite = true;
+        await Assert.ThrowsAsync<IOException>(
+            () => file.AddAsync(new RawRecord("hsl", _at.AddSeconds(1), [4, 5, 6], null), Ct).AsTask());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => file.AddAsync(new RawRecord("hsl", _at.AddSeconds(2), [7], null), Ct).AsTask());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => file.CompleteAsync(Ct));
+        Assert.False(File.Exists(path));
+        Assert.True(File.Exists(path + ".tmp"));
+
+        // The row group flushed before the failure is still there, and the failed buffer was not written twice.
+        var repaired = Path.Combine(_dir.FullName, "out");
+        await ArchiveRepair.RunAsync(Path.GetDirectoryName(path)!, repaired, TextWriter.Null, Ct);
+        var (rows, _) = await ReadAsync(Path.Combine(repaired, "hsl.parquet"));
+        var row = Assert.Single(rows);
+        Assert.Equal(_at.ToUnixTimeMilliseconds(), row.ReceivedAt);
+        Assert.Equal("/hfp/a", row.Topic);
+        Assert.Equal([1, 2, 3], row.Payload);
+    }
+
     private static async Task<(List<(long ReceivedAt, string? Topic, byte[]? Payload)> Rows, int RowGroups)> ReadAsync(string path)
     {
         var rows = new List<(long, string?, byte[]?)>();

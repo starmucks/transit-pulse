@@ -1,0 +1,43 @@
+# Phase-A collector (ADR-0003): the Ingestor as a Native AOT binary, archiving raw feeds to Parquet.
+# Installed by install.sh to /etc/systemd/system/.
+
+[Unit]
+Description=Transit Pulse ingestor (raw feed collector)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+User=transitpulse
+Group=transitpulse
+WorkingDirectory=/opt/transitpulse/ingestor
+ExecStart=/opt/transitpulse/ingestor/TransitPulse.Ingestor
+Environment=DOTNET_ENVIRONMENT=Production
+Environment=Archive__RootDirectory=/var/lib/transitpulse/archive
+# Peak during a row group flush is ~3x the buffer per feed (payloads + encoded column + zstd output): with ten feeds
+# 16 MiB needs a few hundred MiB at weekday HSL peaks, well inside the 750 MiB GC heap limit (75% of MemoryMax).
+Environment=Archive__RowGroupMaxBytes=16777216
+# The GC keeps memory it has committed instead of returning it to the OS: on the collector's VMware host a page the
+# guest touches again after releasing it is slow to get back, so returning memory costs CPU in the kernel.
+Environment=DOTNET_GCRetainVM=1
+
+# Creates /var/lib/transitpulse owned by the service user; the only writable path below.
+StateDirectory=transitpulse
+
+# Restart on any exit: the process exits on a sink failure, and collection must never stop for long.
+Restart=always
+RestartSec=10
+# Longer than the host's 100 s shutdown timeout, which drains the channel and closes open hourly files.
+TimeoutStopSec=120
+# Ten times the default weight: an OS job (apt) or our own upload must yield the CPU to the collector.
+CPUWeight=1000
+# Steady use is ~300 MB; the cap protects the 2 GB server from a leak.
+MemoryMax=1G
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

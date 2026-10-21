@@ -1,0 +1,22 @@
+# Snapshots the static schedules (GTFS) of all feeds; started by transitpulse-gtfs.timer.
+
+[Unit]
+Description=Transit Pulse static schedule (GTFS) snapshot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=transitpulse
+Group=transitpulse
+ExecStart=/opt/transitpulse/gtfs-snapshot.sh
+# A few large downloads twice a day must not slow the collector down.
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=1h
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/transitpulse

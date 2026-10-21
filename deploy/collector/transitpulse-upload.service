@@ -1,0 +1,24 @@
+# Uploads completed archive files to the cloud buffer; started hourly by transitpulse-upload.timer.
+
+[Unit]
+Description=Transit Pulse archive upload to the cloud buffer
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=transitpulse
+Group=transitpulse
+ExecStart=/opt/transitpulse/upload.sh
+# Uploading must never slow the collector down.
+Nice=10
+IOSchedulingClass=idle
+# Nice alone did not stop a TLS upload from taking ~45% of the CPU next to a busy collector: cap it outright.
+CPUQuota=20%
+TimeoutStartSec=50min
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/transitpulse
