@@ -96,6 +96,39 @@ public sealed class HttpPollingSourceTests
         Assert.Equal(urls[0], urls[1]);
     }
 
+    [Fact]
+    public async Task Renews_requestor_id_after_a_poll_whose_response_may_have_been_lost()
+    {
+        await using var run = PollingRun.Start(
+            [
+                _ => Ok("a"),
+                _ => throw new HttpRequestException("connection reset"),
+                _ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable),
+                _ => Ok("b"),
+            ],
+            new HttpFeedOptions { FeedId = "test", Url = "https://example.test/vm?requestorId={requestorId}" });
+
+        await run.PollsAsync(5);
+
+        var urls = run.Handler.Requests.Select(r => r.RequestUri!.ToString()).ToList();
+        Assert.Equal(urls[0], urls[1]);
+        Assert.NotEqual(urls[1], urls[2]);
+        Assert.NotEqual(urls[2], urls[3]);
+        Assert.Equal(urls[3], urls[4]);
+    }
+
+    [Fact]
+    public async Task Keeps_requestor_id_after_a_rejected_request()
+    {
+        await using var run = PollingRun.Start(
+            [_ => Ok("a"), _ => new HttpResponseMessage(HttpStatusCode.TooManyRequests), _ => Ok("b")],
+            new HttpFeedOptions { FeedId = "test", Url = "https://example.test/vm?requestorId={requestorId}" });
+
+        await run.PollsAsync(3);
+
+        Assert.Single(run.Handler.Requests.Select(r => r.RequestUri!.ToString()).Distinct());
+    }
+
     private static HttpResponseMessage Ok(string body, string? etag = null, DateTimeOffset? lastModified = null)
     {
         var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) };

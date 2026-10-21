@@ -20,11 +20,11 @@ internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
     public const string RequestorIdPlaceholder = "{requestorId}";
 
     private readonly HttpFeedOptions _feed;
-    private readonly string _url;
     private readonly HttpClient _client;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<HttpPollingSource> _logger;
 
+    private string _url;
     private EntityTagHeaderValue? _etag;
     private DateTimeOffset? _lastModified;
     private byte[]? _lastHash;
@@ -40,7 +40,7 @@ internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
 
         // SIRI incremental requests: the first poll with a new id returns a full snapshot, later ones only changes.
         // A fresh id per run puts a full snapshot into the archive after every restart, so state can be rebuilt from it.
-        _url = feed.Url.Replace(RequestorIdPlaceholder, Guid.NewGuid().ToString(), StringComparison.Ordinal);
+        _url = NewRequestorUrl();
         _timeProvider = timeProvider;
         _logger = logger;
         _client = new HttpClient(handler)
@@ -106,6 +106,13 @@ internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
             if (!response.IsSuccessStatusCode)
             {
                 LogPollFailed(FeedId, $"HTTP {(int)response.StatusCode}");
+
+                // A 4xx (429 included) rejects the request before any data is produced; a 5xx may come after it.
+                if ((int)response.StatusCode >= 500)
+                {
+                    RenewRequestorId();
+                }
+
                 return null;
             }
 
@@ -126,15 +133,36 @@ internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
         catch (HttpRequestException e)
         {
             LogPollFailed(FeedId, e.Message);
+            RenewRequestorId();
             return null;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             LogPollFailed(FeedId, $"no response within {_feed.Timeout:g}");
+            RenewRequestorId();
             return null;
+        }
+    }
+
+    private string NewRequestorUrl() =>
+        _feed.Url.Replace(RequestorIdPlaceholder, Guid.NewGuid().ToString(), StringComparison.Ordinal);
+
+    /// <summary>
+    /// Starts a new SIRI subscription after a poll whose response may have been produced but not received: the server
+    /// counts those changes as delivered, so the same id would never return them. A new id returns a full snapshot.
+    /// </summary>
+    private void RenewRequestorId()
+    {
+        if (_feed.Url.Contains(RequestorIdPlaceholder, StringComparison.Ordinal))
+        {
+            _url = NewRequestorUrl();
+            LogRequestorIdRenewed(FeedId);
         }
     }
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Poll of feed {FeedId} failed: {Reason}; next poll on schedule")]
     private partial void LogPollFailed(string feedId, string reason);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Feed {FeedId}: requestorId renewed after a failed poll; the next response is a full snapshot")]
+    private partial void LogRequestorIdRenewed(string feedId);
 }
