@@ -38,9 +38,9 @@ builder.Services.AddHttpFeeds(builder.Configuration);
 
 builder.Services.AddHostedService<IngestionPipeline>();
 
-// The default 30 s may not cover draining the channel and closing every open hour; an unclosed file is lost.
-// The service manager's stop timeout must be longer than this.
-builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(60));
+// Covers the pipeline's drain budget plus closing every open hour on a slow CPU; an unclosed file loses its unflushed
+// records. The service manager's stop timeout must be longer than this.
+builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = IngestionPipeline.DrainTimeout + TimeSpan.FromSeconds(80));
 
 using var host = builder.Build();
 return await IngestionPipeline.RunHostAsync(host);

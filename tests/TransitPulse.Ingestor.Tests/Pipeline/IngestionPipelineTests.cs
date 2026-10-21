@@ -51,6 +51,29 @@ public sealed class IngestionPipelineTests
     }
 
     [Fact]
+    public async Task Drops_records_left_after_the_drain_budget_and_still_closes_the_files()
+    {
+        var time = new FakeTimeProvider();
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sink = new RecordingSink { Gate = gate.Task };
+        using var pipeline = Create([ScriptedSource.Writing("a", 100, allWritten)], sink, time);
+
+        await pipeline.StartAsync(Ct);
+        await allWritten.Task.WaitAsync(_timeout, Ct);
+
+        // The sink is stuck on the first record when shutdown starts and moves again only after the budget is gone.
+        var stopping = pipeline.StopAsync(Ct);
+        time.Advance(IngestionPipeline.DrainTimeout);
+        gate.SetResult();
+        await stopping.WaitAsync(_timeout, Ct);
+
+        Assert.Single(sink.Records);
+        Assert.Equal(1, sink.RecordsAtCompletion);
+        Assert.Equal(1, sink.Completions);
+    }
+
+    [Fact]
     public async Task Restarts_failed_source_after_delay()
     {
         var time = new FakeTimeProvider();

@@ -26,8 +26,10 @@ StateDirectory=transitpulse
 # Restart on any exit: the process exits on a sink failure, and collection must never stop for long.
 Restart=always
 RestartSec=10
-# Longer than the host's 60 s shutdown timeout, which drains the channel and closes open hourly files.
-TimeoutStopSec=90
+# Longer than the host's 100 s shutdown timeout, which drains the channel and closes open hourly files.
+TimeoutStopSec=120
+# Ten times the default weight: an OS job (apt) or our own upload must yield the single vCPU to the collector.
+CPUWeight=1000
 # Idle use is ~20 MB; the cap protects the 1 GB server from a leak.
 MemoryMax=400M
 

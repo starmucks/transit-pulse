@@ -22,6 +22,13 @@ public sealed partial class IngestionPipeline(
 
     internal static readonly TimeSpan SourceRestartDelay = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// How long after a stop request records left in the channel are still written. Then the rest is dropped and the
+    /// files are closed: on a starved CPU an unbounded drain outlived the service stop timeout, the process was killed
+    /// and every feed lost its open hour for ~10 s of records (2026-10-21).
+    /// </summary>
+    internal static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(20);
+
     /// <summary>Runs the host until shutdown and turns the pipeline outcome into the process exit code.</summary>
     /// <param name="host">Built host with this pipeline registered as a hosted service.</param>
     /// <returns>1 when the pipeline failed (the host stops but would otherwise exit with 0), else 0.</returns>
@@ -70,7 +77,12 @@ public sealed partial class IngestionPipeline(
 
         // Linked so that a failing sink can stop the sources too; otherwise they would wait on a full channel forever.
         using var sourcesStop = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        var writing = WriteAllAsync(channel.Reader, sourcesStop);
+
+        // Armed by the stop request itself, so the budget also covers the time the sources take to stop.
+        using var drainStop = new CancellationTokenSource(Timeout.InfiniteTimeSpan, timeProvider);
+        await using var armDrainStop = stoppingToken.Register(() => drainStop.CancelAfter(DrainTimeout));
+
+        var writing = WriteAllAsync(channel.Reader, sourcesStop, drainStop.Token);
         try
         {
             await Task.WhenAll(feeds.Select(source => RunSourceAsync(source, channel.Writer, sourcesStop.Token)));
@@ -84,14 +96,21 @@ public sealed partial class IngestionPipeline(
         }
     }
 
-    private async Task WriteAllAsync(ChannelReader<RawRecord> reader, CancellationTokenSource sourcesStop)
+    private async Task WriteAllAsync(ChannelReader<RawRecord> reader, CancellationTokenSource sourcesStop, CancellationToken drainStop)
     {
         var completing = false;
         try
         {
-            // No cancellation here on purpose: after shutdown starts, the channel is still drained and the files closed.
+            // No cancellation of reads or writes on purpose: after shutdown starts, the channel is still drained and
+            // the files closed. The drain budget is checked only between records, never inside a row group write.
             await foreach (var record in reader.ReadAllAsync(CancellationToken.None))
             {
+                if (drainStop.IsCancellationRequested)
+                {
+                    LogDrainBudgetUsedUp(DrainTimeout, reader.Count + 1);
+                    break;
+                }
+
                 await sink.WriteAsync(record, CancellationToken.None);
             }
 
@@ -168,6 +187,9 @@ public sealed partial class IngestionPipeline(
 
     [LoggerMessage(Level = LogLevel.Information, Message = "All feeds stopped; {Pending} records left in the channel to write")]
     private partial void LogSourcesStopped(int pending);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Shutdown drain budget of {Budget} used up; {Dropped} records dropped to close the files in time")]
+    private partial void LogDrainBudgetUsedUp(TimeSpan budget, int dropped);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Channel drained; closing open archive files")]
     private partial void LogChannelDrained();
