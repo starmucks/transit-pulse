@@ -58,8 +58,9 @@ if (( pid > 0 )); then
 fi
 
 # --- feeds: a file is created on the first record of the hour, so its existence proves data this hour.
-# A quiet feed's .tmp is written only when a row group fills or the hour closes: its mtime means nothing.
-# HSL fills a row group every few seconds, so its mtime does show a stalled stream.
+# A .tmp is written only when a row group fills or the hour closes: its mtime means nothing, even for HSL, whose
+# 16 MiB row group takes about a minute in the evening but most of an hour at night. HSL's liveness is read from its
+# broker socket instead: the time since bytes last arrived (data or ping answers; data silence the source handles).
 hour=$(date -u +%Y%m%dT%H)
 day=$(date -u +%F)
 minute=$((10#$(date -u +%M)))
@@ -67,7 +68,8 @@ now=$(date +%s)
 for dir in "$archive"/*/; do
   [[ -d $dir ]] || continue
   feed=$(basename "$dir")
-  current=$(find "$dir$day" -maxdepth 1 -name "$feed-${hour}Z-*" 2>/dev/null | sort | tail -n1)
+  # || true: with no folder for today (a feed dead since yesterday) find fails, and set -e would end the script silently.
+  current=$(find "$dir$day" -maxdepth 1 -name "$feed-${hour}Z-*" 2>/dev/null | sort | tail -n1 || true)
   case $feed in
     *-alerts | *-sx) grace=-1 ;; # written only when the content changes
     weather) grace=20 ;;         # polled every 15 minutes
@@ -83,11 +85,15 @@ for dir in "$archive"/*/; do
       report OK feed "$feed: hour just started"
     fi
   elif [[ $feed == hsl ]]; then
-    age=$(( now - $(stat -c %Y "$current") ))
-    if (( age > 120 )); then
-      report FAIL feed "hsl: nothing written for ${age}s"
+    # ss -i prints the socket's counters on the line after the one naming the process.
+    lastrcv=$(ss -tnpi state established '( dport = :8883 )' 2>/dev/null |
+                grep -A1 "pid=$pid," | grep -o 'lastrcv:[0-9]*' | head -n1 | cut -d: -f2 || true)
+    if [[ -z $lastrcv ]]; then
+      report FAIL feed "hsl: no connection to the broker"
+    elif (( lastrcv > 120000 )); then
+      report FAIL feed "hsl: nothing received for $(( lastrcv / 1000 ))s"
     else
-      report OK feed "hsl: written ${age}s ago"
+      report OK feed "hsl: data this hour, broker last heard $(( lastrcv / 1000 ))s ago"
     fi
   else
     report OK feed "$feed: data this hour"
