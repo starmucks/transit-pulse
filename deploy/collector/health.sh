@@ -17,6 +17,14 @@ report() {
 }
 
 show() { systemctl show "$1" -p "$2" --value; }
+# GNU date reads an empty string as today's midnight, not an error: an empty time must mean "never" (0).
+epoch() { if [[ -n $1 ]]; then date -d "$1" +%s 2>/dev/null || echo 0; else echo 0; fi; }
+# Milliseconds since the collector's HSL broker socket last received bytes; empty without a connection.
+# ss -i prints the socket's counters on the line after the one naming the process.
+hsl_lastrcv() {
+  ss -tnpi state established "( dport = :${HSL_PORT:-8883} )" 2>/dev/null |
+    grep -A1 "pid=$pid," | grep -o 'lastrcv:[0-9]*' | head -n1 | cut -d: -f2 || true
+}
 mib() { awk -v b="$1" 'BEGIN { printf "%.0f MiB", b / 1048576 }'; }
 
 # --- service: a crash restart is silent in systemd; NRestarts is reset by a manual restart or deploy.
@@ -85,9 +93,9 @@ for dir in "$archive"/*/; do
       report OK feed "$feed: hour just started"
     fi
   elif [[ $feed == hsl ]]; then
-    # ss -i prints the socket's counters on the line after the one naming the process.
-    lastrcv=$(ss -tnpi state established '( dport = :8883 )' 2>/dev/null |
-                grep -A1 "pid=$pid," | grep -o 'lastrcv:[0-9]*' | head -n1 | cut -d: -f2 || true)
+    lastrcv=$(hsl_lastrcv)
+    # A reconnect leaves about a second without a connection: look once more before calling it down.
+    if [[ -z $lastrcv ]]; then sleep 3; lastrcv=$(hsl_lastrcv); fi
     if [[ -z $lastrcv ]]; then
       report FAIL feed "hsl: no connection to the broker"
     elif (( lastrcv > 120000 )); then
@@ -127,7 +135,7 @@ fi
 # --- upload to the cloud buffer (hourly timer), optional: without it the archive stays on the server.
 result=$(show transitpulse-upload.service Result)
 last=$(show transitpulse-upload.timer LastTriggerUSec)
-last_epoch=$(date -d "$last" +%s 2>/dev/null || echo 0)
+last_epoch=$(epoch "$last")
 uploading=$(systemctl is-enabled transitpulse-upload.timer 2>/dev/null || true)
 if [[ $uploading != enabled ]]; then
   report INFO upload "disabled: files stay in $archive until copied to the PC"
@@ -144,7 +152,7 @@ fi
 if [[ $uploading != enabled ]]; then
   marker=/var/lib/transitpulse/last-pull
   pulled=$(cat "$marker" 2>/dev/null || true)
-  pulled_epoch=$(date -d "$pulled" +%s 2>/dev/null || echo 0)
+  pulled_epoch=$(epoch "$pulled")
   if (( pulled_epoch == 0 )); then
     report WARN pull "never copied to the PC: the server holds the only copy"
   elif (( now - pulled_epoch > 7 * 86400 )); then
@@ -177,7 +185,7 @@ fi
 gtfs_result=$(show transitpulse-gtfs.service Result)
 # The service's own exit time, not the timer's: a manual run counts too.
 gtfs_last=$(show transitpulse-gtfs.service ExecMainExitTimestamp)
-gtfs_epoch=$(date -d "$gtfs_last" +%s 2>/dev/null || echo 0)
+gtfs_epoch=$(epoch "$gtfs_last")
 latest=$(for d in /var/lib/transitpulse/gtfs/*/; do
            [[ -d $d ]] || continue
            f=$(ls "$d" | grep -E '\.zip$' | sort | tail -1)

@@ -66,16 +66,23 @@ upload_one() {
   relative=${file#"$archive"/}
   remote=$remote_root/$relative
 
+  local_hash=$(sha256sum "$file" | cut -d' ' -f1)
+  # A run killed between the rename and the local delete leaves the file in both places: finish that run's work.
+  if [[ $(json_field "$(call GET "resources?path=$remote&fields=sha256")" sha256) == "$local_hash" ]]; then
+    echo "already uploaded $relative"
+    rm -f "$file"
+    return 0
+  fi
+
   mkdir_remote "$remote_root/${relative%%/*}" || return 1
   mkdir_remote "$(dirname "$remote")" || return 1
   put_file "$file" "$remote.partial" || return 1
 
-  local_hash=$(sha256sum "$file" | cut -d' ' -f1)
   cloud_hash=$(remote_sha256 "$remote.partial") || { echo "no checksum from the cloud for $relative" >&2; return 1; }
   [[ $local_hash == "$cloud_hash" ]] || { echo "checksum mismatch for $relative" >&2; return 1; }
 
-  # Never overwrite: a file of the same name in the buffer is an earlier upload whose number the collector reused
-  # after it was deleted here. Replacing it would lose that hour; keeping this file on the server loses nothing.
+  # Never overwrite: the same file was ruled out above, so a file of this name in the buffer is an earlier hour whose
+  # number the collector reused after it was deleted here. Replacing it would lose that hour; keeping this one loses nothing.
   code=$(status "$(call POST "resources/move?from=$remote.partial&path=$remote&overwrite=false")")
   if [[ $code == 409 ]]; then
     echo "rename $relative: a different file with this name is already in the buffer; kept on the server" >&2
