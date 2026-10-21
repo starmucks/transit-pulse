@@ -15,6 +15,11 @@ if (args is ["--repair", var repairInput, var repairOutput])
     return await ArchiveRepair.RunAsync(repairInput, repairOutput, Console.Out);
 }
 
+if (args is ["--stats", var statsInput])
+{
+    return await ArchiveStats.RunAsync(statsInput, Console.Out);
+}
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.AddServiceDefaults();
