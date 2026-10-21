@@ -1,3 +1,5 @@
+using Parquet;
+using Parquet.Schema;
 using TransitPulse.Ingestor.Archive;
 using TransitPulse.Ingestor.Pipeline;
 
@@ -55,6 +57,31 @@ public sealed class ArchiveStatsTests : IDisposable
         Assert.Equal(1, exitCode);
         Assert.Contains($"UNREADABLE {Path.Combine("b", "2026-10-21", "b-20261021T00Z-0.parquet")}", output.ToString());
         Assert.Contains("\na ", output.ToString().ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
+    public async Task File_with_a_row_group_missing_a_column_is_listed_as_unreadable()
+    {
+        // What a retried flush left on the collector before it was fixed: a finished file whose footer lists a group
+        // without the payload chunk. Its receive times read fine, so only the group's metadata gives it away.
+        var relative = Path.Combine("c", "2026-10-21", "c-20261021T00Z-0.parquet");
+        var path = Path.Combine(_dir.FullName, relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await using (var stream = File.Create(path))
+        await using (var writer = await ParquetWriter.CreateAsync(
+            new ParquetSchema(ArchiveFile.ReceivedAtField, ArchiveFile.TopicField, ArchiveFile.PayloadField), stream, cancellationToken: Ct))
+        using (var cut = writer.CreateRowGroup())
+        {
+            await cut.WriteAsync(ArchiveFile.ReceivedAtField, (ReadOnlyMemory<long>)new long[] { 1_000 }, null, null, Ct);
+            await cut.WriteAsync(ArchiveFile.TopicField, new string?[] { null }, null);
+        }
+
+        var output = new StringWriter();
+
+        var exitCode = await ArchiveStats.RunAsync(_dir.FullName, output, Ct);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains($"UNREADABLE {relative}: InvalidDataException: row group 0 has 2 of 3 columns", output.ToString());
     }
 
     private async Task WriteAsync(string name, params string[] times)
