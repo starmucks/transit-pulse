@@ -13,6 +13,8 @@ ExecStart=/opt/transitpulse/upload.sh
 # Uploading must never slow the collector down on the single vCPU.
 Nice=10
 IOSchedulingClass=idle
+# Nice alone did not stop a TLS upload from taking ~45% of the CPU next to a busy collector: cap it outright.
+CPUQuota=20%
 TimeoutStartSec=50min
 
 NoNewPrivileges=true

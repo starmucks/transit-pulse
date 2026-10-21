@@ -5,12 +5,21 @@
 #   -> delete the local file.
 # A reader on the other side sees only finished names, and "upload.lock" in the buffer while a run is in progress.
 # A failed file stays on the server and is retried next hour.
+# During peak hours the run is skipped: the collector needs the single vCPU (see the settings below).
 set -euo pipefail
 
 archive=${ARCHIVE_DIR:-/var/lib/transitpulse/archive}
 token_file=${TOKEN_FILE:-/etc/transitpulse/yandex.token}
 remote_root=app:/archive
 api=https://cloud-api.yandex.net/v1/disk
+
+# UTC hour windows "start-end" (end exclusive, may wrap past midnight) with no upload. Measured CPU use there is
+# 50-85% from the collector alone; an upload burst on top saturated the vCPU and stalled the HSL feed.
+pause_hours=${UPLOAD_PAUSE_HOURS_UTC:-04-08 12-16}
+# Above this disk use the upload runs even in a pause: a full disk loses more data than a slow hour.
+force_disk_percent=${UPLOAD_FORCE_DISK_PERCENT:-75}
+# Spreads an hourly file (up to ~200 MB at HSL peaks) over minutes instead of a burst that takes the whole CPU.
+rate_limit=${UPLOAD_RATE_LIMIT:-300k}
 
 # Calls the Disk API; prints the body, then the HTTP status on the last line. The token reaches curl as a header
 # on stdin, so it never shows up in the process list or the journal.
@@ -37,7 +46,7 @@ put_file() {
   [[ $code == 200 ]] || { echo "upload link for $remote: HTTP $code" >&2; return 1; }
   # The upload link is pre-signed: no token is sent with the data.
   href=$(json_field "$response" href)
-  code=$(curl -sS --retry 3 --max-time 1800 -T "$source" -o /dev/null -w '%{http_code}' "$href")
+  code=$(curl -sS --retry 3 --max-time 1800 --limit-rate "$rate_limit" -T "$source" -o /dev/null -w '%{http_code}' "$href")
   [[ $code == 201 || $code == 202 ]] || { echo "upload $remote: HTTP $code" >&2; return 1; }
 }
 
@@ -71,6 +80,29 @@ upload_one() {
   echo "uploaded $relative ($(stat -c %s "$file") bytes)"
   rm -f "$file"
 }
+
+# True when the current UTC hour falls into one of the pause windows.
+in_pause() {
+  local hour window start end
+  hour=$((10#$(date -u +%H)))
+  for window in $pause_hours; do
+    start=$((10#${window%-*}))
+    end=$((10#${window#*-}))
+    if (( start <= end ? (hour >= start && hour < end) : (hour >= start || hour < end) )); then
+      return 0
+    fi
+  done
+  return 1
+}
+
+if in_pause; then
+  disk_percent=$(df --output=pcent "$archive" | tail -n1 | tr -dc '0-9')
+  if (( disk_percent < force_disk_percent )); then
+    echo "peak hours ($pause_hours UTC): upload skipped, disk ${disk_percent}%"
+    exit 0
+  fi
+  echo "peak hours, but disk ${disk_percent}% >= ${force_disk_percent}%: uploading anyway"
+fi
 
 mapfile -t files < <(find "$archive" -type f -name '*.parquet' | sort)
 if (( ${#files[@]} == 0 )); then
