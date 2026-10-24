@@ -25,7 +25,7 @@
 
 - **Licence:** [Norwegian Licence for Open Government Data (NLOD) 2.0](https://data.norge.no/nlod/en/2.0). Source: [Entur developer portal](https://developer.entur.no/) (moved from developer.entur.org).
 - **Attribution (NLOD default wording):** "Contains data under the Norwegian licence for Open Government data (NLOD) distributed by Entur", with links to the licence and the source where practical.
-- **Mandatory header:** `ET-Client-Name: <company>-<application>` on every request; our value is `transitpulse-ingestor`. Clients without it get strict rate limiting and may be blocked. No numeric limits are published for identified clients — keep polling at 10–30 s and use incremental `requestorId` requests.
+- **Mandatory header:** `ET-Client-Name: <company>-<application>` on every request; our value is `transitpulse-ingestor`. Clients without it get strict rate limiting and may be blocked. No numeric limits are published for identified clients — keep polling at 10–30 s and use incremental `requestorId` requests. Measured 2026-10-21…24: SIRI-VM polled every 15 s got `HTTP 429` on every 8th request (once per ~2 min), while ET (60 s) and SX (120 s) never did — the limit is per endpoint, about 7 VM requests per 2 min. We poll VM every 30 s.
 
 ## MBTA — Boston
 
