@@ -51,7 +51,10 @@ internal static class RawSinkRegistration
         services.AddOptions<KafkaOptions>()
             .BindConfiguration(KafkaOptions.SectionName)
             .Validate(o => !string.IsNullOrWhiteSpace(o.BootstrapServers), "Kafka:BootstrapServers is required in full mode.")
+            .Validate(o => !string.IsNullOrWhiteSpace(o.PositionsTopic), "Kafka:PositionsTopic is required.")
             .Validate(o => o.PositionsPartitions > 0, "Kafka:PositionsPartitions must be positive.")
+            // retention.ms=0 would let the broker delete positions almost as soon as they arrive.
+            .Validate(o => o.PositionsRetention > TimeSpan.Zero, "Kafka:PositionsRetention must be positive.")
             .ValidateOnStart();
         services.AddHostedService<KafkaTopicInitializer>();
         services.AddSingleton<PositionRouter>();

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using TransitPulse.Ingestor.Normalization;
+using TransitPulse.Ingestor.Pipeline;
 
 namespace TransitPulse.Ingestor.Tests.Normalization;
 
@@ -65,5 +66,25 @@ public sealed class PositionRouterTests
         Assert.Single(router.Route(FakeNormalizer.Record("hsl", seconds: 5)));
         Assert.Empty(router.Route(FakeNormalizer.Record("hsl", seconds: 5)));
         Assert.Single(router.Route(FakeNormalizer.Record("hsl", seconds: 6)));
+    }
+
+    [Fact]
+    public void Position_from_the_future_is_dropped_and_does_not_silence_the_vehicle()
+    {
+        var router = Create(new FakeNormalizer("hsl", "hsl"));
+        // Observed at T0 + 200 s, but received 10 min before T0: the vehicle's clock is ahead.
+        var skewed = new RawRecord("hsl", FakeNormalizer.T0.AddMinutes(-10), [200], null);
+
+        Assert.Empty(router.Route(skewed));
+        // Earlier than the dropped time: had it been accepted, this correct position would count as late.
+        Assert.Single(router.Route(FakeNormalizer.Record("hsl", seconds: 1)));
+    }
+
+    [Fact]
+    public void Position_at_the_clock_skew_limit_is_kept()
+    {
+        var router = Create(new FakeNormalizer("hsl", "hsl"));
+
+        Assert.Single(router.Route(new RawRecord("hsl", FakeNormalizer.T0 - PositionRouter.MaxClockSkew, [0], null)));
     }
 }

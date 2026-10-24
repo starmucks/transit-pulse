@@ -40,14 +40,18 @@ public sealed class RawSinkRegistrationTests
         Assert.Contains(provider.GetServices<IHostedService>(), service => service is KafkaTopicInitializer);
     }
 
-    [Fact]
-    public void Full_mode_without_a_broker_address_fails_validation()
+    [Theory]
+    [InlineData("Kafka:BootstrapServers", "")]
+    [InlineData("Kafka:PositionsTopic", " ")]
+    [InlineData("Kafka:PositionsPartitions", "0")]
+    [InlineData("Kafka:PositionsRetention", "00:00:00")]
+    public void Invalid_kafka_setting_fails_validation(string key, string value)
     {
-        using var provider = Build(Configuration("full", bootstrapServers: null));
+        using var provider = Build(Configuration("full", bootstrapServers: "127.0.0.1:1", (key, value)));
 
         var error = Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<KafkaOptions>>().Value);
 
-        Assert.Contains("Kafka:BootstrapServers", error.Message, StringComparison.Ordinal);
+        Assert.Contains(key, error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -58,15 +62,21 @@ public sealed class RawSinkRegistrationTests
         Assert.Contains("'replay'", error.Message, StringComparison.Ordinal);
     }
 
-    private static IConfiguration Configuration(string mode, string? bootstrapServers) =>
-        new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                [RawSinkRegistration.ModeKey] = mode,
-                ["Archive:RootDirectory"] = Path.Combine(Path.GetTempPath(), "tp-registration"),
-                ["Kafka:BootstrapServers"] = bootstrapServers,
-            })
-            .Build();
+    private static IConfiguration Configuration(string mode, string? bootstrapServers, (string Key, string Value)? setting = null)
+    {
+        var values = new Dictionary<string, string?>
+        {
+            [RawSinkRegistration.ModeKey] = mode,
+            ["Archive:RootDirectory"] = Path.Combine(Path.GetTempPath(), "tp-registration"),
+            ["Kafka:BootstrapServers"] = bootstrapServers,
+        };
+        if (setting is var (key, value))
+        {
+            values[key] = value;
+        }
+
+        return new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+    }
 
     private static ServiceProvider Build(IConfiguration configuration) =>
         new ServiceCollection()

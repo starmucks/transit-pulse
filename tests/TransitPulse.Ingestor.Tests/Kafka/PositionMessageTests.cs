@@ -26,7 +26,7 @@ public sealed class PositionMessageTests
 
         // Validated properties are redeclared in the record body, so they follow the compiler-generated ones.
         Assert.Equal(
-            """{"tripId":"1009-1-2026-10-02-21:31","routeId":"1009","speedMps":8.03,"bearing":254,"delaySec":-195,"occupancy":"Empty","feedId":"hsl","vehicleId":"40/415","lat":60.202731,"lon":24.924969,"observedAt":"2026-10-02T19:10:52.101+00:00"}""",
+            """{"tripId":"1009-1-2026-10-02-21:31","routeId":"1009","delaySec":-195,"occupancy":"Empty","feedId":"hsl","vehicleId":"40/415","lat":60.202731,"lon":24.924969,"speedMps":8.03,"bearing":254,"observedAt":"2026-10-02T19:10:52.101+00:00"}""",
             json);
     }
 
