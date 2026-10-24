@@ -70,6 +70,7 @@ IFeedSource ──► Channel<RawRecord> (bounded, ждёт) ──► ArchiveSi
 - Native AOT: `Confluent.Kafka` — `TrimmerRootAssembly` (иначе тримминг вырезает нативные методы, продюсер не стартует); основной `librdkafka.so` требует `libsasl2.so.3`, на Ubuntu 24.04 грузится `centos8-librdkafka.so`. Проверено 2026-10-24 нативной сборкой против Redpanda.
 
 **Готово, когда:** интеграционный тест (Testcontainers Redpanda) отправляет и читает позиции; в режиме `archive` Kafka не нужна.
+✅ 2026-10-24: влито PR #27 — интеграционный тест читает позиции обратно (каждая машина в одной партиции, по времени); `archive` — режим по умолчанию, проверен тестом на поставляемом `appsettings.json`; AOT-сборка без предупреждений, на сервере с 24.10 20:49 UTC.
 
 ### 1.5 Адаптер HSL (JSON) (#17)
 - [ ] Нормализация HFP `VP`: `oper/veh` → `VehicleId`, `dl` → `DelaySec`, `occu` → `OccupancyLevel`, `tst` → UTC; поля маршрута из топика.
