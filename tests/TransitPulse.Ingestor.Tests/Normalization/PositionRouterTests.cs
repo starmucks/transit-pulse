@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging.Testing;
 using TransitPulse.Ingestor.Normalization;
 using TransitPulse.Ingestor.Pipeline;
 
@@ -56,6 +58,27 @@ public sealed class PositionRouterTests
 
         Assert.Empty(router.Route(FakeNormalizer.Record("hsl", seconds: 1)));
         Assert.Single(router.Route(FakeNormalizer.Record("hsl", seconds: 2)));
+    }
+
+    [Fact]
+    public void Failing_feed_is_logged_once_per_episode()
+    {
+        var logger = new FakeLogger<PositionRouter>();
+        var router = new PositionRouter([new FakeNormalizer("hsl", "hsl") { FailOnSeconds = 1 }], logger);
+
+        for (var i = 0; i < 100; i++)
+        {
+            router.Route(new RawRecord("hsl", FakeNormalizer.T0.AddSeconds(i / 10.0), [1], null));
+        }
+
+        // Within the quiet period a success does not end the episode; after it, one summary with the count.
+        router.Route(new RawRecord("hsl", FakeNormalizer.T0.AddSeconds(30), [2], null));
+        router.Route(new RawRecord("hsl", FakeNormalizer.T0.AddSeconds(80), [3], null));
+
+        var logs = logger.Collector.GetSnapshot();
+        Assert.Equal(2, logs.Count);
+        Assert.Equal(LogLevel.Warning, logs[0].Level);
+        Assert.Contains("100 records", logs[1].Message, StringComparison.Ordinal);
     }
 
     [Fact]

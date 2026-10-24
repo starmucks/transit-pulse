@@ -16,6 +16,8 @@ internal sealed partial class PositionRouter
 
     private readonly Dictionary<string, IPositionNormalizer> _byRawFeed = [];
     private readonly PositionDeduplicator _deduplicator = new();
+    private readonly FailureEpisodes _normalizeFailures = new(FailureEpisodes.DefaultQuietPeriod);
+    private readonly FailureEpisodes _clockSkews = new(FailureEpisodes.DefaultQuietPeriod);
     private readonly ILogger<PositionRouter> _logger;
 
     /// <summary>Indexes the normalizers by the raw feeds they read.</summary>
@@ -60,8 +62,17 @@ internal sealed partial class PositionRouter
         {
             // Any adapter bug, not only a FormatException: one city's broken message must not stop the others.
             // The record is still in the raw archive, so it can be normalized again after a fix.
-            LogNormalizeFailed(ex, record.FeedId, record.ReceivedAt);
+            if (_normalizeFailures.Fail(record.FeedId, record.ReceivedAt))
+            {
+                LogNormalizeFailing(ex, record.FeedId, record.ReceivedAt);
+            }
+
             return [];
+        }
+
+        if (_normalizeFailures.Succeed(record.FeedId, record.ReceivedAt) is var dropped and > 0)
+        {
+            LogNormalizeRecovered(record.FeedId, dropped);
         }
 
         // The record's receive time, not the wall clock: replayed records are judged as they were live.
@@ -71,11 +82,23 @@ internal sealed partial class PositionRouter
         {
             // Before the deduplicator: a time from the future would become the vehicle's last time and silence all
             // its correct positions until the process restarts.
+            // Keyed per vehicle: one bad clock among hundreds of vehicles must not end and restart a feed-wide episode.
             if (position.ObservedAt > latestPlausible)
             {
-                LogFromTheFuture(record.FeedId, position.VehicleId, position.ObservedAt, record.ReceivedAt);
+                if (_clockSkews.Fail(VehicleKey(position), record.ReceivedAt))
+                {
+                    LogFromTheFuture(position.VehicleId, position.FeedId, position.ObservedAt, record.ReceivedAt);
+                }
+
+                continue;
             }
-            else if (_deduplicator.TryAccept(position))
+
+            if (_clockSkews.AnyOpen && _clockSkews.Succeed(VehicleKey(position), record.ReceivedAt) is var skewed and > 0)
+            {
+                LogClockRecovered(position.VehicleId, position.FeedId, skewed);
+            }
+
+            if (_deduplicator.TryAccept(position))
             {
                 accepted.Add(position);
             }
@@ -84,9 +107,17 @@ internal sealed partial class PositionRouter
         return accepted;
     }
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Record of feed {FeedId} received at {ReceivedAt} failed to normalize; dropped")]
-    private partial void LogNormalizeFailed(Exception exception, string feedId, DateTimeOffset receivedAt);
+    private static string VehicleKey(VehiclePosition position) => $"{position.FeedId}/{position.VehicleId}";
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Position of vehicle {VehicleId} in feed {FeedId} observed at {ObservedAt}, after receipt at {ReceivedAt}; dropped")]
-    private partial void LogFromTheFuture(string feedId, string vehicleId, DateTimeOffset observedAt, DateTimeOffset receivedAt);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Records of feed {FeedId} fail to normalize (first received at {ReceivedAt}); they are dropped until it recovers")]
+    private partial void LogNormalizeFailing(Exception exception, string feedId, DateTimeOffset receivedAt);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Feed {FeedId} normalizes again; {Dropped} records were dropped")]
+    private partial void LogNormalizeRecovered(string feedId, long dropped);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Vehicle {VehicleId} of feed {FeedId} reports a time after receipt ({ObservedAt} > {ReceivedAt}); its positions are dropped until its clock recovers")]
+    private partial void LogFromTheFuture(string vehicleId, string feedId, DateTimeOffset observedAt, DateTimeOffset receivedAt);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Vehicle {VehicleId} of feed {FeedId} reports plausible times again; {Dropped} positions were dropped")]
+    private partial void LogClockRecovered(string vehicleId, string feedId, long dropped);
 }
