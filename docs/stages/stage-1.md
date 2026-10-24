@@ -9,9 +9,11 @@
 
 ## Архитектура этапа (кратко)
 ```
-IFeedSource ──► Channel<RawRecord> (bounded) ──► ArchiveSink (Parquet+zstd, по часам)   ← всегда
-   (MQTT / HTTP poll)                         └► Normalizer ► Channel<VehiclePosition> ► KafkaSink (positions.raw) ← только локально
+IFeedSource ──► Channel<RawRecord> (bounded, ждёт) ──► ArchiveSink (Parquet+zstd, по часам)        ← всегда
+   (MQTT / HTTP poll)                                └► NormalizingSink: Channel<RawRecord> (bounded, отбрасывает)
+                                                         ► PositionRouter (нормализатор города + дедуп) ► KafkaSink (positions.raw) ← режим full
 ```
+- Ответвление в нормализацию отбрасывает записи при переполнении, а не тормозит архив; дыры в `positions.raw` закрываются replay ([ADR-0005](../adr/0005-drop-positions-under-backpressure-and-rebuild-them-from-the-raw-archive.md)).
 - Один процесс **Ingestor**, два режима конфигурацией: `archive` (сервер фазы A, без Kafka) и `full` (локально в Aspire).
 - Сырьё хранится **как получено** (payload + время приёма + метаданные), чтобы нормализацию можно было переиграть по архиву после исправления багов.
 
@@ -62,9 +64,10 @@ IFeedSource ──► Channel<RawRecord> (bounded) ──► ArchiveSink (Parque
 **Готово, когда:** сбор идёт на новом сервере ≥ 24 ч без пропусков > 5 мин по фиду (по архиву, `--stats`); закрытые файлы скопированы на ПК со сверкой SHA-256, недописанные (`.tmp`) не берутся; `health.sh` показывает зелёное, включая строку `pull`. ~~Облачный буфер и проверка забора во время выгрузки~~ — выполнено на старом сервере 2026-10-21, схема больше не используется.
 
 ### 1.4 Конвейер нормализации и Kafka-продюсер (#16)
-- [ ] Абстракция нормализатора `RawRecord → VehiclePosition[]`; дедуп по `(FeedId, VehicleId, ObservedAt)`.
-- [ ] `KafkaSink`: `positions.raw`, ключ `vehicleId`, идемпотентный продюсер, батчинг (`linger.ms`), сжатие (lz4/zstd).
-- [ ] `src/TransitPulse.Ingestor/CLAUDE.md`: «только Kafka-протокол, без Redpanda-специфики» (ADR-0002), «SIRI — только `XmlReader`», «время — через `TimeProvider`».
+- [x] Абстракция нормализатора `RawRecord → VehiclePosition[]` (один нормализатор на город, может читать несколько сырых фидов — MBTA берёт задержку из TripUpdates); дедуп по `(FeedId, VehicleId)`: проходит только позиция с `ObservedAt` строго позже последней — отсекает и повторы, и опоздавшие точки, трек машины строго идёт вперёд. Позиции с `ObservedAt` позже времени приёма больше чем на 5 мин отбрасываются до дедупа.
+- [x] `KafkaSink`: `positions.raw` (12 партиций, 24 ч, топик создаётся при старте), ключ `{FeedId}/{VehicleId}` (id машин уникальны только внутри фида), идемпотентный продюсер, `linger.ms` 20, lz4, murmur2; значение — JSON (source generator). Режим задаётся `Ingestor:Mode` (`archive` по умолчанию).
+- [x] `src/TransitPulse.Ingestor/CLAUDE.md`: правила модуля (Kafka-протокол, AOT и librdkafka, `XmlReader`, `TimeProvider`, один читатель, логи по эпизодам).
+- Native AOT: `Confluent.Kafka` — `TrimmerRootAssembly` (иначе тримминг вырезает нативные методы, продюсер не стартует); основной `librdkafka.so` требует `libsasl2.so.3`, на Ubuntu 24.04 грузится `centos8-librdkafka.so`. Проверено 2026-10-24 нативной сборкой против Redpanda.
 
 **Готово, когда:** интеграционный тест (Testcontainers Redpanda) отправляет и читает позиции; в режиме `archive` Kafka не нужна.
 

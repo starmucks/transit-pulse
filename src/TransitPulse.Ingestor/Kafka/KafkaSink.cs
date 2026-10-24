@@ -49,7 +49,7 @@ internal sealed partial class KafkaSink : IPositionSink, IDisposable
         {
             // Retries cannot duplicate or reorder messages within a partition; implies acks=all.
             EnableIdempotence = true,
-            // ~20 messages per batch at ~1 000/s, for 20 ms of extra latency.
+            // At ~1 000/s a 20 ms wait gathers ~20 messages per request (spread over the partitions) for 20 ms of latency.
             LingerMs = 20,
             CompressionType = CompressionType.Lz4,
             // The Java client's key hash: the same key lands in the same partition whichever client writes it.

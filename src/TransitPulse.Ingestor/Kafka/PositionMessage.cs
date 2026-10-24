@@ -24,7 +24,8 @@ internal static class PositionMessage
 
     /// <summary>Reads a value written by <see cref="Value"/>.</summary>
     /// <param name="value">UTF-8 JSON bytes.</param>
-    /// <exception cref="JsonException">The bytes are not a valid position.</exception>
+    /// <exception cref="JsonException">The bytes are not valid JSON of a position.</exception>
+    /// <exception cref="ArgumentException">A value breaks a rule of <see cref="VehiclePosition"/> (e.g. latitude 91).</exception>
     public static VehiclePosition Parse(ReadOnlySpan<byte> value) =>
         JsonSerializer.Deserialize(value, PositionJsonContext.Default.VehiclePosition)
         ?? throw new JsonException("The message value is null.");

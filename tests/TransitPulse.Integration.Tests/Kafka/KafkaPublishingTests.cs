@@ -79,8 +79,8 @@ public sealed class KafkaPublishingTests(RedpandaFixture redpanda) : IClassFixtu
         consumer.Subscribe(topic);
 
         var received = new List<ConsumeResult<string, byte[]>>();
-        var deadline = DateTime.UtcNow.AddSeconds(30);
-        while (received.Count < count && DateTime.UtcNow < deadline)
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        while (received.Count < count && !timeout.IsCancellationRequested)
         {
             if (consumer.Consume(TimeSpan.FromSeconds(1)) is { } result)
             {
