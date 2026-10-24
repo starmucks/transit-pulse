@@ -8,8 +8,11 @@
     <!--
       Parquet.Net reflects over CLR types when a DataField<T> is built (IL2070, IL3050 in ParquetClrSchemaExtensions).
       Our fixed schema (long, string, byte[]) is verified to write and read back in a native linux-x64 build.
+      Confluent.Kafka binds its P/Invoke methods by reflection (IL2067) and has an unused AWS OAuth path (IL2026, IL2075)
+      and PtrToStructure<T> (IL2091); the assembly is rooted below, and an idempotent lz4 producer was verified to deliver
+      in a native linux-x64 build (2026-10-24).
       Every assembly reports detailed warnings, so a new trim problem in any other library still fails the publish;
-      only Parquet is collapsed into the IL2104/IL3053 summaries, and only those summaries are suppressed.
+      only Parquet and Confluent.Kafka are collapsed into the IL2104/IL3053 summaries, and only those summaries are suppressed.
     -->
     <TrimmerSingleWarn>false</TrimmerSingleWarn>
     <NoWarn>$(NoWarn);IL2104;IL3053</NoWarn>
@@ -17,13 +20,19 @@
 
   <Target Name="CollapseParquetTrimWarnings" BeforeTargets="WriteIlcRspFileForCompilation">
     <ItemGroup>
-      <ManagedAssemblyToLink Update="@(ManagedAssemblyToLink)" Condition="'%(Filename)' == 'Parquet'" TrimmerSingleWarn="true" />
+      <ManagedAssemblyToLink Update="@(ManagedAssemblyToLink)" Condition="'%(Filename)' == 'Parquet' Or '%(Filename)' == 'Confluent.Kafka'" TrimmerSingleWarn="true" />
     </ItemGroup>
   </Target>
 
   <ItemGroup>
+    <PackageReference Include="Confluent.Kafka" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Parquet.Net" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Kept whole: trimming removes the native methods it looks up by reflection, and the producer fails to start. -->
+    <TrimmerRootAssembly Include="Confluent.Kafka" />
   </ItemGroup>
 
   <ItemGroup>
