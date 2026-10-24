@@ -1,7 +1,7 @@
-using Microsoft.Extensions.Options;
 using TransitPulse.Ingestor.Archive;
 using TransitPulse.Ingestor.Feeds.Hsl;
 using TransitPulse.Ingestor.Feeds.Http;
+using TransitPulse.Ingestor.Normalization;
 using TransitPulse.Ingestor.Pipeline;
 
 // Checked before the host is built: the self-test needs no configuration, telemetry or feeds.
@@ -24,19 +24,8 @@ var builder = Host.CreateApplicationBuilder(args);
 
 builder.AddServiceDefaults();
 
-// Fails at startup, not at the first hourly rotation, when the archive is not configured.
-builder.Services.AddOptions<ArchiveOptions>()
-    .BindConfiguration(ArchiveOptions.SectionName)
-    .Validate(o => !string.IsNullOrWhiteSpace(o.RootDirectory), "Archive:RootDirectory is required.")
-    .Validate(o => o.RowGroupMaxBytes > 0, "Archive:RowGroupMaxBytes must be positive.")
-    .ValidateOnStart();
-
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton<IRawSink>(services =>
-{
-    var options = services.GetRequiredService<IOptions<ArchiveOptions>>().Value;
-    return new ArchiveSink(options.RootDirectory, options.RowGroupMaxBytes, services.GetRequiredService<ILogger<ArchiveSink>>());
-});
+builder.Services.AddRawSink(builder.Configuration);
 builder.Services.AddOptions<HslMqttOptions>().BindConfiguration(HslMqttOptions.SectionName);
 builder.Services.AddSingleton<IFeedSource, HslMqttSource>();
 builder.Services.AddHttpFeeds(builder.Configuration);

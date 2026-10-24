@@ -8,5 +8,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/TransitPulse.Domain.Tests/TransitPulse.Domain.Tests.csproj" />
     <Project Path="tests/TransitPulse.Ingestor.Tests/TransitPulse.Ingestor.Tests.csproj" />
+    <Project Path="tests/TransitPulse.Integration.Tests/TransitPulse.Integration.Tests.csproj" />
   </Folder>
 </Solution>

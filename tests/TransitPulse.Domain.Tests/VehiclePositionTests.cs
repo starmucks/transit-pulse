@@ -10,9 +10,11 @@ public sealed class VehiclePositionTests
         string vehicleId = "40/415",
         double lat = 60.202731,
         double lon = 24.924969,
-        DateTimeOffset? observedAt = null) =>
+        DateTimeOffset? observedAt = null,
+        float? speedMps = 8.03f,
+        float? bearing = 254f) =>
         new(feedId, vehicleId, "1009-1-2026-10-02-21:31", "1009", lat, lon,
-            8.03f, 254f, -195, OccupancyLevel.Empty, observedAt ?? _utcNow);
+            speedMps, bearing, -195, OccupancyLevel.Empty, observedAt ?? _utcNow);
 
     [Fact]
     public void Valid_position_keeps_all_values()
@@ -57,6 +59,26 @@ public sealed class VehiclePositionTests
     {
         var ex = Assert.Throws<ArgumentOutOfRangeException>(() => Create(lon: lon));
         Assert.Equal("Lon", ex.ParamName);
+    }
+
+    [Theory]
+    [InlineData(float.NaN)]
+    [InlineData(float.PositiveInfinity)]
+    [InlineData(float.NegativeInfinity)]
+    public void Non_finite_speed_and_bearing_are_rejected(float value)
+    {
+        // JSON has no NaN: one such value would fail serialization of a whole batch downstream.
+        Assert.Equal("SpeedMps", Assert.Throws<ArgumentOutOfRangeException>(() => Create(speedMps: value)).ParamName);
+        Assert.Equal("Bearing", Assert.Throws<ArgumentOutOfRangeException>(() => Create(bearing: value)).ParamName);
+    }
+
+    [Fact]
+    public void Unknown_speed_and_bearing_are_allowed()
+    {
+        var position = Create(speedMps: null, bearing: null);
+
+        Assert.Null(position.SpeedMps);
+        Assert.Null(position.Bearing);
     }
 
     [Theory]

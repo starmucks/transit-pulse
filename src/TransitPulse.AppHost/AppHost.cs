@@ -55,7 +55,11 @@ builder.AddContainer("redpanda-console", "redpandadata/console", "v3.12.0")
     .WaitFor(redpanda);
 
 // The process runs from its project folder; point the archive at the git-ignored /data/ at the repository root instead.
+// Full mode: positions are also normalized and published to Redpanda (the collector server runs in archive mode).
 builder.AddProject<Projects.TransitPulse_Ingestor>("ingestor")
-    .WithEnvironment("Archive__RootDirectory", Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", "..", "data", "archive")));
+    .WithEnvironment("Archive__RootDirectory", Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", "..", "data", "archive")))
+    .WithEnvironment("Ingestor__Mode", "full")
+    .WithEnvironment("Kafka__BootstrapServers", redpanda.GetEndpoint("kafka").Property(EndpointProperty.HostAndPort))
+    .WaitFor(redpanda);
 
 await builder.Build().RunAsync();

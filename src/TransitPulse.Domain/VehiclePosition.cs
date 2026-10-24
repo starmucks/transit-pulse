@@ -4,8 +4,9 @@ namespace TransitPulse.Domain;
 
 /// <summary>
 /// One observed position of a vehicle: the single model every feed adapter normalizes into.
-/// Construction fails on values that can only come from an adapter bug. Speed, bearing and delay
-/// are not validated here: their plausible ranges differ per source and are normalized by adapters.
+/// Construction fails on values that can only come from an adapter bug. The plausible ranges of speed, bearing and
+/// delay differ per source and are normalized by adapters; here speed and bearing only have to be finite numbers,
+/// since NaN or infinity cannot be stored or serialized (an adapter maps such a source value to <c>null</c>).
 /// </summary>
 /// <param name="FeedId">Source feed, e.g. <c>hsl</c>, <c>entur-sky</c>, <c>mbta</c>.</param>
 /// <param name="VehicleId">Vehicle identifier, unique within the feed.</param>
@@ -43,6 +44,12 @@ public sealed record VehiclePosition(
     /// <summary>WGS 84 longitude in degrees, [-180, 180].</summary>
     public double Lon { get; } = RequireRange(Lon, -180, 180);
 
+    /// <summary>Speed in metres per second, if reported; never NaN or infinite.</summary>
+    public float? SpeedMps { get; } = RequireFinite(SpeedMps);
+
+    /// <summary>Heading in degrees clockwise from north, if reported; never NaN or infinite.</summary>
+    public float? Bearing { get; } = RequireFinite(Bearing);
+
     /// <summary>When the source measured the position; always UTC.</summary>
     public DateTimeOffset ObservedAt { get; } = RequireUtc(ObservedAt);
 
@@ -57,6 +64,11 @@ public sealed record VehiclePosition(
         value >= min && value <= max
             ? value
             : throw new ArgumentOutOfRangeException(name, value, $"Must be within [{min}, {max}].");
+
+    private static float? RequireFinite(float? value, [CallerArgumentExpression(nameof(value))] string? name = null) =>
+        value is not { } number || float.IsFinite(number)
+            ? value
+            : throw new ArgumentOutOfRangeException(name, number, "Must be a finite number or null.");
 
     // Local source time zones are normalized in adapters; a non-zero offset means one was missed.
     // default (0001-01-01) also has offset zero: it means the timestamp was never parsed.
