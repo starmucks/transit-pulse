@@ -1,0 +1,14 @@
+{"feedId":"hsl","vehicleId":"22/1532","tripId":"2549/0/20261020/06:03:00","routeId":"2549","lat":60.175405,"lon":24.806725,"speedMps":3.76,"bearing":248,"delaySec":-206,"observedAt":"2026-10-20T03:00:00.255+00:00"}
+{"feedId":"hsl","vehicleId":"40/649","tripId":"1004/1/20261020/06:04:00","routeId":"1004","lat":60.194497,"lon":24.872437,"speedMps":0.01,"bearing":105,"delaySec":-239,"observedAt":"2026-10-20T03:00:03.721+00:00"}
+{"feedId":"hsl","vehicleId":"50/322","tripId":"31M1/0/20261020/04:49:00","routeId":"31M1","lat":60.165015892,"lon":24.753360279,"speedMps":21.74,"bearing":54,"observedAt":"2026-10-20T02:00:00.079+00:00"}
+{"feedId":"hsl","vehicleId":"50/320","tripId":"31M1/0/20261022/09:33:00","routeId":"31M1","lat":60.16299219,"lon":24.91445278,"speedMps":0,"bearing":0,"observedAt":"2026-10-22T07:00:00.000+00:00"}
+{"feedId":"hsl","vehicleId":"90/6306","tripId":"3001T/1/20261020/03:55:00","routeId":"3001T","lat":60.676546,"lon":24.836723,"speedMps":27.59,"bearing":172,"delaySec":59,"observedAt":"2026-10-20T01:00:00.255+00:00"}
+{"feedId":"hsl","vehicleId":"90/1028","lat":60.173437,"lon":24.939936,"speedMps":0.0,"observedAt":"2026-10-20T00:00:00.251+00:00"}
+{"feedId":"hsl","vehicleId":"60/2","tripId":"1019/0/20261020/07:00:00","routeId":"1019","lat":60.153347,"lon":24.982842,"speedMps":4.11552,"bearing":167,"occupancy":"ManySeatsAvailable","observedAt":"2026-10-20T04:11:42.000+00:00"}
+{"feedId":"hsl","vehicleId":"12/1919","tripId":"2544/1/20261020/07:13:00","routeId":"2544","lat":60.177832,"lon":24.754982,"speedMps":19.19,"bearing":342,"delaySec":330,"occupancy":"Full","observedAt":"2026-10-20T04:46:13.255+00:00"}
+null
+{"feedId":"hsl","vehicleId":"12/1831","tripId":"4600/0/20261020/10:09:00","routeId":"4600","lat":60.17089,"lon":24.943114,"speedMps":1.89,"bearing":357,"observedAt":"2026-10-20T05:00:00.755+00:00"}
+{"feedId":"hsl","vehicleId":"22/1172","tripId":"4431N/0/20261020/24:00:00","routeId":"4431N","lat":60.173229,"lon":24.938805,"speedMps":6.98,"bearing":358,"delaySec":39,"observedAt":"2026-10-20T21:01:00.251+00:00"}
+{"feedId":"hsl","vehicleId":"6/1019","tripId":"6173N/1/20261020/24:02:00","routeId":"6173N","lat":60.032949,"lon":24.366067,"speedMps":0.0,"bearing":178,"delaySec":-179,"observedAt":"2026-10-20T20:59:44.251+00:00"}
+{"feedId":"hsl","vehicleId":"12/2412","tripId":"4600/0/20261019/27:06:00","routeId":"4600","lat":60.170971,"lon":24.943143,"speedMps":0.0,"bearing":176,"delaySec":-419,"observedAt":"2026-10-20T00:00:00.253+00:00"}
+{"feedId":"hsl","vehicleId":"22/1107","tripId":"1057/0/20261020/04:00:00","routeId":"1057","lat":60.236438,"lon":25.081972,"speedMps":0.0,"bearing":330,"delaySec":-34,"observedAt":"2026-10-20T01:00:00.251+00:00"}
