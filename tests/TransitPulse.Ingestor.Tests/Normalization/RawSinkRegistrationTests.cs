@@ -25,6 +25,7 @@ public sealed class RawSinkRegistrationTests
 
         Assert.IsType<ArchiveSink>(provider.GetRequiredService<IRawSink>());
         Assert.Null(provider.GetService<IPositionSink>());
+        Assert.Empty(provider.GetServices<IPositionNormalizer>());
         Assert.DoesNotContain(provider.GetServices<IHostedService>(), service => service is KafkaTopicInitializer);
     }
 
@@ -38,6 +39,19 @@ public sealed class RawSinkRegistrationTests
         Assert.IsType<NormalizingSink>(provider.GetRequiredService<IRawSink>());
         Assert.IsType<KafkaSink>(provider.GetRequiredService<IPositionSink>());
         Assert.Contains(provider.GetServices<IHostedService>(), service => service is KafkaTopicInitializer);
+    }
+
+    [Fact]
+    public void Full_mode_normalizes_hsl_records()
+    {
+        using var provider = Build(Configuration("full", bootstrapServers: "127.0.0.1:1"));
+        var payload = """{"VP":{"oper":40,"veh":108,"tst":"2026-10-22T06:59:59.952Z","lat":60.167646,"long":24.952242}}"""u8.ToArray();
+
+        var receivedAt = new DateTimeOffset(2026, 10, 22, 7, 0, 0, TimeSpan.Zero);
+
+        var positions = provider.GetRequiredService<PositionRouter>().Route(new RawRecord("hsl", receivedAt, payload, null));
+
+        Assert.Equal("40/108", Assert.Single(positions).VehicleId);
     }
 
     [Theory]

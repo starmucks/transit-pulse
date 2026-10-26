@@ -1,6 +1,7 @@
 using Confluent.Kafka;
 using Microsoft.Extensions.Options;
 using TransitPulse.Ingestor.Archive;
+using TransitPulse.Ingestor.Feeds.Hsl;
 using TransitPulse.Ingestor.Kafka;
 using TransitPulse.Ingestor.Pipeline;
 
@@ -57,6 +58,8 @@ internal static class RawSinkRegistration
             .Validate(o => o.PositionsRetention > TimeSpan.Zero, "Kafka:PositionsRetention must be positive.")
             .ValidateOnStart();
         services.AddHostedService<KafkaTopicInitializer>();
+        // One normalizer per city; the router finds each by the raw feeds it claims.
+        services.AddSingleton<IPositionNormalizer, HslPositionNormalizer>();
         services.AddSingleton<PositionRouter>();
         services.AddSingleton<IPositionSink>(provider =>
         {
