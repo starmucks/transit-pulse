@@ -21,10 +21,14 @@ internal sealed class HslPositionNormalizer : IPositionNormalizer
     /// <summary>Raw and normalized feed id of HSL positions.</summary>
     public const string FeedId = "hsl";
 
-    /// <summary>Larger offsets are feed errors (measured: up to 12 h); the position is kept without a delay.</summary>
-    internal static readonly TimeSpan MaxPlausibleDelay = TimeSpan.FromHours(2);
+    // Larger offsets are feed errors (measured: up to 12 h); the position is kept without a delay.
+    private const int MaxPlausibleDelaySeconds = 2 * 60 * 60;
 
     private const int PlaceholderJourney = 9999;
+
+    // Journeys of the previous operating day start at most at 03:xx (measured over four nights); a later start
+    // observed 12 h on is a vehicle still reporting an old journey, not a journey of the next calendar day.
+    private const int LatestNightStartHour = 5;
 
     // Helsinki is UTC+2 or +3. The offset only chooses between two departures 24 h apart, so being an hour off in
     // summer cannot change the choice, and the build needs no time zone data (InvariantGlobalization).
@@ -72,8 +76,9 @@ internal sealed class HslPositionNormalizer : IPositionNormalizer
         ];
     }
 
+    // A pattern, not Math.Abs: Math.Abs(int.MinValue) throws and would fail the whole feed for one value.
     private static int? Delay(int? offset) =>
-        offset is { } ahead && Math.Abs(ahead) <= MaxPlausibleDelay.TotalSeconds ? -ahead : null;
+        offset is >= -MaxPlausibleDelaySeconds and <= MaxPlausibleDelaySeconds ? -offset : null;
 
     private static OccupancyLevel? Occupancy(int? percent) => percent switch
     {
@@ -95,11 +100,12 @@ internal sealed class HslPositionNormalizer : IPositionNormalizer
             return null;
         }
 
-        // "00:15" on operating day D is either D 00:15 or GTFS 24:15 (D+1 00:15). A vehicle reports only around its
-        // journey, so the departure nearer to the observation is the right one; a fixed cut-off hour would not
-        // work, since 03:xx is a night journey of D-1 or an early one of D.
+        // "00:15" on operating day D is either D 00:15 or GTFS 24:15 (D+1 00:15). Around its journey a vehicle is
+        // nearer to the right departure; a cut-off hour alone would not do, since 03:xx is a night journey of D-1 or
+        // an early one of D.
         var sameDay = new DateTimeOffset(oday.ToDateTime(start), _helsinkiStandardOffset);
-        var hours = start.Hour + (observedAt - sameDay > TimeSpan.FromHours(12) ? 24 : 0);
+        var afterMidnight = start.Hour <= LatestNightStartHour && observedAt - sameDay > TimeSpan.FromHours(12);
+        var hours = start.Hour + (afterMidnight ? 24 : 0);
         var directionId = vp.Dir == "1" ? 0 : 1;
         return string.Create(CultureInfo.InvariantCulture, $"{route}/{directionId}/{oday:yyyyMMdd}/{hours:00}:{start.Minute:00}:00");
     }

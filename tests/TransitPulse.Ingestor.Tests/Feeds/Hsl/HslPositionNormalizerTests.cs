@@ -53,6 +53,8 @@ public sealed class HslPositionNormalizerTests
     [Theory]
     [InlineData(-7201)]
     [InlineData(-43468)]
+    [InlineData(int.MinValue)]
+    [InlineData(int.MaxValue)]
     public void Implausible_delay_is_dropped_but_the_position_is_kept(int dl)
     {
         Assert.Null(Position(("dl", $"{dl}")).DelaySec);
@@ -64,6 +66,7 @@ public sealed class HslPositionNormalizerTests
     [InlineData("2026-10-20T21:10:00Z", "2026-10-20", "23:50", "20261020/23:50:00")] // runs past midnight
     [InlineData("2026-10-21T00:15:00Z", "2026-10-20", "03:10", "20261020/27:10:00")] // night journey of the day before
     [InlineData("2026-10-21T00:35:00Z", "2026-10-21", "03:30", "20261021/03:30:00")] // first journey of the day
+    [InlineData("2026-10-20T20:39:00Z", "2026-10-20", "10:09", "20261020/10:09:00")] // still on a journey 12.5 h old
     public void Trip_start_is_written_as_gtfs_time(string tst, string oday, string start, string expected)
     {
         var position = Position(("tst", $"\"{tst}\""), ("oday", $"\"{oday}\""), ("start", $"\"{start}\""));
@@ -74,19 +77,25 @@ public sealed class HslPositionNormalizerTests
     [Fact]
     public void Placeholder_journey_keeps_the_position_without_trip_route_or_delay()
     {
-        var position = Position(("jrn", "9999"), ("dl", "-15783"));
+        // A plausible offset, so only the placeholder rule can drop it.
+        var position = Position(("jrn", "9999"), ("dl", "-60"));
 
         Assert.Equal((null, null, null), (position.TripId, position.RouteId, position.DelaySec));
         Assert.Equal(60.167646, position.Lat);
     }
 
     [Theory]
+    [InlineData(-1, null)]
     [InlineData(0, null)]
-    [InlineData(100, OccupancyLevel.Full)]
     [InlineData(1, OccupancyLevel.ManySeatsAvailable)]
-    [InlineData(61, OccupancyLevel.FewSeatsAvailable)]
-    [InlineData(95, OccupancyLevel.StandingRoomOnly)]
-    public void Occupancy_zero_means_unknown(int occu, OccupancyLevel? expected)
+    [InlineData(49, OccupancyLevel.ManySeatsAvailable)]
+    [InlineData(50, OccupancyLevel.FewSeatsAvailable)]
+    [InlineData(89, OccupancyLevel.FewSeatsAvailable)]
+    [InlineData(90, OccupancyLevel.StandingRoomOnly)]
+    [InlineData(99, OccupancyLevel.StandingRoomOnly)]
+    [InlineData(100, OccupancyLevel.Full)]
+    [InlineData(101, null)]
+    public void Occupancy_maps_percent_to_level(int occu, OccupancyLevel? expected)
     {
         Assert.Equal(expected, Position(("occu", $"{occu}")).Occupancy);
     }
@@ -100,12 +109,16 @@ public sealed class HslPositionNormalizerTests
     }
 
     [Theory]
-    [InlineData("lat")]
-    [InlineData("tst")]
-    [InlineData("veh")]
-    public void Vehicle_without_coordinates_time_or_identity_is_skipped(string field)
+    [InlineData("lat", "null")]
+    [InlineData("long", "null")]
+    [InlineData("tst", "null")]
+    [InlineData("oper", "null")]
+    [InlineData("veh", "null")]
+    [InlineData("lat", "91")]
+    [InlineData("long", "-181")]
+    public void Vehicle_without_valid_coordinates_time_or_identity_is_skipped(string field, string json)
     {
-        Assert.Empty(Normalize((field, "null")));
+        Assert.Empty(Normalize((field, json)));
     }
 
     [Theory]

@@ -15,13 +15,16 @@ public sealed class HslContractTests
     private static readonly string[] _messages = File.ReadAllLines(Path.Combine(_directory, "vp.jsonl"));
     private static readonly string[] _expected = File.ReadAllLines(Path.Combine(_directory, "vp.expected.jsonl"));
 
-    public static TheoryData<string> Cases =>
-        [.. _messages.Select(line => (string)JsonNode.Parse(line)!["case"]!)];
+    private static readonly string[] _cases = [.. _messages.Select(line => (string)JsonNode.Parse(line)!["case"]!)];
+
+    public static TheoryData<string> Cases => [.. _cases];
 
     [Fact]
-    public void Every_message_has_an_expected_position()
+    public void Every_message_has_an_expected_position_and_a_unique_case()
     {
         Assert.Equal(_messages.Length, _expected.Length);
+        // Lines are found by case name: a repeated name would leave the second line untested.
+        Assert.Equal(_cases.Length, _cases.Distinct(StringComparer.Ordinal).Count());
     }
 
     [Theory]

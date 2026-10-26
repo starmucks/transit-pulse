@@ -10,7 +10,10 @@ namespace TransitPulse.Domain;
 /// </summary>
 /// <param name="FeedId">Source feed, e.g. <c>hsl</c>, <c>entur-sky</c>, <c>mbta</c>.</param>
 /// <param name="VehicleId">Vehicle identifier, unique within the feed.</param>
-/// <param name="TripId">Trip the vehicle is serving, if known.</param>
+/// <param name="TripId">
+/// Trip the vehicle is serving, if known: the GTFS <c>trip_id</c> where the feed sends one, otherwise the GTFS-RT
+/// trip descriptor <c>{route_id}/{direction_id}/{start_date}/{start_time}</c> (HSL), so its meaning depends on the feed.
+/// </param>
 /// <param name="RouteId">Route the vehicle is serving, if known.</param>
 /// <param name="Lat">WGS 84 latitude in degrees, [-90, 90].</param>
 /// <param name="Lon">WGS 84 longitude in degrees, [-180, 180].</param>
