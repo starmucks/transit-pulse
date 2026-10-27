@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using TransitPulse.Ingestor.Archive;
 using TransitPulse.Ingestor.Feeds.Hsl;
 using TransitPulse.Ingestor.Feeds.Http;
@@ -35,6 +36,7 @@ builder.Services.AddHostedService<IngestionPipeline>();
 
 // Run in process, not served over HTTP: the collector has no web server, and memory is its tightest limit.
 builder.Services.AddHealthChecks().AddCheck<FeedSilenceHealthCheck>(FeedSilenceHealthCheck.Name);
+builder.Services.AddSingleton<IHealthCheckPublisher, FeedSilenceLog>();
 
 // Covers the pipeline's drain budget plus closing every open hour on a slow CPU; an unclosed file loses its unflushed
 // records. The service manager's stop timeout must be longer than this.
