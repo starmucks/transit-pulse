@@ -20,8 +20,6 @@ public sealed partial class IngestionPipeline(
     /// <summary>About 8 s of all feeds at ~1 200 messages/s, a few MB of memory.</summary>
     internal const int ChannelCapacity = 10_000;
 
-    internal static readonly TimeSpan SourceRestartDelay = TimeSpan.FromSeconds(5);
-
     /// <summary>
     /// How long after a stop request records left in the channel are still written. Then the rest is dropped and the
     /// files are closed: on a starved CPU an unbounded drain outlived the service stop timeout, the process was killed
@@ -147,8 +145,12 @@ public sealed partial class IngestionPipeline(
 
     private async Task RunSourceAsync(IFeedSource source, ChannelWriter<RawRecord> output, CancellationToken cancellationToken)
     {
+        // Growing delays: a broker down for an hour costs a few dozen attempts and log lines, not one every 5 s.
+        var backoff = new RestartBackoff(Random.Shared);
         while (true)
         {
+            var started = timeProvider.GetTimestamp();
+            Exception? failure = null;
             try
             {
                 await source.RunAsync(output, cancellationToken);
@@ -156,8 +158,6 @@ public sealed partial class IngestionPipeline(
                 {
                     return;
                 }
-
-                LogSourceReturned(source.FeedId, SourceRestartDelay);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -165,12 +165,22 @@ public sealed partial class IngestionPipeline(
             }
             catch (Exception ex)
             {
-                LogSourceFailed(ex, source.FeedId, SourceRestartDelay);
+                failure = ex;
+            }
+
+            var delay = backoff.Next(timeProvider.GetElapsedTime(started));
+            if (failure is null)
+            {
+                LogSourceReturned(source.FeedId, backoff.Failures, delay);
+            }
+            else
+            {
+                LogSourceFailed(failure, source.FeedId, backoff.Failures, delay);
             }
 
             try
             {
-                await Task.Delay(SourceRestartDelay, timeProvider, cancellationToken);
+                await Task.Delay(delay, timeProvider, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -179,11 +189,11 @@ public sealed partial class IngestionPipeline(
         }
     }
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Feed {FeedId} failed; restarting in {Delay}")]
-    private partial void LogSourceFailed(Exception exception, string feedId, TimeSpan delay);
+    [LoggerMessage(Level = LogLevel.Error, Message = "Feed {FeedId} failed ({Failures} in a row); restarting in {Delay}")]
+    private partial void LogSourceFailed(Exception exception, string feedId, int failures, TimeSpan delay);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Feed {FeedId} stopped without a shutdown request; restarting in {Delay}")]
-    private partial void LogSourceReturned(string feedId, TimeSpan delay);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Feed {FeedId} stopped without a shutdown request ({Failures} in a row); restarting in {Delay}")]
+    private partial void LogSourceReturned(string feedId, int failures, TimeSpan delay);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "All feeds stopped; {Pending} records left in the channel to write")]
     private partial void LogSourcesStopped(int pending);

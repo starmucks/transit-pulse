@@ -116,7 +116,7 @@ public sealed class IngestionPipelineTests
         await WaitUntilAsync(() => sink.Records.Count == 1);
         await pipeline.StopAsync(Ct);
 
-        Assert.True(restartedAt - started >= IngestionPipeline.SourceRestartDelay);
+        Assert.True(restartedAt - started >= RestartBackoff.Initial);
     }
 
     [Fact]
