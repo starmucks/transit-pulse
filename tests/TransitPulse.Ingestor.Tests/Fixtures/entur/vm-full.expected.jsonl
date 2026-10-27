@@ -1,0 +1,10 @@
+{"feedId":"entur-sky","vehicleId":"3350387032","tripId":"SKY:ServiceJourney:60-208332-20716543","routeId":"SKY:Line:60","lat":60.2618999686092,"lon":5.34388999454677,"occupancy":"ManySeatsAvailable","observedAt":"2026-10-24T20:49:33.000+00:00"}
+null
+{"feedId":"entur-sky","vehicleId":"3350447512","tripId":"SKY:ServiceJourney:19-202624-20942370","routeId":"SKY:Line:19","lat":60.4630937241018,"lon":5.32103874720633,"delaySec":236,"occupancy":"ManySeatsAvailable","observedAt":"2026-10-24T20:45:20.000+00:00"}
+null
+null
+{"feedId":"entur-sky","vehicleId":"3350361436","tripId":"SKY:ServiceJourney:340-208055-20439176","routeId":"SKY:Line:340","lat":60.5460500065237,"lon":5.27935462072492,"occupancy":"ManySeatsAvailable","observedAt":"2026-10-24T20:49:10.000+00:00"}
+{"feedId":"entur-sky","vehicleId":"3350377369","tripId":"SKY:ServiceJourney:403-210589-20955106","routeId":"SKY:Line:403","lat":60.4071000125259,"lon":5.22690000012517,"delaySec":88,"occupancy":"ManySeatsAvailable","observedAt":"2026-10-24T20:49:28.000+00:00"}
+null
+null
+{"feedId":"entur-sky","vehicleId":"3350453147","tripId":"SKY:ServiceJourney:10-202810-20687354","routeId":"SKY:Line:10","lat":60.3812708426267,"lon":5.31809049658477,"bearing":62.4,"delaySec":89,"occupancy":"StandingRoomOnly","observedAt":"2026-10-24T20:49:33.000+00:00"}
