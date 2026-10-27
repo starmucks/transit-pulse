@@ -1,6 +1,6 @@
-using TransitPulse.Ingestor.Normalization;
+using TransitPulse.Ingestor.Pipeline;
 
-namespace TransitPulse.Ingestor.Tests.Normalization;
+namespace TransitPulse.Ingestor.Tests.Pipeline;
 
 public sealed class FailureEpisodesTests
 {

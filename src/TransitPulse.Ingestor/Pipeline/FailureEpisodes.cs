@@ -1,4 +1,4 @@
-namespace TransitPulse.Ingestor.Normalization;
+namespace TransitPulse.Ingestor.Pipeline;
 
 /// <summary>
 /// Groups repeated failures into episodes so that a failure at stream rate is logged twice (when it starts and when it
