@@ -15,8 +15,11 @@ internal sealed class RestartBackoff(Random random)
     /// <summary>Delay after the first failure in a row; jitter only lengthens it, never shortens.</summary>
     public static readonly TimeSpan Initial = TimeSpan.FromSeconds(5);
 
-    /// <summary>Longest delay before jitter: a feed back after an outage is picked up within about this long.</summary>
-    public static readonly TimeSpan Max = TimeSpan.FromMinutes(5);
+    /// <summary>
+    /// Longest delay before jitter: a feed back after an outage is picked up within about this long. Kept short
+    /// because a push feed has no history: what it sends before we reconnect is lost, not delayed.
+    /// </summary>
+    public static readonly TimeSpan Max = TimeSpan.FromMinutes(1);
 
     /// <summary>A run at least this long counts as healthy; longer than a connect attempt or HSL's 10 s check.</summary>
     public static readonly TimeSpan HealthyRun = TimeSpan.FromMinutes(1);

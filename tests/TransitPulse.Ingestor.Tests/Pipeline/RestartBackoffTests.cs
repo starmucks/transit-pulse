@@ -13,7 +13,7 @@ public sealed class RestartBackoffTests
 
         var delays = Enumerable.Range(0, 8).Select(_ => backoff.Next(_shortRun).TotalSeconds).ToList();
 
-        Assert.Equal([5, 10, 20, 40, 80, 160, 300, 300], delays);
+        Assert.Equal([5, 10, 20, 40, 60, 60, 60, 60], delays);
         Assert.Equal(8, backoff.Failures);
     }
 

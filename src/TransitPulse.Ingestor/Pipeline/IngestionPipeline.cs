@@ -145,7 +145,7 @@ public sealed partial class IngestionPipeline(
 
     private async Task RunSourceAsync(IFeedSource source, ChannelWriter<RawRecord> output, CancellationToken cancellationToken)
     {
-        // Growing delays: a broker down for an hour costs a few dozen attempts and log lines, not one every 5 s.
+        // Growing delays: a broker down for an hour costs about one attempt and log line a minute, not one every 5 s.
         var backoff = new RestartBackoff(Random.Shared);
         while (true)
         {
