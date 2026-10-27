@@ -121,7 +121,7 @@ public sealed class PositionRouterTests
         using var dropped = new MetricCollector<long>(meters, FeedMetrics.MeterName, "transitpulse.positions.dropped");
         using var skipped = new MetricCollector<long>(meters, FeedMetrics.MeterName, "transitpulse.positions.records_skipped");
         var router = new PositionRouter(
-            [new FakeNormalizer("hsl", "hsl") { FailOnSeconds = 9 }, new FakeNormalizer("mbta", "mbta-vp") { SilentFeed = "mbta-vp" }],
+            [new FakeNormalizer("hsl", "hsl") { FailOnSeconds = 9 }, new FakeNormalizer("mbta", "mbta-vp") { SilentFeed = "mbta-vp", SilentDropReason = PositionMetrics.Stale }],
             new PositionMetrics(meters),
             NullLogger<PositionRouter>.Instance);
 
@@ -134,7 +134,7 @@ public sealed class PositionRouterTests
 
         Assert.Equal(2, accepted.GetMeasurementSnapshot().Sum(m => m.Value));
         Assert.Equal(
-            [("hsl", PositionMetrics.Duplicate), ("hsl", PositionMetrics.FromTheFuture)],
+            [("hsl", PositionMetrics.Duplicate), ("hsl", PositionMetrics.FromTheFuture), ("mbta-vp", PositionMetrics.Stale)],
             dropped.GetMeasurementSnapshot().Select(Key).Order());
         Assert.Equal(
             [("hsl", PositionMetrics.Unparsable), ("mbta-vp", PositionMetrics.Empty)],

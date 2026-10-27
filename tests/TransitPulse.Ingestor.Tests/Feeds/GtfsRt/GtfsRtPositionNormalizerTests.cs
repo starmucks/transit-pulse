@@ -2,6 +2,7 @@ using Google.Protobuf;
 using TransitPulse.Domain;
 using TransitPulse.Ingestor.Feeds.GtfsRt;
 using TransitPulse.Ingestor.Pipeline;
+using TransitPulse.Ingestor.Tests.Normalization;
 using Rt = TransitRealtime;
 
 namespace TransitPulse.Ingestor.Tests.Feeds.GtfsRt;
@@ -53,7 +54,7 @@ public sealed class GtfsRtPositionNormalizerTests
     }
 
     private static IReadOnlyList<VehiclePosition> Normalize(byte[] payload, DateTimeOffset receivedAt) =>
-        new GtfsRtPositionNormalizer("mbta", "mbta-vp").Normalize(new RawRecord("mbta-vp", receivedAt, payload, Topic: null));
+        new GtfsRtPositionNormalizer("mbta", "mbta-vp").Normalize(new RawRecord("mbta-vp", receivedAt, payload, Topic: null), new DropLog());
 
     private static Rt.FeedEntity Entity(Rt.VehiclePosition vehicle) => new() { Id = vehicle.Vehicle?.Id ?? "x", Vehicle = vehicle };
 
@@ -81,7 +82,7 @@ public sealed class GtfsRtPositionNormalizerTests
         var message = new Rt.FeedMessage { Header = new Rt.FeedHeader { GtfsRealtimeVersion = "2.0" } };
         message.Entity.Add(Entity(Sample()));
 
-        var positions = normalizer.Normalize(new RawRecord("nl-vp", _receivedAt, message.ToByteArray(), Topic: null));
+        var positions = normalizer.Normalize(new RawRecord("nl-vp", _receivedAt, message.ToByteArray(), Topic: null), new DropLog());
 
         Assert.Equal(["nl-vp"], normalizer.RawFeedIds);
         Assert.Equal("nl", Assert.Single(positions).FeedId);

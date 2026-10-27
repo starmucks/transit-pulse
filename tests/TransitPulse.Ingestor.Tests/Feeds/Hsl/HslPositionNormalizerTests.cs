@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using TransitPulse.Domain;
 using TransitPulse.Ingestor.Feeds.Hsl;
 using TransitPulse.Ingestor.Pipeline;
+using TransitPulse.Ingestor.Tests.Normalization;
 
 namespace TransitPulse.Ingestor.Tests.Feeds.Hsl;
 
@@ -23,7 +24,7 @@ public sealed class HslPositionNormalizerTests
             root["VP"]![field] = JsonNode.Parse(json);
         }
 
-        return new HslPositionNormalizer().Normalize(Record(root.ToJsonString()));
+        return new HslPositionNormalizer().Normalize(Record(root.ToJsonString()), new DropLog());
     }
 
     private static VehiclePosition Position(params (string Field, string Json)[] changes) => Assert.Single(Normalize(changes));
@@ -131,11 +132,11 @@ public sealed class HslPositionNormalizerTests
 
         if (fails)
         {
-            Assert.Throws<FormatException>(() => normalizer.Normalize(record));
+            Assert.Throws<FormatException>(() => normalizer.Normalize(record, new DropLog()));
         }
         else
         {
-            Assert.Empty(normalizer.Normalize(record));
+            Assert.Empty(normalizer.Normalize(record, new DropLog()));
         }
     }
 }

@@ -3,6 +3,7 @@ using System.Text;
 using TransitPulse.Ingestor.Feeds.Entur;
 using TransitPulse.Ingestor.Kafka;
 using TransitPulse.Ingestor.Pipeline;
+using TransitPulse.Ingestor.Tests.Normalization;
 
 namespace TransitPulse.Ingestor.Tests.Feeds.Entur;
 
@@ -22,7 +23,7 @@ public sealed class SiriVmContractTests
         var record = new RawRecord(
             SiriVmPositionNormalizer.RawFeedId, DateTimeOffset.Parse(receivedAt, CultureInfo.InvariantCulture), payload, Topic: null);
 
-        var positions = new SiriVmPositionNormalizer().Normalize(record);
+        var positions = new SiriVmPositionNormalizer().Normalize(record, new DropLog());
 
         // One line per record: a record added to the fixture without an expectation fails here.
         Assert.Equal(lines.Length, SiriVmReader.Read(new MemoryStream(payload)).Count());

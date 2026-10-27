@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using TransitPulse.Domain;
 using TransitPulse.Ingestor.Feeds.Entur;
 using TransitPulse.Ingestor.Pipeline;
+using TransitPulse.Ingestor.Tests.Normalization;
 
 namespace TransitPulse.Ingestor.Tests.Feeds.Entur;
 
@@ -30,7 +31,7 @@ public sealed class SiriVmPositionNormalizerTests
 
     private static IReadOnlyList<VehiclePosition> Normalize(DateTimeOffset receivedAt, params string[] activities) =>
         new SiriVmPositionNormalizer().Normalize(
-            new RawRecord("entur-sky-vm", receivedAt, Encoding.UTF8.GetBytes(SiriVmSamples.Response(activities)), Topic: null));
+            new RawRecord("entur-sky-vm", receivedAt, Encoding.UTF8.GetBytes(SiriVmSamples.Response(activities)), Topic: null), new DropLog());
 
     private static VehiclePosition Position(string activity) => Assert.Single(Normalize(_receivedAt, activity));
 
@@ -185,7 +186,7 @@ public sealed class SiriVmPositionNormalizerTests
         var truncated = Encoding.UTF8.GetBytes(SiriVmSamples.Response(Sample, Sample)[..^300]);
 
         Assert.Throws<FormatException>(() =>
-            new SiriVmPositionNormalizer().Normalize(new RawRecord("entur-sky-vm", _receivedAt, truncated, Topic: null)));
+            new SiriVmPositionNormalizer().Normalize(new RawRecord("entur-sky-vm", _receivedAt, truncated, Topic: null), new DropLog()));
     }
 
     [Fact]
@@ -195,7 +196,7 @@ public sealed class SiriVmPositionNormalizerTests
             "?>", "?><!DOCTYPE Siri [<!ENTITY x \"x\">]>", StringComparison.Ordinal);
 
         Assert.Throws<FormatException>(() => new SiriVmPositionNormalizer().Normalize(
-            new RawRecord("entur-sky-vm", _receivedAt, Encoding.UTF8.GetBytes(withDtd), Topic: null)));
+            new RawRecord("entur-sky-vm", _receivedAt, Encoding.UTF8.GetBytes(withDtd), Topic: null), new DropLog()));
     }
 
     [Fact]

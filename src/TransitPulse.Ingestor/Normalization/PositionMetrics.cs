@@ -16,6 +16,15 @@ internal sealed class PositionMetrics
     /// <summary>A position not newer than the vehicle's last one (a repeat or a late, out-of-order report).</summary>
     public const string Duplicate = "duplicate";
 
+    /// <summary>A vehicle record measured too long before its message was received (a vehicle that stopped reporting).</summary>
+    public const string Stale = "stale";
+
+    /// <summary>A vehicle record without coordinates or with coordinates off the globe.</summary>
+    public const string BadLocation = "bad_location";
+
+    /// <summary>A vehicle record without a vehicle id or a usable measurement time; a jump hints at a changed format.</summary>
+    public const string Incomplete = "incomplete";
+
     /// <summary>A record the normalizer could not parse.</summary>
     public const string Unparsable = "unparsable";
 
@@ -55,7 +64,10 @@ internal sealed class PositionMetrics
 
     /// <summary>Counts one dropped position.</summary>
     /// <param name="feedId">Raw feed id of its record.</param>
-    /// <param name="reason"><see cref="FromTheFuture"/> or <see cref="Duplicate"/>.</param>
+    /// <param name="reason">
+    /// <see cref="FromTheFuture"/> or <see cref="Duplicate"/> from the router; <see cref="Stale"/>,
+    /// <see cref="BadLocation"/> or <see cref="Incomplete"/> from a normalizer.
+    /// </param>
     public void Dropped(string feedId, string reason) =>
         _dropped.Add(1, new KeyValuePair<string, object?>(FeedTag, feedId), new KeyValuePair<string, object?>(ReasonTag, reason));
 

@@ -19,6 +19,7 @@ internal sealed partial class PositionRouter
     private readonly FailureEpisodes _normalizeFailures = new(FailureEpisodes.DefaultQuietPeriod);
     private readonly FailureEpisodes _clockSkews = new(FailureEpisodes.DefaultQuietPeriod);
     private readonly PositionMetrics _metrics;
+    private readonly FeedDrops _drops;
     private readonly ILogger<PositionRouter> _logger;
 
     /// <summary>Indexes the normalizers by the raw feeds they read.</summary>
@@ -29,6 +30,7 @@ internal sealed partial class PositionRouter
     public PositionRouter(IEnumerable<IPositionNormalizer> normalizers, PositionMetrics metrics, ILogger<PositionRouter> logger)
     {
         _metrics = metrics;
+        _drops = new FeedDrops(metrics);
         _logger = logger;
         foreach (var normalizer in normalizers)
         {
@@ -59,7 +61,8 @@ internal sealed partial class PositionRouter
         IReadOnlyList<VehiclePosition> positions;
         try
         {
-            positions = normalizer.Normalize(record);
+            _drops.FeedId = record.FeedId;
+            positions = normalizer.Normalize(record, _drops);
         }
         catch (Exception ex)
         {
@@ -123,6 +126,15 @@ internal sealed partial class PositionRouter
     }
 
     private static string VehicleKey(VehiclePosition position) => $"{position.FeedId}/{position.VehicleId}";
+
+    // One instance re-pointed at each record's feed rather than one per call: no allocation per HSL message, and the
+    // router is single-threaded, so the feed cannot change while a normalizer reports.
+    private sealed class FeedDrops(PositionMetrics metrics) : IPositionDrops
+    {
+        public string FeedId { get; set; } = "";
+
+        public void Drop(string reason) => metrics.Dropped(FeedId, reason);
+    }
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Records of feed {FeedId} fail to normalize (first received at {ReceivedAt}); they are dropped until it recovers")]
     private partial void LogNormalizeFailing(Exception exception, string feedId, DateTimeOffset receivedAt);

@@ -34,7 +34,7 @@ internal sealed class GtfsRtPositionNormalizer(string feedId, string rawFeedId) 
     public IReadOnlySet<string> RawFeedIds { get; } = new HashSet<string>(StringComparer.Ordinal) { rawFeedId };
 
     /// <inheritdoc/>
-    public IReadOnlyList<VehiclePosition> Normalize(RawRecord record)
+    public IReadOnlyList<VehiclePosition> Normalize(RawRecord record, IPositionDrops drops)
     {
         Rt.FeedMessage message;
         try

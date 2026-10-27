@@ -16,7 +16,8 @@ public interface IPositionNormalizer
 
     /// <summary>Extracts the positions contained in one raw message.</summary>
     /// <param name="record">A message from one of <see cref="RawFeedIds"/>.</param>
+    /// <param name="drops">Told the reason for each vehicle record of the message that yields no position.</param>
     /// <returns>The positions in the message, or an empty list when it carries none.</returns>
     /// <exception cref="FormatException">The payload cannot be parsed; the caller drops the message and keeps going.</exception>
-    IReadOnlyList<VehiclePosition> Normalize(RawRecord record);
+    IReadOnlyList<VehiclePosition> Normalize(RawRecord record, IPositionDrops drops);
 }

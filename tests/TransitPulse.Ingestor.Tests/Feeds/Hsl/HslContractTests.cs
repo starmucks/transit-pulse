@@ -5,6 +5,7 @@ using TransitPulse.Domain;
 using TransitPulse.Ingestor.Feeds.Hsl;
 using TransitPulse.Ingestor.Kafka;
 using TransitPulse.Ingestor.Pipeline;
+using TransitPulse.Ingestor.Tests.Normalization;
 
 namespace TransitPulse.Ingestor.Tests.Feeds.Hsl;
 
@@ -40,7 +41,7 @@ public sealed class HslContractTests
             (string)message["topic"]!);
         VehiclePosition? expected = _expected[line] == "null" ? null : PositionMessage.Parse(Encoding.UTF8.GetBytes(_expected[line]));
 
-        var positions = new HslPositionNormalizer().Normalize(record);
+        var positions = new HslPositionNormalizer().Normalize(record, new DropLog());
 
         Assert.Equal(expected, Assert.Single(positions.DefaultIfEmpty()));
     }

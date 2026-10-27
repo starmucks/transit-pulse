@@ -3,6 +3,7 @@ using System.Text;
 using TransitPulse.Ingestor.Feeds.GtfsRt;
 using TransitPulse.Ingestor.Kafka;
 using TransitPulse.Ingestor.Pipeline;
+using TransitPulse.Ingestor.Tests.Normalization;
 using Rt = TransitRealtime;
 
 namespace TransitPulse.Ingestor.Tests.Feeds.GtfsRt;
@@ -21,7 +22,7 @@ public sealed class GtfsRtContractTests
         var record = new RawRecord(
             "mbta-vp", DateTimeOffset.Parse("2026-10-26T00:00:03.443Z", CultureInfo.InvariantCulture), payload, Topic: null);
 
-        var positions = new GtfsRtPositionNormalizer("mbta", "mbta-vp").Normalize(record);
+        var positions = new GtfsRtPositionNormalizer("mbta", "mbta-vp").Normalize(record, new DropLog());
 
         // One line per entity: an entity added to the fixture without an expectation fails here.
         Assert.Equal(lines.Length, Rt.FeedMessage.Parser.ParseFrom(payload).Entity.Count);

@@ -38,7 +38,7 @@ internal sealed class HslPositionNormalizer : IPositionNormalizer
     public IReadOnlySet<string> RawFeedIds { get; } = new HashSet<string>(StringComparer.Ordinal) { FeedId };
 
     /// <inheritdoc/>
-    public IReadOnlyList<VehiclePosition> Normalize(RawRecord record)
+    public IReadOnlyList<VehiclePosition> Normalize(RawRecord record, IPositionDrops drops)
     {
         HfpMessage? message;
         try

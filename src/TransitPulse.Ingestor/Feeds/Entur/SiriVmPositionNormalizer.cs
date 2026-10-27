@@ -37,7 +37,7 @@ internal sealed class SiriVmPositionNormalizer : IPositionNormalizer
     public IReadOnlySet<string> RawFeedIds { get; } = new HashSet<string>(StringComparer.Ordinal) { RawFeedId };
 
     /// <inheritdoc/>
-    public IReadOnlyList<VehiclePosition> Normalize(RawRecord record)
+    public IReadOnlyList<VehiclePosition> Normalize(RawRecord record, IPositionDrops drops)
     {
         var positions = new List<VehiclePosition>();
         try
