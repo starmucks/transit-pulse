@@ -99,7 +99,8 @@ IFeedSource ──► Channel<RawRecord> (bounded, ждёт) ──► ArchiveSi
 ✅ 2026-10-27: влито PR #33. Нормализатор общий для любого GTFS-RT (`GtfsRtPositionNormalizer(feedId, rawFeedId)`), MBTA — одна строка регистрации. Правила по 2,85 млн записей за 26.10: порог устаревания 5 мин (1,7 % записей старше), незаданные скорость/курс/загруженность → `null` (не 0 и не `EMPTY`). Контрактный снимок — 10 случаев (отменённый и добавленный рейс, `trip_id` других форматов, курс не задан). Вживую 2 494 позиции от 187 машин за 254 с без нарушений; AOT-публикация без предупреждений.
 
 ### 1.8 Надёжность и метрики источников (#20)
-- [ ] Polly (`Microsoft.Extensions.Resilience`): ретраи с экспоненциальной задержкой для HTTP, переподключение MQTT.
+- [x] ~~Polly (`Microsoft.Extensions.Resilience`)~~ → собственный backoff ([ADR-0007](../adr/0007-retry-feed-sources-with-own-backoff-instead-of-polly.md)): ретраи с экспоненциальной задержкой для HTTP, переподключение MQTT.
+  - ✅ 2026-10-27: перезапуск источника 5 с → ×2 → 1 мин (+0–20 % jitter, сброс после минуты работы); HTTP при сетевых сбоях — по расписанию, `429`/`Retry-After` — пауза (≤ 30 мин); логи сбоев эпизодами. Ручная проверка с отключением сети — впереди.
 - [ ] Метрики OpenTelemetry по фиду: сообщений/с, байт/с, «секунд без данных», отброшено (устаревшие/дубли/ошибки разбора).
   - Из ревью 1.6: ответ, который разобран, но не дал ни одной позиции (например, после смены формата у источника), сейчас проходит молча — нужен счётчик отброшенных записей по причине у нормализаторов.
 - [ ] Тревога «источник молчит» (лог-предупреждение + health check `Degraded`).
@@ -125,6 +126,7 @@ IFeedSource ──► Channel<RawRecord> (bounded, ждёт) ──► ArchiveSi
 - [ADR-0004](../adr/0004-use-a-minimal-mqtt-client-for-the-hsl-feed.md) — Minimal MQTT 3.1.1 client for HSL instead of MQTTnet (задача 1.2; принят 2026-10-20).
 - [ADR-0005](../adr/0005-drop-positions-under-backpressure-and-rebuild-them-from-the-raw-archive.md) — Drop positions under backpressure and rebuild them from the raw archive (задача 1.4; принят 2026-10-24).
 - [ADR-0006](../adr/0006-normalize-every-feed-into-one-vehicle-position-model.md) — Normalize every feed into one VehiclePosition model (бриф §8 п. 6; в брифе — этап 2, но решение принято здесь после трёх адаптеров; принят 2026-10-27).
+- [ADR-0007](../adr/0007-retry-feed-sources-with-own-backoff-instead-of-polly.md) — Retry feed sources with our own backoff instead of Polly (задача 1.8; принят 2026-10-27).
 - [ADR-0003](../adr/0003-run-the-collector-as-native-aot-with-a-raw-parquet-archive.md) — Phase-A collector: Native AOT + systemd, raw archive in Parquet+zstd (принят 2026-10-15).
 - ADR 6a (push vs pull) — по брифу этап 4; черновик можно начать после 1.7, когда все три протокола реализованы.
 
