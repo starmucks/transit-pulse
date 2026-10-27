@@ -5,6 +5,7 @@ Full project context, goals and work plan: @PROJECT_BRIEF.md — read it before 
 ## Working process
 - **"Начинаем сессию"** → read `docs/STATUS.md` and the current `docs/stages/stage-N.md`; summarize stage, done, in progress, next step, open questions; propose the session plan.
 - **"Заканчиваем сессию"** → update `docs/STATUS.md` (max one screen), tick checkboxes in `stage-N.md`, offer a commit to the working branch.
+- Status and stage-file updates go into the current task's branch and PR (a session without code → the next task's branch); a separate docs PR only to open or close a stage.
 - Never merge to main, push tags, touch the VPS or spend money without the author's explicit command.
 - Propose an ADR when a disputable decision is made; propose a local `CLAUDE.md` rule when a rule is easy to break.
 
