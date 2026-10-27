@@ -2,6 +2,7 @@ using Confluent.Kafka;
 using Microsoft.Extensions.Options;
 using TransitPulse.Ingestor.Archive;
 using TransitPulse.Ingestor.Feeds.Entur;
+using TransitPulse.Ingestor.Feeds.GtfsRt;
 using TransitPulse.Ingestor.Feeds.Hsl;
 using TransitPulse.Ingestor.Kafka;
 using TransitPulse.Ingestor.Pipeline;
@@ -62,6 +63,8 @@ internal static class RawSinkRegistration
         // One normalizer per city; the router finds each by the raw feeds it claims.
         services.AddSingleton<IPositionNormalizer, HslPositionNormalizer>();
         services.AddSingleton<IPositionNormalizer, SiriVmPositionNormalizer>();
+        // Boston: the GTFS-RT adapter is city-neutral, so a city is its pair of feed ids.
+        services.AddSingleton<IPositionNormalizer>(new GtfsRtPositionNormalizer(feedId: "mbta", rawFeedId: "mbta-vp"));
         services.AddSingleton<PositionRouter>();
         services.AddSingleton<IPositionSink>(provider =>
         {

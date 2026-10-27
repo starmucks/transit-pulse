@@ -1,0 +1,10 @@
+{"feedId":"mbta","vehicleId":"y1256","tripId":"78210003","routeId":"28","lat":42.29431915283203,"lon":-71.08804321289062,"bearing":0.0,"occupancy":"ManySeatsAvailable","observedAt":"2026-10-25T23:59:41.000+00:00"}
+{"feedId":"mbta","vehicleId":"y1821","tripId":"78983359","routeId":"10","lat":42.32560729980469,"lon":-71.06580352783203,"bearing":317.0,"occupancy":"ManySeatsAvailable","observedAt":"2026-10-25T23:59:57.000+00:00"}
+{"feedId":"mbta","vehicleId":"y1896","tripId":"78983246","routeId":"66","lat":42.3575325012207,"lon":-71.12786102294922,"bearing":270.0,"occupancy":"FewSeatsAvailable","observedAt":"2026-10-25T23:59:55.000+00:00"}
+null
+{"feedId":"mbta","vehicleId":"O-548C6147","tripId":"77822376","routeId":"Orange","lat":42.32854080200195,"lon":-71.09757232666016,"bearing":210.0,"observedAt":"2026-10-25T23:59:56.000+00:00"}
+{"feedId":"mbta","vehicleId":"G-10143","tripId":"77658012","routeId":"Green-C","lat":42.346649169921875,"lon":-71.1048812866211,"bearing":60.0,"observedAt":"2026-10-25T23:59:42.000+00:00"}
+{"feedId":"mbta","vehicleId":"1718","tripId":"HHwithSalemNoBlocks-867003-7172","routeId":"CR-Newburyport","lat":42.44099807739258,"lon":-70.9767074584961,"speedMps":13.9,"observedAt":"2026-10-25T23:59:55.000+00:00"}
+{"feedId":"mbta","vehicleId":"y1979","tripId":"78481212","routeId":"77","lat":42.407188415527344,"lon":-71.14413452148438,"bearing":313.0,"observedAt":"2026-10-25T23:59:56.000+00:00"}
+{"feedId":"mbta","vehicleId":"y1786","tripId":"78983954-OL1","routeId":"8","lat":42.3381462097168,"lon":-71.09668731689453,"bearing":122.0,"observedAt":"2026-10-25T23:59:59.000+00:00"}
+{"feedId":"mbta","vehicleId":"R-548C6540","tripId":"ADDED-1585021557","routeId":"Red","lat":42.35525894165039,"lon":-71.0601577758789,"bearing":310.0,"observedAt":"2026-10-25T23:59:56.000+00:00"}

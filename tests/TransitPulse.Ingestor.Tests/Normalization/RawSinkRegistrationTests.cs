@@ -72,6 +72,20 @@ public sealed class RawSinkRegistrationTests
         Assert.Equal(("entur-sky", "3350447527"), (Assert.Single(positions).FeedId, positions[0].VehicleId));
     }
 
+    [Fact]
+    public void Full_mode_normalizes_mbta_records()
+    {
+        using var provider = Build(Configuration("full", bootstrapServers: "127.0.0.1:1"));
+        var payload = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "mbta", "vp.pb"));
+        var receivedAt = new DateTimeOffset(2026, 10, 26, 0, 0, 3, TimeSpan.Zero);
+
+        var positions = provider.GetRequiredService<PositionRouter>().Route(new RawRecord("mbta-vp", receivedAt, payload, null));
+
+        // 10 vehicles in the snapshot, one of them stale.
+        Assert.Equal(9, positions.Count);
+        Assert.All(positions, position => Assert.Equal("mbta", position.FeedId));
+    }
+
     [Theory]
     [InlineData("Kafka:BootstrapServers", "")]
     [InlineData("Kafka:PositionsTopic", " ")]
