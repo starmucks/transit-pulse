@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -8,6 +9,7 @@ using TransitPulse.Ingestor.Archive;
 using TransitPulse.Ingestor.Kafka;
 using TransitPulse.Ingestor.Normalization;
 using TransitPulse.Ingestor.Pipeline;
+using TransitPulse.Ingestor.Tests.Feeds.Entur;
 
 namespace TransitPulse.Ingestor.Tests.Normalization;
 
@@ -52,6 +54,22 @@ public sealed class RawSinkRegistrationTests
         var positions = provider.GetRequiredService<PositionRouter>().Route(new RawRecord("hsl", receivedAt, payload, null));
 
         Assert.Equal("40/108", Assert.Single(positions).VehicleId);
+    }
+
+    [Fact]
+    public void Full_mode_normalizes_siri_vm_records()
+    {
+        using var provider = Build(Configuration("full", bootstrapServers: "127.0.0.1:1"));
+        var payload = Encoding.UTF8.GetBytes(SiriVmSamples.Response("""
+            <VehicleActivity><RecordedAtTime>2026-10-23T08:59:50+02:00</RecordedAtTime><MonitoredVehicleJourney>
+            <VehicleLocation><Longitude>5.3</Longitude><Latitude>60.4</Latitude></VehicleLocation>
+            <VehicleRef>3350447527</VehicleRef></MonitoredVehicleJourney></VehicleActivity>
+            """));
+        var receivedAt = new DateTimeOffset(2026, 10, 23, 7, 0, 0, TimeSpan.Zero);
+
+        var positions = provider.GetRequiredService<PositionRouter>().Route(new RawRecord("entur-sky-vm", receivedAt, payload, null));
+
+        Assert.Equal(("entur-sky", "3350447527"), (Assert.Single(positions).FeedId, positions[0].VehicleId));
     }
 
     [Theory]
