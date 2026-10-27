@@ -61,15 +61,17 @@ internal sealed class GtfsRtPositionNormalizer(string feedId, string rawFeedId) 
     // Null skips this vehicle only: one bad record must not cost the other hundreds in the snapshot.
     private VehiclePosition? Position(Rt.VehiclePosition vehicle, DateTimeOffset receivedAt)
     {
+        // A time past year 9999 is rejected before the conversion, which would throw and cost the whole snapshot.
         if (vehicle.Vehicle?.Id is not { } vehicleId || string.IsNullOrWhiteSpace(vehicleId)
             || vehicle.Position is not { } position
-            || !vehicle.HasTimestamp || vehicle.Timestamp is 0 || vehicle.Timestamp > _maxUnixSeconds)
+            || vehicle.Timestamp > _maxUnixSeconds)
         {
             return null;
         }
 
         var observedAt = DateTimeOffset.FromUnixTimeSeconds((long)vehicle.Timestamp);
 
+        // An unset or zero timestamp reads as 1970 and fails the age check.
         // "Not within" rather than "outside": every comparison with NaN is false.
         if (receivedAt - observedAt > MaxRecordAge
             || position.Latitude is not (>= -90 and <= 90)

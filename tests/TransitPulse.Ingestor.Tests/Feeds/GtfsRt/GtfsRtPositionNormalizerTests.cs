@@ -78,8 +78,13 @@ public sealed class GtfsRtPositionNormalizerTests
     public void Reads_the_feed_ids_it_was_given()
     {
         var normalizer = new GtfsRtPositionNormalizer("nl", "nl-vp");
+        var message = new Rt.FeedMessage { Header = new Rt.FeedHeader { GtfsRealtimeVersion = "2.0" } };
+        message.Entity.Add(Entity(Sample()));
+
+        var positions = normalizer.Normalize(new RawRecord("nl-vp", _receivedAt, message.ToByteArray(), Topic: null));
 
         Assert.Equal(["nl-vp"], normalizer.RawFeedIds);
+        Assert.Equal("nl", Assert.Single(positions).FeedId);
     }
 
     [Fact]
@@ -177,7 +182,9 @@ public sealed class GtfsRtPositionNormalizerTests
         ["no position"] = v => v.Position = null,
         ["no timestamp"] = v => v.ClearTimestamp(),
         ["zero timestamp"] = v => v.Timestamp = 0,
-        ["timestamp past year 9999"] = v => v.Timestamp = ulong.MaxValue,
+        // Past 9999-12-31 but positive as a long: the conversion would throw. (ulong.MaxValue becomes -1, i.e. 1969.)
+        ["timestamp past year 9999"] = v => v.Timestamp = 253_402_300_800,
+        ["timestamp long.MaxValue"] = v => v.Timestamp = long.MaxValue,
         ["latitude NaN"] = v => v.Position.Latitude = float.NaN,
         ["latitude 91"] = v => v.Position.Latitude = 91,
         ["longitude -181"] = v => v.Position.Longitude = -181,
