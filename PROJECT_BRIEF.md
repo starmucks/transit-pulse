@@ -107,7 +107,7 @@ Transit Pulse — пет-проект: система мониторинга г�
 | Доставка | **Push**: MQTT-подписка | **Инкрементальный pull**: опрос с `requestorId`, в ответе только изменения | **Полный pull**: опрос снимка |
 | Объём (замер) | ~750 сообщ./с вечером, 519 машин | 422 машины Бергена (вся Норвегия ~1 500) | 514 машин вечером (днём ~800) |
 | Частота | 1 раз/с на машину | опрос раз в 10–30 с | фид обновляется каждые несколько секунд |
-| Задержка в данных | ✅ поле `dl` | ✅ у 100% машин (`PT5M43S`) | ❌ считаем из Trip Updates |
+| Задержка в данных | ✅ поле `dl` | ✅ у 100% машин (`PT5M43S`) | ❌ пересчёт по расписанию (в Trip Updates MBTA только абсолютные прогнозы, без `delay`) |
 | Загруженность | ✅ `occu` | ✅ у 81% | ✅ у 72% (+ по вагонам у поездов) |
 | Особые поля | двери, одометр, скорость | «в пробке» (`InCongestion`) у 86%, «стоит на остановке» | статус у остановки, загрузка вагонов |
 | Официальные прогнозы | ✅ GTFS-RT Trip Updates | ✅ SIRI-ET | ✅ GTFS-RT Trip Updates (1 232 рейса) |
@@ -143,7 +143,7 @@ Transit Pulse — пет-проект: система мониторинга г�
 
 **Поля SIRI-VM** (`MonitoredVehicleJourney`, из реального ответа Бергена): `LineRef` (`SKY:Line:6`), `DatedVehicleJourneyRef` (рейс), `VehicleMode`, `PublishedLineName`, `OperatorRef`, `OriginRef/OriginName`, `DestinationRef/DestinationName`, `Monitored`, `InCongestion`, `VehicleLocation` (`Latitude`/`Longitude`), `Bearing`, `Occupancy` (`seatsAvailable`…), `Delay` (ISO 8601 duration, `PT5M43S`), `VehicleStatus`, `VehicleRef`, `MonitoredCall` (`StopPointRef`, `Order`, `StopPointName`, `VehicleAtStop`), `RecordedAtTime` (время замера). Особенности: у части записей нет `VehicleMode`; данные менее свежие (медиана возраста записи ~40 с) — адаптер должен отбрасывать устаревшие записи по `RecordedAtTime`.
 
-**Поля MBTA GTFS-RT `VehiclePosition`:** `trip` (trip_id, route_id, direction_id, start_time/date), `position` (lat, lon, bearing, редко speed), `current_stop_sequence`, `current_status` (`STOPPED_AT`, `IN_TRANSIT_TO`, `INCOMING_AT`), `stop_id`, `timestamp`, `vehicle` (id, label), `occupancy_status`, `occupancy_percentage`, `multi_carriage_details` (загрузка по вагонам). Задержки в позициях нет — берётся из `TripUpdates` (сравнение с расписанием).
+**Поля MBTA GTFS-RT `VehiclePosition`:** `trip` (trip_id, route_id, direction_id, start_time/date), `position` (lat, lon, bearing, редко speed), `current_stop_sequence`, `current_status` (`STOPPED_AT`, `IN_TRANSIT_TO`, `INCOMING_AT`), `stop_id`, `timestamp`, `vehicle` (id, label), `occupancy_status`, `occupancy_percentage`, `multi_carriage_details` (загрузка по вагонам). Задержки в позициях нет; в `TripUpdates` MBTA тоже нет поля `delay` — только абсолютные прогнозы `arrival.time` (замер 26.10.2026: 0 из 1,83 млн), поэтому задержку считает Processor по расписанию (`stop_times.txt`).
 
 ### 4.2. Контекст для ML и объяснений (проверены вживую)
 
@@ -264,7 +264,7 @@ Transit Pulse — пет-проект: система мониторинга г�
 - Интерфейс `IFeedSource` + три реализации с разными протоколами:
   - `HslMqttSource` — push: постоянная MQTT-подписка, JSON, ~1 сообщ./с на машину.
   - `SiriVmPollingSource` — инкрементальный pull: опрос Entur с постоянным `requestorId` (в ответе только изменения), **потоковый разбор XML через `XmlReader`** (ответы до нескольких МБ не держим целиком в памяти), парсинг ISO 8601 duration (`PT5M43S`), отбрасывание устаревших записей по `RecordedAtTime`, восстановление полного снимка при смене `requestorId`/рестарте.
-  - `GtfsRtPollingSource` — полный pull: опрос protobuf-снимка с `ETag`/`If-Modified-Since`, вычисление дельты относительно предыдущего снимка, задержка — из `TripUpdates`.
+  - `GtfsRtPollingSource` — полный pull: опрос protobuf-снимка с `ETag`/`If-Modified-Since`, вычисление дельты относительно предыдущего снимка; задержки адаптер не даёт (`null`) — её считает Processor.
   - Новый город = новый адаптер (+ конфигурация); остальная система не меняется.
 - Нормализация различий: идентификаторы (`oper/veh` vs `VehicleRef` vs `vehicle.id`), единицы скорости, формат задержки, словари загруженности (HSL `occu` / SIRI `Occupancy` / GTFS `OccupancyStatus`) → единый enum, часовые пояса → `DateTimeOffset` UTC.
 - Единая модель:
@@ -298,7 +298,7 @@ Transit Pulse — пет-проект: система мониторинга г�
 1. Состояние машины (последние N точек) в памяти, снапшот в Redis для восстановления после ребаланса.
 2. **Map matching**: проекция GPS на геометрию маршрута (`shapes.txt`), фильтрация шума, пройденная дистанция вдоль маршрута.
 3. **Детекция прибытия/отправления**: вход в радиус остановки + скорость ≈ 0 + выезд → событие с фактическим временем.
-4. **Задержка**: у HSL — поле `dl`, у Бергена — `Delay`, у Бостона — из `TripUpdates`/факт против `stop_times.txt`. Разные источники задержки — аргумент за единую модель; для контроля качества задержка дополнительно пересчитывается по расписанию во всех городах.
+4. **Задержка**: у HSL — поле `dl`, у Бергена — `Delay`, у Бостона — факт против `stop_times.txt` (в `TripUpdates` MBTA нет `delay`). Разные источники задержки — аргумент за единую модель; для контроля качества задержка дополнительно пересчитывается по расписанию во всех городах.
 5. **Слипание**: по линии — упорядоченный список машин по дистанции; интервал < X% планового → событие.
 6. **Гарантии**: детерминированные id событий (`vehicleId+tripId+stopId+serviceDate`), upsert; после N ретраев — в DLQ. Exactly-once Kafka-транзакции сознательно не используем (ADR).
 
@@ -552,7 +552,7 @@ transit-pulse/
 
 Этапы 2–3 выполняются на Хельсинки (самый богатый и частый поток). Здесь подключаем Берген и Бостон к обработке и продукту:
 - Импорт расписаний Бергена (GTFS-выгрузка Entur; NeTEx — если GTFS неполон) и Бостона (GTFS MBTA) тем же импортёром.
-- Processor для Бергена и Бостона: map matching, прибытия, задержки (у Бостона — из Trip Updates/расписания), слипание.
+- Processor для Бергена и Бостона: map matching, прибытия, задержки (у Бостона — по расписанию), слипание.
 - Переключатель городов на карте, пунктуальность по городам, сравнение городов на дашборде.
 - Опционально — **четвёртый город** (Нидерланды); ADR 6a (push vs pull).
 
