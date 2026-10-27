@@ -96,7 +96,7 @@ IFeedSource ──► Channel<RawRecord> (bounded, ждёт) ──► ArchiveSi
 - [x] Контрактные тесты на сохранённых `.pb`.
 
 **Готово, когда:** контрактные тесты зелёные; позиции `mbta` в `positions.raw`.
-✅ 2026-10-27 (PR готов): нормализатор общий для любого GTFS-RT (`GtfsRtPositionNormalizer(feedId, rawFeedId)`), MBTA — одна строка регистрации. Правила по 2,85 млн записей за 26.10: порог устаревания 5 мин (1,7 % записей старше), незаданные скорость/курс/загруженность → `null` (не 0 и не `EMPTY`). Контрактный снимок — 10 случаев (отменённый и добавленный рейс, `trip_id` других форматов, курс не задан). Вживую 2 494 позиции от 187 машин за 254 с без нарушений; AOT-публикация без предупреждений.
+✅ 2026-10-27: влито PR #33. Нормализатор общий для любого GTFS-RT (`GtfsRtPositionNormalizer(feedId, rawFeedId)`), MBTA — одна строка регистрации. Правила по 2,85 млн записей за 26.10: порог устаревания 5 мин (1,7 % записей старше), незаданные скорость/курс/загруженность → `null` (не 0 и не `EMPTY`). Контрактный снимок — 10 случаев (отменённый и добавленный рейс, `trip_id` других форматов, курс не задан). Вживую 2 494 позиции от 187 машин за 254 с без нарушений; AOT-публикация без предупреждений.
 
 ### 1.8 Надёжность и метрики источников (#20)
 - [ ] Polly (`Microsoft.Extensions.Resilience`): ретраи с экспоненциальной задержкой для HTTP, переподключение MQTT.
@@ -124,7 +124,7 @@ IFeedSource ──► Channel<RawRecord> (bounded, ждёт) ──► ArchiveSi
 ## ADR этапа
 - [ADR-0004](../adr/0004-use-a-minimal-mqtt-client-for-the-hsl-feed.md) — Minimal MQTT 3.1.1 client for HSL instead of MQTTnet (задача 1.2; принят 2026-10-20).
 - [ADR-0005](../adr/0005-drop-positions-under-backpressure-and-rebuild-them-from-the-raw-archive.md) — Drop positions under backpressure and rebuild them from the raw archive (задача 1.4; принят 2026-10-24).
-- ADR-0006 — Unified `VehiclePosition` model and feed adapter pattern (бриф §8 п. 6; в брифе — этап 2, но решение принимается здесь; номер сдвинут: 0005 занят решением из 1.4).
+- [ADR-0006](../adr/0006-normalize-every-feed-into-one-vehicle-position-model.md) — Normalize every feed into one VehiclePosition model (бриф §8 п. 6; в брифе — этап 2, но решение принято здесь после трёх адаптеров; принят 2026-10-27).
 - [ADR-0003](../adr/0003-run-the-collector-as-native-aot-with-a-raw-parquet-archive.md) — Phase-A collector: Native AOT + systemd, raw archive in Parquet+zstd (принят 2026-10-15).
 - ADR 6a (push vs pull) — по брифу этап 4; черновик можно начать после 1.7, когда все три протокола реализованы.
 
