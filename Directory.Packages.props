@@ -21,6 +21,8 @@
 
   <ItemGroup Label="Feeds and storage">
     <PackageVersion Include="Confluent.Kafka" Version="2.16.0" />
+    <PackageVersion Include="Google.Protobuf" Version="3.36.2" />
+    <PackageVersion Include="Grpc.Tools" Version="2.85.0" />
     <PackageVersion Include="Parquet.Net" Version="6.1.0" />
   </ItemGroup>
 

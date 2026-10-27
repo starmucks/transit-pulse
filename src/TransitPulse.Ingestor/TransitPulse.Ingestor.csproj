@@ -26,8 +26,18 @@
 
   <ItemGroup>
     <PackageReference Include="Confluent.Kafka" />
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Parquet.Net" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      The official GTFS Realtime schema, unmodified (google/transit 474750a163, 2026-08-17), so an update is a file swap.
+      Only message classes are generated (no gRPC services), in namespace TransitRealtime.
+    -->
+    <Protobuf Include="Feeds\GtfsRt\gtfs-realtime.proto" GrpcServices="None" Access="Internal" />
   </ItemGroup>
 
   <ItemGroup>
