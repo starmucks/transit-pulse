@@ -49,6 +49,9 @@ internal sealed partial class HslMqttSource(
     public string FeedId => "hsl";
 
     /// <inheritdoc />
+    public TimeSpan? MaxSilence => options.Value.MaxSilence;
+
+    /// <inheritdoc />
     public async Task RunAsync(ChannelWriter<RawRecord> output, CancellationToken cancellationToken)
     {
         while (true)

@@ -1,3 +1,5 @@
+using System.Diagnostics.Metrics;
+using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging.Testing;
@@ -16,9 +18,16 @@ public sealed class NormalizingSinkTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     private NormalizingSink Create(
-        RecordingPositionSink positions, IRawSink? archive = null, int channelCapacity = 100, ILogger<NormalizingSink>? logger = null) =>
-        new(archive ?? _archive, new PositionRouter([new FakeNormalizer("hsl", "hsl")], NullLogger<PositionRouter>.Instance),
-            positions, _time, logger ?? NullLogger<NormalizingSink>.Instance, channelCapacity);
+        RecordingPositionSink positions,
+        IRawSink? archive = null,
+        int channelCapacity = 100,
+        ILogger<NormalizingSink>? logger = null,
+        IMeterFactory? meters = null)
+    {
+        var metrics = new PositionMetrics(meters ?? TestMeters.Create());
+        return new(archive ?? _archive, new PositionRouter([new FakeNormalizer("hsl", "hsl")], metrics, NullLogger<PositionRouter>.Instance),
+            positions, _time, metrics, logger ?? NullLogger<NormalizingSink>.Instance, channelCapacity);
+    }
 
     private static async Task WaitForAsync(Func<bool> condition)
     {
@@ -57,7 +66,9 @@ public sealed class NormalizingSinkTests
     {
         var gate = new TaskCompletionSource();
         var positions = new RecordingPositionSink { Gate = gate.Task };
-        using var sink = Create(positions, channelCapacity: 2);
+        var meters = TestMeters.Create();
+        using var skipped = new MetricCollector<long>(meters, FeedMetrics.MeterName, "transitpulse.positions.records_skipped");
+        using var sink = Create(positions, channelCapacity: 2, meters: meters);
 
         await WriteAsync(sink, 1);
         // The loop holds record 1 in a blocked publish: the channel then fits records 2 and 3 only.
@@ -68,6 +79,9 @@ public sealed class NormalizingSinkTests
 
         Assert.Equal(6, _archive.Records.Count);
         Assert.Equal(3, positions.Positions.Count);
+        var drops = skipped.GetMeasurementSnapshot();
+        Assert.Equal(3, drops.Sum(m => m.Value));
+        Assert.All(drops, m => Assert.Equal(PositionMetrics.Backpressure, m.Tags["reason"]));
     }
 
     [Fact]

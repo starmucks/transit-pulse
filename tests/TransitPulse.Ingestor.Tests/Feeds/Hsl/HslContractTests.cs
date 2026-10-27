@@ -5,6 +5,7 @@ using TransitPulse.Domain;
 using TransitPulse.Ingestor.Feeds.Hsl;
 using TransitPulse.Ingestor.Kafka;
 using TransitPulse.Ingestor.Pipeline;
+using TransitPulse.Ingestor.Tests.Normalization;
 
 namespace TransitPulse.Ingestor.Tests.Feeds.Hsl;
 
@@ -40,8 +41,11 @@ public sealed class HslContractTests
             (string)message["topic"]!);
         VehiclePosition? expected = _expected[line] == "null" ? null : PositionMessage.Parse(Encoding.UTF8.GetBytes(_expected[line]));
 
-        var positions = new HslPositionNormalizer().Normalize(record);
+        var drops = new DropLog();
+        var positions = new HslPositionNormalizer().Normalize(record, drops);
 
         Assert.Equal(expected, Assert.Single(positions.DefaultIfEmpty()));
+        // A message without a position is counted with a reason: nothing is dropped silently.
+        Assert.Equal(expected is null ? 1 : 0, drops.Reasons.Count);
     }
 }

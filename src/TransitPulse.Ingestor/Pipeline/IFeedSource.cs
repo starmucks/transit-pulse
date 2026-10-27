@@ -11,6 +11,12 @@ public interface IFeedSource
     string FeedId { get; }
 
     /// <summary>
+    /// Longest normal time without a record; longer marks the feed silent. <see langword="null"/> for feeds that may
+    /// legitimately stay quiet for long, such as alerts, whose unchanged responses are not archived.
+    /// </summary>
+    TimeSpan? MaxSilence { get; }
+
+    /// <summary>
     /// Receives messages and writes them to <paramref name="output"/> until <paramref name="cancellationToken"/> is cancelled.
     /// Writes must pass the token: when the channel is full they wait, and cancellation is what releases them on shutdown.
     /// Throwing ends this run; the pipeline logs the error and starts the source again after a delay.

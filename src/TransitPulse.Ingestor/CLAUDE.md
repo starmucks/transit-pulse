@@ -15,6 +15,10 @@
   `libsasl2.so.3` (absent on Ubuntu 24.04) and the client falls back to `centos8-librdkafka.so`.
 - **Adapters clean values per vehicle:** a source value `VehiclePosition` would reject (NaN speed, missing time)
   becomes `null` or skips that one vehicle; throwing from `Normalize` drops the whole message (a snapshot of hundreds).
+  A skipped vehicle is reported to `IPositionDrops` with a `PositionMetrics` reason; contract tests expect one drop
+  per `null` line.
+- **Feed silence limits** (`MaxSilence`) are set from measured gaps in the archive, not from the poll interval alone;
+  feeds whose unchanged responses are skipped (alerts, weather) have none.
 - **SIRI XML only through `XmlReader`** (responses reach several MB; no `XDocument`/`XmlDocument`).
 - **Time through `TimeProvider`** (needed by tests and replay); never `DateTime.UtcNow` or `Task.Delay` without it.
 - **Single reader.** Sinks, normalizers, the router and the deduplicator are called from one loop and keep state

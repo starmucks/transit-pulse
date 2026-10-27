@@ -2,7 +2,9 @@ using System.Text;
 using System.Text.Json.Nodes;
 using TransitPulse.Domain;
 using TransitPulse.Ingestor.Feeds.Hsl;
+using TransitPulse.Ingestor.Normalization;
 using TransitPulse.Ingestor.Pipeline;
+using TransitPulse.Ingestor.Tests.Normalization;
 
 namespace TransitPulse.Ingestor.Tests.Feeds.Hsl;
 
@@ -15,7 +17,10 @@ public sealed class HslPositionNormalizerTests
         "line":30,"start":"09:58","loc":"GPS","stop":1030425,"route":"1002","occu":0}}
         """;
 
-    private static IReadOnlyList<VehiclePosition> Normalize(params (string Field, string Json)[] changes)
+    private static IReadOnlyList<VehiclePosition> Normalize(params (string Field, string Json)[] changes) =>
+        Normalize(new DropLog(), changes);
+
+    private static IReadOnlyList<VehiclePosition> Normalize(DropLog drops, params (string Field, string Json)[] changes)
     {
         var root = JsonNode.Parse(Sample)!;
         foreach (var (field, json) in changes)
@@ -23,7 +28,7 @@ public sealed class HslPositionNormalizerTests
             root["VP"]![field] = JsonNode.Parse(json);
         }
 
-        return new HslPositionNormalizer().Normalize(Record(root.ToJsonString()));
+        return new HslPositionNormalizer().Normalize(Record(root.ToJsonString()), drops);
     }
 
     private static VehiclePosition Position(params (string Field, string Json)[] changes) => Assert.Single(Normalize(changes));
@@ -109,16 +114,19 @@ public sealed class HslPositionNormalizerTests
     }
 
     [Theory]
-    [InlineData("lat", "null")]
-    [InlineData("long", "null")]
-    [InlineData("tst", "null")]
-    [InlineData("oper", "null")]
-    [InlineData("veh", "null")]
-    [InlineData("lat", "91")]
-    [InlineData("long", "-181")]
-    public void Vehicle_without_valid_coordinates_time_or_identity_is_skipped(string field, string json)
+    [InlineData("lat", "null", PositionMetrics.BadLocation)]
+    [InlineData("long", "null", PositionMetrics.BadLocation)]
+    [InlineData("tst", "null", PositionMetrics.Incomplete)]
+    [InlineData("oper", "null", PositionMetrics.Incomplete)]
+    [InlineData("veh", "null", PositionMetrics.Incomplete)]
+    [InlineData("lat", "91", PositionMetrics.BadLocation)]
+    [InlineData("long", "-181", PositionMetrics.BadLocation)]
+    public void Vehicle_without_valid_coordinates_time_or_identity_is_skipped(string field, string json, string reason)
     {
-        Assert.Empty(Normalize((field, json)));
+        var drops = new DropLog();
+
+        Assert.Empty(Normalize(drops, (field, json)));
+        Assert.Equal([reason], drops.Reasons);
     }
 
     [Theory]
@@ -131,11 +139,14 @@ public sealed class HslPositionNormalizerTests
 
         if (fails)
         {
-            Assert.Throws<FormatException>(() => normalizer.Normalize(record));
+            Assert.Throws<FormatException>(() => normalizer.Normalize(record, new DropLog()));
         }
         else
         {
-            Assert.Empty(normalizer.Normalize(record));
+            var drops = new DropLog();
+
+            Assert.Empty(normalizer.Normalize(record, drops));
+            Assert.Empty(drops.Reasons);
         }
     }
 }

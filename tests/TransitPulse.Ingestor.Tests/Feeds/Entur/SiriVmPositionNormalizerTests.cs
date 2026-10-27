@@ -2,7 +2,9 @@ using System.Text;
 using System.Text.RegularExpressions;
 using TransitPulse.Domain;
 using TransitPulse.Ingestor.Feeds.Entur;
+using TransitPulse.Ingestor.Normalization;
 using TransitPulse.Ingestor.Pipeline;
+using TransitPulse.Ingestor.Tests.Normalization;
 
 namespace TransitPulse.Ingestor.Tests.Feeds.Entur;
 
@@ -29,8 +31,11 @@ public sealed class SiriVmPositionNormalizerTests
         Regex.Replace(activity, $"<{element}>[^<]*</{element}>", value is null ? "" : $"<{element}>{value}</{element}>");
 
     private static IReadOnlyList<VehiclePosition> Normalize(DateTimeOffset receivedAt, params string[] activities) =>
+        Normalize(new DropLog(), receivedAt, activities);
+
+    private static IReadOnlyList<VehiclePosition> Normalize(DropLog drops, DateTimeOffset receivedAt, params string[] activities) =>
         new SiriVmPositionNormalizer().Normalize(
-            new RawRecord("entur-sky-vm", receivedAt, Encoding.UTF8.GetBytes(SiriVmSamples.Response(activities)), Topic: null));
+            new RawRecord("entur-sky-vm", receivedAt, Encoding.UTF8.GetBytes(SiriVmSamples.Response(activities)), Topic: null), drops);
 
     private static VehiclePosition Position(string activity) => Assert.Single(Normalize(_receivedAt, activity));
 
@@ -128,9 +133,11 @@ public sealed class SiriVmPositionNormalizerTests
     public void Record_older_than_the_limit_is_dropped_and_one_at_the_limit_kept()
     {
         var limit = _recordedAt + SiriVmPositionNormalizer.MaxRecordAge;
+        var drops = new DropLog();
 
-        Assert.Single(Normalize(limit, Sample));
-        Assert.Empty(Normalize(limit.AddSeconds(1), Sample));
+        Assert.Single(Normalize(drops, limit, Sample));
+        Assert.Empty(Normalize(drops, limit.AddSeconds(1), Sample));
+        Assert.Equal([PositionMetrics.Stale], drops.Reasons);
     }
 
     [Theory]
@@ -153,10 +160,14 @@ public sealed class SiriVmPositionNormalizerTests
     public void Unusable_record_skips_only_its_vehicle(string element, string? value)
     {
         var other = With("VehicleRef", "3350447528");
+        var drops = new DropLog();
 
-        var position = Assert.Single(Normalize(_receivedAt, With(element, value), other));
+        var position = Assert.Single(Normalize(drops, _receivedAt, With(element, value), other));
 
         Assert.Equal("3350447528", position.VehicleId);
+        Assert.Equal(
+            [element is "Latitude" or "Longitude" ? PositionMetrics.BadLocation : PositionMetrics.Incomplete],
+            drops.Reasons);
     }
 
     [Theory]
@@ -185,7 +196,7 @@ public sealed class SiriVmPositionNormalizerTests
         var truncated = Encoding.UTF8.GetBytes(SiriVmSamples.Response(Sample, Sample)[..^300]);
 
         Assert.Throws<FormatException>(() =>
-            new SiriVmPositionNormalizer().Normalize(new RawRecord("entur-sky-vm", _receivedAt, truncated, Topic: null)));
+            new SiriVmPositionNormalizer().Normalize(new RawRecord("entur-sky-vm", _receivedAt, truncated, Topic: null), new DropLog()));
     }
 
     [Fact]
@@ -195,7 +206,7 @@ public sealed class SiriVmPositionNormalizerTests
             "?>", "?><!DOCTYPE Siri [<!ENTITY x \"x\">]>", StringComparison.Ordinal);
 
         Assert.Throws<FormatException>(() => new SiriVmPositionNormalizer().Normalize(
-            new RawRecord("entur-sky-vm", _receivedAt, Encoding.UTF8.GetBytes(withDtd), Topic: null)));
+            new RawRecord("entur-sky-vm", _receivedAt, Encoding.UTF8.GetBytes(withDtd), Topic: null), new DropLog()));
     }
 
     [Fact]

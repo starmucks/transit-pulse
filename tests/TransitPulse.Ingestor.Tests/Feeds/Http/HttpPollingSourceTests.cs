@@ -4,7 +4,9 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging.Testing;
 using Microsoft.Extensions.Time.Testing;
 using TransitPulse.Ingestor.Feeds.Http;
 using TransitPulse.Ingestor.Pipeline;
@@ -133,6 +135,104 @@ public sealed class HttpPollingSourceTests
         Assert.Single(run.Handler.Requests.Select(r => r.RequestUri!.ToString()).Distinct());
     }
 
+    [Fact]
+    public async Task Waits_as_long_as_retry_after_asks()
+    {
+        await using var run = PollingRun.Start([_ => Ok("a"), _ => TooManyRequests(TimeSpan.FromMinutes(2)), _ => Ok("b"), _ => Ok("c")]);
+
+        await run.PollsAsync(4);
+
+        var gaps = run.Gaps();
+        AssertGap(TimeSpan.FromMinutes(2), gaps[1]);
+        AssertGap(_interval, gaps[2]);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.ServiceUnavailable, true)]
+    [InlineData(HttpStatusCode.InternalServerError, false)]
+    [InlineData(HttpStatusCode.Forbidden, false)]
+    public async Task Follows_retry_after_only_on_429_and_503(HttpStatusCode status, bool followed)
+    {
+        await using var run = PollingRun.Start([_ => Rejected(status, TimeSpan.FromMinutes(2)), _ => Ok("a")]);
+
+        await run.PollsAsync(2);
+
+        AssertGap(followed ? TimeSpan.FromMinutes(2) : _interval, run.Gaps()[0]);
+    }
+
+    [Fact]
+    public async Task Doubles_the_pause_while_429_comes_without_retry_after()
+    {
+        await using var run = PollingRun.Start([_ => TooManyRequests(), _ => TooManyRequests(), _ => TooManyRequests(), _ => Ok("a"), _ => Ok("b")]);
+
+        await run.PollsAsync(5);
+
+        var gaps = run.Gaps();
+        AssertGap(_interval * 2, gaps[0]);
+        AssertGap(_interval * 4, gaps[1]);
+        AssertGap(_interval * 8, gaps[2]);
+        AssertGap(_interval, gaps[3]);
+    }
+
+    [Fact]
+    public async Task Caps_a_retry_after_that_asks_for_too_long()
+    {
+        await using var run = PollingRun.Start([_ => TooManyRequests(TimeSpan.FromDays(1)), _ => Ok("a")]);
+
+        await run.PollsAsync(2);
+
+        AssertGap(HttpPollingSource.MaxThrottle, run.Gaps()[0]);
+    }
+
+    [Fact]
+    public async Task Keeps_the_schedule_on_server_errors_without_retry_after()
+    {
+        await using var run = PollingRun.Start([_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable), _ => Ok("a")]);
+
+        await run.PollsAsync(2);
+
+        AssertGap(_interval, run.Gaps()[0]);
+    }
+
+    [Fact]
+    public async Task Logs_an_outage_once_when_it_starts_and_once_when_it_ends()
+    {
+        var logger = new FakeLogger<HttpPollingSource>();
+        var serverError = (HttpRequestMessage _) => new HttpResponseMessage(HttpStatusCode.InternalServerError);
+        await using var run = PollingRun.Start(
+            [_ => Ok("a"), serverError, serverError, serverError, _ => Ok("b"), _ => Ok("c"), _ => Ok("d")],
+            logger: logger);
+
+        // The episode ends at the first success a quiet period after the last failure: the second success here.
+        await run.PollsAsync(7);
+
+        var logs = logger.Collector.GetSnapshot();
+        var failing = Assert.Single(logs, log => log.Level == LogLevel.Warning);
+        Assert.Contains("HTTP 500", failing.Message, StringComparison.Ordinal);
+        var recovered = Assert.Single(logs, log => log.Level == LogLevel.Information);
+        Assert.Contains("3 polls failed", recovered.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The test advances time in steps of one interval, so a pause shows up rounded up to the next step: at least as
+    /// long as expected and less than one step longer.
+    /// </summary>
+    private static void AssertGap(TimeSpan expected, TimeSpan actual) =>
+        Assert.True(actual >= expected && actual < expected + _interval, $"Expected a pause of {expected}, got {actual}.");
+
+    private static HttpResponseMessage TooManyRequests(TimeSpan? retryAfter = null) => Rejected(HttpStatusCode.TooManyRequests, retryAfter);
+
+    private static HttpResponseMessage Rejected(HttpStatusCode status, TimeSpan? retryAfter)
+    {
+        var response = new HttpResponseMessage(status);
+        if (retryAfter is { } delay)
+        {
+            response.Headers.RetryAfter = new RetryConditionHeaderValue(delay);
+        }
+
+        return response;
+    }
+
     private static HttpResponseMessage Ok(string body, string? etag = null, DateTimeOffset? lastModified = null)
     {
         var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) };
@@ -148,13 +248,16 @@ public sealed class HttpPollingSourceTests
     private static HttpResponseMessage NotModified() => new(HttpStatusCode.NotModified);
 
     /// <summary>Answers requests from a script in order; every request past the script gets 304.</summary>
-    private sealed class ScriptedHandler(Func<HttpRequestMessage, HttpResponseMessage>[] script) : HttpMessageHandler
+    private sealed class ScriptedHandler(Func<HttpRequestMessage, HttpResponseMessage>[] script, TimeProvider time) : HttpMessageHandler
     {
         public ConcurrentQueue<HttpRequestMessage> Requests { get; } = new();
+
+        public ConcurrentQueue<DateTimeOffset> SentAt { get; } = new();
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var number = Requests.Count;
+            SentAt.Enqueue(time.GetUtcNow());
             Requests.Enqueue(request);
             return Task.FromResult(number < script.Length ? script[number](request) : NotModified());
         }
@@ -168,12 +271,12 @@ public sealed class HttpPollingSourceTests
         private readonly CancellationTokenSource _stop = new();
         private readonly HttpPollingSource _source;
 
-        private PollingRun(Func<HttpRequestMessage, HttpResponseMessage>[] script, HttpFeedOptions feed)
+        private PollingRun(Func<HttpRequestMessage, HttpResponseMessage>[] script, HttpFeedOptions feed, ILogger<HttpPollingSource> logger)
         {
             StartedAt = _time.GetUtcNow();
-            Handler = new ScriptedHandler(script);
+            Handler = new ScriptedHandler(script, _time);
             feed.Interval = _interval;
-            _source = new HttpPollingSource(feed, Handler, _time, NullLogger<HttpPollingSource>.Instance);
+            _source = new HttpPollingSource(feed, Handler, _time, logger);
             Task = _source.RunAsync(_output.Writer, _stop.Token);
         }
 
@@ -185,8 +288,21 @@ public sealed class HttpPollingSourceTests
 
         public ChannelReader<RawRecord> Output => _output.Reader;
 
-        public static PollingRun Start(Func<HttpRequestMessage, HttpResponseMessage>[] script, HttpFeedOptions? feed = null) =>
-            new(script, feed ?? new HttpFeedOptions { FeedId = "test", Url = "https://example.test/feed" });
+        public static PollingRun Start(
+            Func<HttpRequestMessage, HttpResponseMessage>[] script,
+            HttpFeedOptions? feed = null,
+            ILogger<HttpPollingSource>? logger = null) =>
+            new(
+                script,
+                feed ?? new HttpFeedOptions { FeedId = "test", Url = "https://example.test/feed" },
+                logger ?? NullLogger<HttpPollingSource>.Instance);
+
+        /// <summary>Time between consecutive requests, in order.</summary>
+        public List<TimeSpan> Gaps()
+        {
+            var sent = Handler.SentAt.ToList();
+            return sent.Zip(sent.Skip(1), (earlier, later) => later - earlier).ToList();
+        }
 
         /// <summary>
         /// Advances time until at least <paramref name="count"/> requests were sent. Polls run one after another, so

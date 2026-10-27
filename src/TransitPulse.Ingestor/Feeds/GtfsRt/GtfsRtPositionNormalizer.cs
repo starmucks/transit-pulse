@@ -34,7 +34,7 @@ internal sealed class GtfsRtPositionNormalizer(string feedId, string rawFeedId) 
     public IReadOnlySet<string> RawFeedIds { get; } = new HashSet<string>(StringComparer.Ordinal) { rawFeedId };
 
     /// <inheritdoc/>
-    public IReadOnlyList<VehiclePosition> Normalize(RawRecord record)
+    public IReadOnlyList<VehiclePosition> Normalize(RawRecord record, IPositionDrops drops)
     {
         Rt.FeedMessage message;
         try
@@ -49,7 +49,7 @@ internal sealed class GtfsRtPositionNormalizer(string feedId, string rawFeedId) 
         var positions = new List<VehiclePosition>(message.Entity.Count);
         foreach (var entity in message.Entity)
         {
-            if (!entity.IsDeleted && entity.Vehicle is { } vehicle && Position(vehicle, record.ReceivedAt) is { } position)
+            if (!entity.IsDeleted && entity.Vehicle is { } vehicle && Position(vehicle, record.ReceivedAt, drops) is { } position)
             {
                 positions.Add(position);
             }
@@ -59,24 +59,31 @@ internal sealed class GtfsRtPositionNormalizer(string feedId, string rawFeedId) 
     }
 
     // Null skips this vehicle only: one bad record must not cost the other hundreds in the snapshot.
-    private VehiclePosition? Position(Rt.VehiclePosition vehicle, DateTimeOffset receivedAt)
+    private VehiclePosition? Position(Rt.VehiclePosition vehicle, DateTimeOffset receivedAt, IPositionDrops drops)
     {
-        // A time past year 9999 is rejected before the conversion, which would throw and cost the whole snapshot.
+        // An unset timestamp reads as 0 (1970) and would pass for a stale record, hiding a feed that stopped sending
+        // times. A time past year 9999 is rejected before the conversion, which would throw and cost the whole snapshot.
         if (vehicle.Vehicle?.Id is not { } vehicleId || string.IsNullOrWhiteSpace(vehicleId)
-            || vehicle.Position is not { } position
+            || vehicle.Timestamp == 0
             || vehicle.Timestamp > _maxUnixSeconds)
         {
+            drops.Drop(PositionMetrics.Incomplete);
             return null;
         }
 
         var observedAt = DateTimeOffset.FromUnixTimeSeconds((long)vehicle.Timestamp);
+        if (receivedAt - observedAt > MaxRecordAge)
+        {
+            drops.Drop(PositionMetrics.Stale);
+            return null;
+        }
 
-        // An unset or zero timestamp reads as 1970 and fails the age check.
         // "Not within" rather than "outside": every comparison with NaN is false.
-        if (receivedAt - observedAt > MaxRecordAge
+        if (vehicle.Position is not { } position
             || position.Latitude is not (>= -90 and <= 90)
             || position.Longitude is not (>= -180 and <= 180))
         {
+            drops.Drop(PositionMetrics.BadLocation);
             return null;
         }
 

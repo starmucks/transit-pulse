@@ -37,14 +37,14 @@ internal sealed class SiriVmPositionNormalizer : IPositionNormalizer
     public IReadOnlySet<string> RawFeedIds { get; } = new HashSet<string>(StringComparer.Ordinal) { RawFeedId };
 
     /// <inheritdoc/>
-    public IReadOnlyList<VehiclePosition> Normalize(RawRecord record)
+    public IReadOnlyList<VehiclePosition> Normalize(RawRecord record, IPositionDrops drops)
     {
         var positions = new List<VehiclePosition>();
         try
         {
             foreach (var activity in SiriVmReader.Read(new MemoryStream(record.Payload, writable: false)))
             {
-                if (Position(activity, record.ReceivedAt) is { } position)
+                if (Position(activity, record.ReceivedAt, drops) is { } position)
                 {
                     positions.Add(position);
                 }
@@ -61,15 +61,25 @@ internal sealed class SiriVmPositionNormalizer : IPositionNormalizer
     }
 
     // Null skips this vehicle only: one bad record must not cost the other hundreds in the response.
-    private static VehiclePosition? Position(SiriVehicleActivity activity, DateTimeOffset receivedAt)
+    private static VehiclePosition? Position(SiriVehicleActivity activity, DateTimeOffset receivedAt, IPositionDrops drops)
     {
-        if (string.IsNullOrWhiteSpace(activity.VehicleRef)
-            || Time(activity.RecordedAtTime) is not { } recordedAt
-            || receivedAt - recordedAt > MaxRecordAge
-            // "Not within" rather than "outside": every comparison with NaN (which parses from "NaN") is false.
-            || Number(activity.Latitude) is not { } lat || lat is not (>= -90 and <= 90)
+        if (string.IsNullOrWhiteSpace(activity.VehicleRef) || Time(activity.RecordedAtTime) is not { } recordedAt)
+        {
+            drops.Drop(PositionMetrics.Incomplete);
+            return null;
+        }
+
+        if (receivedAt - recordedAt > MaxRecordAge)
+        {
+            drops.Drop(PositionMetrics.Stale);
+            return null;
+        }
+
+        // "Not within" rather than "outside": every comparison with NaN (which parses from "NaN") is false.
+        if (Number(activity.Latitude) is not { } lat || lat is not (>= -90 and <= 90)
             || Number(activity.Longitude) is not { } lon || lon is not (>= -180 and <= 180))
         {
+            drops.Drop(PositionMetrics.BadLocation);
             return null;
         }
 

@@ -18,19 +18,25 @@ public sealed class HttpFeedRegistrationTests
             .AddJsonFile("appsettings.json", optional: false)
             .Build();
 
-        var feedIds = Resolve(configuration).Select(source => source.FeedId).ToList();
+        var sources = Resolve(configuration);
+        var feedIds = sources.Select(source => source.FeedId).ToList();
 
         Assert.Equal(
             ["entur-sky-vm", "entur-sky-et", "entur-sky-sx", "mbta-vp", "mbta-tu", "mbta-alerts", "hsl-tu", "hsl-alerts", "weather"],
             feedIds);
         Assert.All(feedIds, id => Assert.True(FeedIds.IsValid(id), id));
+        // Positions and predictions are checked for silence; alerts and weather may stay unchanged for long.
+        Assert.Equal(
+            [3, 5, null, 3, 5, null, 5, null, null],
+            sources.Select(source => source.MaxSilence?.TotalMinutes));
     }
 
     [Theory]
     [InlineData("example.test/feed", "00:01:00")]
     [InlineData("ftp://example.test/feed", "00:01:00")]
     [InlineData("https://example.test/feed", "00:00:00")]
-    public void Invalid_feed_fails_registration(string url, string interval)
+    [InlineData("https://example.test/feed", "00:01:00", "00:01:00")]
+    public void Invalid_feed_fails_registration(string url, string interval, string? maxSilence = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -38,6 +44,7 @@ public sealed class HttpFeedRegistrationTests
                 ["Feeds:Http:0:FeedId"] = "broken",
                 ["Feeds:Http:0:Url"] = url,
                 ["Feeds:Http:0:Interval"] = interval,
+                ["Feeds:Http:0:MaxSilence"] = maxSilence,
             })
             .Build();
 

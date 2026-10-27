@@ -7,7 +7,8 @@ namespace TransitPulse.Ingestor.Tests.Normalization;
 
 /// <summary>
 /// Returns one position of vehicle "v1" observed the payload's first byte of seconds after <see cref="T0"/>;
-/// returns nothing for <see cref="SilentFeed"/> and throws for <see cref="FailOnSeconds"/>.
+/// returns nothing for <see cref="SilentFeed"/> (reporting <see cref="SilentDropReason"/> when set) and throws for
+/// <see cref="FailOnSeconds"/>.
 /// </summary>
 internal sealed class FakeNormalizer(string cityFeedId, params string[] rawFeedIds) : IPositionNormalizer
 {
@@ -17,6 +18,8 @@ internal sealed class FakeNormalizer(string cityFeedId, params string[] rawFeedI
 
     public string? SilentFeed { get; init; }
 
+    public string? SilentDropReason { get; init; }
+
     public int? FailOnSeconds { get; init; }
 
     public int Calls { get; private set; }
@@ -24,7 +27,7 @@ internal sealed class FakeNormalizer(string cityFeedId, params string[] rawFeedI
     /// <summary>Raw record whose single payload byte is the number of seconds after <see cref="T0"/>.</summary>
     public static RawRecord Record(string feedId, byte seconds = 0) => new(feedId, T0, [seconds], null);
 
-    public IReadOnlyList<VehiclePosition> Normalize(RawRecord record)
+    public IReadOnlyList<VehiclePosition> Normalize(RawRecord record, IPositionDrops drops)
     {
         Calls++;
         var seconds = record.Payload[0];
@@ -33,10 +36,26 @@ internal sealed class FakeNormalizer(string cityFeedId, params string[] rawFeedI
             throw new FormatException("Broken payload.");
         }
 
-        return record.FeedId == SilentFeed
-            ? []
-            : [new VehiclePosition(cityFeedId, "v1", null, null, 60.2, 24.9, null, null, null, null, T0.AddSeconds(seconds))];
+        if (record.FeedId == SilentFeed)
+        {
+            if (SilentDropReason is not null)
+            {
+                drops.Drop(SilentDropReason);
+            }
+
+            return [];
+        }
+
+        return [new VehiclePosition(cityFeedId, "v1", null, null, 60.2, 24.9, null, null, null, null, T0.AddSeconds(seconds))];
     }
+}
+
+/// <summary>Keeps the drop reasons a normalizer reports, in order.</summary>
+internal sealed class DropLog : IPositionDrops
+{
+    public List<string> Reasons { get; } = [];
+
+    public void Drop(string reason) => Reasons.Add(reason);
 }
 
 /// <summary>Position sink that keeps everything in memory; can be held on a gate or made to fail.</summary>

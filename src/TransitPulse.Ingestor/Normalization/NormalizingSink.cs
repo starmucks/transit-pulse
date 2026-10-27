@@ -22,6 +22,7 @@ internal sealed partial class NormalizingSink : IRawSink, IDisposable
     private readonly IRawSink _archive;
     private readonly PositionRouter _router;
     private readonly IPositionSink _positions;
+    private readonly PositionMetrics _metrics;
     private readonly ILogger<NormalizingSink> _logger;
     private readonly Channel<RawRecord> _channel;
     private readonly CancellationTokenSource _drainStop;
@@ -39,6 +40,7 @@ internal sealed partial class NormalizingSink : IRawSink, IDisposable
     /// <param name="router">Turns records into positions.</param>
     /// <param name="positions">Where positions are published.</param>
     /// <param name="timeProvider">Clock for the shutdown drain budget.</param>
+    /// <param name="metrics">Count of records dropped on a full channel.</param>
     /// <param name="logger">Log for dropped records and publish failures.</param>
     /// <param name="channelCapacity">Records waiting to be published before new ones are dropped.</param>
     public NormalizingSink(
@@ -46,12 +48,14 @@ internal sealed partial class NormalizingSink : IRawSink, IDisposable
         PositionRouter router,
         IPositionSink positions,
         TimeProvider timeProvider,
+        PositionMetrics metrics,
         ILogger<NormalizingSink> logger,
         int channelCapacity = DefaultChannelCapacity)
     {
         _archive = archive;
         _router = router;
         _positions = positions;
+        _metrics = metrics;
         _logger = logger;
         _channel = Channel.CreateBounded<RawRecord>(new BoundedChannelOptions(channelCapacity)
         {
@@ -80,9 +84,13 @@ internal sealed partial class NormalizingSink : IRawSink, IDisposable
                 LogDroppingEnded(dropped);
             }
         }
-        else if (_drops.Fail(ChannelKey, record.ReceivedAt))
+        else
         {
-            LogDroppingStarted(_channel.Reader.Count);
+            _metrics.Skipped(record.FeedId, PositionMetrics.Backpressure);
+            if (_drops.Fail(ChannelKey, record.ReceivedAt))
+            {
+                LogDroppingStarted(_channel.Reader.Count);
+            }
         }
     }
 

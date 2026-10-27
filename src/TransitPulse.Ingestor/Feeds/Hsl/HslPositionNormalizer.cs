@@ -38,7 +38,7 @@ internal sealed class HslPositionNormalizer : IPositionNormalizer
     public IReadOnlySet<string> RawFeedIds { get; } = new HashSet<string>(StringComparer.Ordinal) { FeedId };
 
     /// <inheritdoc/>
-    public IReadOnlyList<VehiclePosition> Normalize(RawRecord record)
+    public IReadOnlyList<VehiclePosition> Normalize(RawRecord record, IPositionDrops drops)
     {
         HfpMessage? message;
         try
@@ -50,10 +50,22 @@ internal sealed class HslPositionNormalizer : IPositionNormalizer
             throw new FormatException("The HFP payload is not valid JSON of a VP event.", ex);
         }
 
-        // No coordinates (location from the odometer only) or no identity: nothing to place on a map.
-        if (message?.VP is not { Oper: { } oper, Veh: { } veh, Tst: { } tst, Lat: { } lat, Lon: { } lon } vp
-            || lat is < -90 or > 90 || lon is < -180 or > 180)
+        // Another event type: not a vehicle record, so nothing was dropped.
+        if (message?.VP is not { } vp)
         {
+            return [];
+        }
+
+        if (vp is not { Oper: { } oper, Veh: { } veh, Tst: { } tst })
+        {
+            drops.Drop(PositionMetrics.Incomplete);
+            return [];
+        }
+
+        // No coordinates (location from the odometer only): nothing to place on a map.
+        if (vp is not { Lat: { } lat, Lon: { } lon } || lat is < -90 or > 90 || lon is < -180 or > 180)
+        {
+            drops.Drop(PositionMetrics.BadLocation);
             return [];
         }
 
