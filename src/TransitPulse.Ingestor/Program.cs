@@ -27,7 +27,10 @@ builder.AddServiceDefaults();
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddRawSink(builder.Configuration);
-builder.Services.AddOptions<HslMqttOptions>().BindConfiguration(HslMqttOptions.SectionName);
+builder.Services.AddOptions<HslMqttOptions>().BindConfiguration(HslMqttOptions.SectionName)
+    // A limit within the reconnect timeout would report every reconnect as a silent feed.
+    .Validate(o => o.MaxSilence is null || o.MaxSilence > o.SilenceTimeout, "Feeds:Hsl:MaxSilence must be longer than SilenceTimeout.")
+    .ValidateOnStart();
 builder.Services.AddSingleton<IFeedSource, HslMqttSource>();
 builder.Services.AddHttpFeeds(builder.Configuration);
 

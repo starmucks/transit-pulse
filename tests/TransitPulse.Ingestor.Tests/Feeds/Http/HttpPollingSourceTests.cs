@@ -147,6 +147,19 @@ public sealed class HttpPollingSourceTests
         AssertGap(_interval, gaps[2]);
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.ServiceUnavailable, true)]
+    [InlineData(HttpStatusCode.InternalServerError, false)]
+    [InlineData(HttpStatusCode.Forbidden, false)]
+    public async Task Follows_retry_after_only_on_429_and_503(HttpStatusCode status, bool followed)
+    {
+        await using var run = PollingRun.Start([_ => Rejected(status, TimeSpan.FromMinutes(2)), _ => Ok("a")]);
+
+        await run.PollsAsync(2);
+
+        AssertGap(followed ? TimeSpan.FromMinutes(2) : _interval, run.Gaps()[0]);
+    }
+
     [Fact]
     public async Task Doubles_the_pause_while_429_comes_without_retry_after()
     {
@@ -207,9 +220,11 @@ public sealed class HttpPollingSourceTests
     private static void AssertGap(TimeSpan expected, TimeSpan actual) =>
         Assert.True(actual >= expected && actual < expected + _interval, $"Expected a pause of {expected}, got {actual}.");
 
-    private static HttpResponseMessage TooManyRequests(TimeSpan? retryAfter = null)
+    private static HttpResponseMessage TooManyRequests(TimeSpan? retryAfter = null) => Rejected(HttpStatusCode.TooManyRequests, retryAfter);
+
+    private static HttpResponseMessage Rejected(HttpStatusCode status, TimeSpan? retryAfter)
     {
-        var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+        var response = new HttpResponseMessage(status);
         if (retryAfter is { } delay)
         {
             response.Headers.RetryAfter = new RetryConditionHeaderValue(delay);

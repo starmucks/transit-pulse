@@ -27,9 +27,11 @@ internal sealed class FeedSilenceHealthCheck(IEnumerable<IFeedSource> sources, F
         {
             if (metrics.SilenceOf(feedId) is { } silence && silence > limit)
             {
-                silent[feedId] = Math.Round(silence.TotalSeconds);
+                // Rounded once: Math.Round and the "0" format round halves differently, so data and text could differ.
+                var seconds = Math.Round(silence.TotalSeconds);
+                silent[feedId] = seconds;
                 description.Add(string.Create(
-                    CultureInfo.InvariantCulture, $"{feedId} {silence.TotalSeconds:0} s (limit {limit.TotalSeconds:0} s)"));
+                    CultureInfo.InvariantCulture, $"{feedId} {seconds} s (limit {limit.TotalSeconds:0} s)"));
             }
         }
 

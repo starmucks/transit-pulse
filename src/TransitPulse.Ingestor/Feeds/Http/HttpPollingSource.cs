@@ -162,6 +162,13 @@ internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
     /// </summary>
     private void Throttle(HttpResponseMessage response, DateTimeOffset receivedAt, TimeSpan? previous)
     {
+        // Only these two statuses ask to slow down (RFC 6585, RFC 9110); a Retry-After on a 500 would stall the feed
+        // for up to MaxThrottle although the next poll on schedule may well succeed.
+        if (response.StatusCode is not (HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable))
+        {
+            return;
+        }
+
         var retryAfter = response.Headers.RetryAfter;
         var asked = retryAfter?.Delta ?? (retryAfter?.Date - receivedAt);
         if (asked is null && response.StatusCode != HttpStatusCode.TooManyRequests)

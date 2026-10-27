@@ -28,7 +28,11 @@ internal sealed class PositionMetrics
     /// <summary>A record the normalizer could not parse.</summary>
     public const string Unparsable = "unparsable";
 
-    /// <summary>A record that parsed but carried no usable position; a jump hints at a changed source format.</summary>
+    /// <summary>
+    /// A record that parsed but carried no usable position. Includes every record whose vehicles were all dropped
+    /// (an HSL message without coordinates counts here and as <see cref="BadLocation"/>), so a steady background is
+    /// normal; a changed source format shows first as <see cref="Incomplete"/>.
+    /// </summary>
     public const string Empty = "empty";
 
     /// <summary>A record archived but not published because the position channel was full.</summary>

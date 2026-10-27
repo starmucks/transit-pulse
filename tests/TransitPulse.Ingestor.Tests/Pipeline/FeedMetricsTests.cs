@@ -26,6 +26,13 @@ public sealed class FeedMetricsTests : IDisposable
     }
 
     [Fact]
+    public void Meter_is_named_after_the_application_so_service_defaults_export_it()
+    {
+        // ServiceDefaults adds the meter named after the application (the entry assembly); any other name is not exported.
+        Assert.Equal(FeedMetrics.MeterName, typeof(FeedMetrics).Assembly.GetName().Name);
+    }
+
+    [Fact]
     public void Counts_payload_bytes_per_feed()
     {
         _metrics.Received(Record("a", payloadBytes: 100));
