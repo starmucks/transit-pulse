@@ -1,4 +1,6 @@
+using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -27,6 +29,23 @@ public sealed class IngestionPipelineTests
         Assert.Equal(50, sink.Records.Count(r => r.FeedId == "a"));
         Assert.Equal(50, sink.Records.Count(r => r.FeedId == "b"));
         Assert.Equal(1, sink.Completions);
+    }
+
+    [Fact]
+    public async Task Counts_every_record_it_writes_per_feed()
+    {
+        var meters = TestMeters.Create();
+        using var records = new MetricCollector<long>(meters, FeedMetrics.MeterName, "transitpulse.feed.records");
+        var sink = new RecordingSink();
+        using var pipeline = Create([ScriptedSource.Writing("a", count: 3), ScriptedSource.Writing("b", count: 2)], sink, meters: meters);
+
+        await pipeline.StartAsync(Ct);
+        await WaitUntilAsync(() => sink.Records.Count == 5);
+        await pipeline.StopAsync(Ct);
+
+        var byFeed = records.GetMeasurementSnapshot().GroupBy(m => (string)m.Tags["feed.id"]!).ToDictionary(g => g.Key, g => g.Sum(m => m.Value));
+        Assert.Equal(3, byFeed["a"]);
+        Assert.Equal(2, byFeed["b"]);
     }
 
     [Fact]
@@ -210,12 +229,20 @@ public sealed class IngestionPipelineTests
         builder.Services.AddSingleton(source);
         builder.Services.AddSingleton<IRawSink>(sink);
         builder.Services.AddSingleton(TimeProvider.System);
+        builder.Services.AddSingleton<FeedMetrics>();
         builder.Services.AddHostedService<IngestionPipeline>();
         return builder.Build();
     }
 
-    private static IngestionPipeline Create(IFeedSource[] sources, RecordingSink sink, TimeProvider? time = null) =>
-        new(sources, sink, time ?? TimeProvider.System, NullLogger<IngestionPipeline>.Instance);
+    private static IngestionPipeline Create(
+        IFeedSource[] sources,
+        RecordingSink sink,
+        TimeProvider? time = null,
+        IMeterFactory? meters = null)
+    {
+        time ??= TimeProvider.System;
+        return new(sources, sink, time, new FeedMetrics(meters ?? TestMeters.Create(), time), NullLogger<IngestionPipeline>.Instance);
+    }
 
     private static async Task WaitUntilAsync(Func<bool> condition)
     {

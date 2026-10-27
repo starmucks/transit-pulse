@@ -30,6 +30,7 @@ builder.Services.AddOptions<HslMqttOptions>().BindConfiguration(HslMqttOptions.S
 builder.Services.AddSingleton<IFeedSource, HslMqttSource>();
 builder.Services.AddHttpFeeds(builder.Configuration);
 
+builder.Services.AddSingleton<FeedMetrics>();
 builder.Services.AddHostedService<IngestionPipeline>();
 
 // Covers the pipeline's drain budget plus closing every open hour on a slow CPU; an unclosed file loses its unflushed

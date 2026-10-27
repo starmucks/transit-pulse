@@ -10,11 +10,13 @@ namespace TransitPulse.Ingestor.Pipeline;
 /// <param name="sources">All configured feeds.</param>
 /// <param name="sink">Where records are stored.</param>
 /// <param name="timeProvider">Clock for restart delays.</param>
+/// <param name="metrics">Per-feed counts of what is received.</param>
 /// <param name="logger">Pipeline log.</param>
 public sealed partial class IngestionPipeline(
     IEnumerable<IFeedSource> sources,
     IRawSink sink,
     TimeProvider timeProvider,
+    FeedMetrics metrics,
     ILogger<IngestionPipeline> logger) : BackgroundService
 {
     /// <summary>About 8 s of all feeds at ~1 200 messages/s, a few MB of memory.</summary>
@@ -67,6 +69,8 @@ public sealed partial class IngestionPipeline(
             LogNoSources();
         }
 
+        metrics.Started(feeds.Select(source => source.FeedId));
+
         var channel = Channel.CreateBounded<RawRecord>(new BoundedChannelOptions(ChannelCapacity)
         {
             FullMode = BoundedChannelFullMode.Wait,
@@ -109,6 +113,7 @@ public sealed partial class IngestionPipeline(
                     break;
                 }
 
+                metrics.Received(record);
                 await sink.WriteAsync(record, CancellationToken.None);
             }
 

@@ -1,8 +1,17 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
 using System.Threading.Channels;
+using Microsoft.Extensions.DependencyInjection;
 using TransitPulse.Ingestor.Pipeline;
 
 namespace TransitPulse.Ingestor.Tests.Pipeline;
+
+/// <summary>Meter factories for tests: each test gets its own, so collectors see only that test's measurements.</summary>
+internal static class TestMeters
+{
+    public static IMeterFactory Create() =>
+        new ServiceCollection().AddMetrics().BuildServiceProvider().GetRequiredService<IMeterFactory>();
+}
 
 /// <summary>Feed whose behaviour per run is given by the test; the run number starts at 1.</summary>
 internal sealed class ScriptedSource(string feedId, Func<int, ChannelWriter<RawRecord>, CancellationToken, Task> run) : IFeedSource

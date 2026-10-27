@@ -31,6 +31,7 @@ public static class ServiceDefaultsExtensions
 
         var telemetry = builder.Services.AddOpenTelemetry()
             .WithMetrics(metrics => metrics
+                .AddMeter(builder.Environment.ApplicationName)
                 .AddRuntimeInstrumentation()
                 .AddHttpClientInstrumentation())
             .WithTracing(tracing => tracing
