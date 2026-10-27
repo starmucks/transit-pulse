@@ -56,6 +56,12 @@ public sealed class FeedMetrics
         _lastRecordAt[record.FeedId] = _timeProvider.GetTimestamp();
     }
 
+    /// <summary>Time since the feed's last record, or since <see cref="Started"/> if none came yet.</summary>
+    /// <param name="feedId">Feed to look up.</param>
+    /// <returns><see langword="null"/> before <see cref="Started"/> and for unknown feeds.</returns>
+    public TimeSpan? SilenceOf(string feedId) =>
+        _lastRecordAt.TryGetValue(feedId, out var last) ? _timeProvider.GetElapsedTime(last) : null;
+
     private IEnumerable<Measurement<double>> ObserveSilence() =>
         _lastRecordAt.Select(feed => new Measurement<double>(
             _timeProvider.GetElapsedTime(feed.Value).TotalSeconds,

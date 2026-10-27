@@ -31,6 +31,12 @@ internal static class HttpFeedRegistration
                 throw new InvalidOperationException($"Feed '{feed.FeedId}': Interval and Timeout must be positive.");
             }
 
+            // A limit within one interval would report a healthy feed as silent between every two polls.
+            if (feed.MaxSilence <= feed.Interval)
+            {
+                throw new InvalidOperationException($"Feed '{feed.FeedId}': MaxSilence must be longer than Interval.");
+            }
+
             services.AddSingleton<IFeedSource>(provider => new HttpPollingSource(
                 feed,
                 CreateHandler(),

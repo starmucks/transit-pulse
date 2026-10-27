@@ -33,6 +33,9 @@ builder.Services.AddHttpFeeds(builder.Configuration);
 builder.Services.AddSingleton<FeedMetrics>();
 builder.Services.AddHostedService<IngestionPipeline>();
 
+// Run in process, not served over HTTP: the collector has no web server, and memory is its tightest limit.
+builder.Services.AddHealthChecks().AddCheck<FeedSilenceHealthCheck>(FeedSilenceHealthCheck.Name);
+
 // Covers the pipeline's drain budget plus closing every open hour on a slow CPU; an unclosed file loses its unflushed
 // records. The service manager's stop timeout must be longer than this.
 builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = IngestionPipeline.DrainTimeout + TimeSpan.FromSeconds(80));

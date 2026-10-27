@@ -70,6 +70,9 @@ internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
     public string FeedId => _feed.FeedId;
 
     /// <inheritdoc />
+    public TimeSpan? MaxSilence => _feed.MaxSilence;
+
+    /// <inheritdoc />
     public async Task RunAsync(ChannelWriter<RawRecord> output, CancellationToken cancellationToken)
     {
         while (true)

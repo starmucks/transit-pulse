@@ -20,6 +20,8 @@ internal sealed class ScriptedSource(string feedId, Func<int, ChannelWriter<RawR
 
     public string FeedId => feedId;
 
+    public TimeSpan? MaxSilence { get; init; }
+
     public int Runs => Volatile.Read(ref _runs);
 
     public Task RunAsync(ChannelWriter<RawRecord> output, CancellationToken cancellationToken) =>

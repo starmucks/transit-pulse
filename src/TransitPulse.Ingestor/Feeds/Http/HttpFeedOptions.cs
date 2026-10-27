@@ -16,6 +16,12 @@ internal sealed class HttpFeedOptions
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
+    /// Longest normal time without a new response; longer marks the feed silent. Unset for feeds whose content may
+    /// stay unchanged for long (alerts, weather): unchanged responses are not archived, so silence is normal there.
+    /// </summary>
+    public TimeSpan? MaxSilence { get; set; }
+
+    /// <summary>
     /// Largest accepted response body. The whole body is held in memory once per poll, so this bounds what a
     /// broken or unexpectedly large response can take from the collector's memory limit.
     /// </summary>
