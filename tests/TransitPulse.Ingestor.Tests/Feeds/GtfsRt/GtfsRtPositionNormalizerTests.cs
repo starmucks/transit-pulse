@@ -1,6 +1,7 @@
 using Google.Protobuf;
 using TransitPulse.Domain;
 using TransitPulse.Ingestor.Feeds.GtfsRt;
+using TransitPulse.Ingestor.Normalization;
 using TransitPulse.Ingestor.Pipeline;
 using TransitPulse.Ingestor.Tests.Normalization;
 using Rt = TransitRealtime;
@@ -43,28 +44,39 @@ public sealed class GtfsRtPositionNormalizerTests
         return vehicle;
     }
 
-    private static IReadOnlyList<VehiclePosition> Normalize(DateTimeOffset receivedAt, params Rt.FeedEntity[] entities)
+    private static IReadOnlyList<VehiclePosition> Normalize(DateTimeOffset receivedAt, params Rt.FeedEntity[] entities) =>
+        Normalize(new DropLog(), receivedAt, entities);
+
+    private static IReadOnlyList<VehiclePosition> Normalize(DropLog drops, DateTimeOffset receivedAt, params Rt.FeedEntity[] entities)
     {
         var message = new Rt.FeedMessage
         {
             Header = new Rt.FeedHeader { GtfsRealtimeVersion = "2.0", Timestamp = (ulong)receivedAt.ToUnixTimeSeconds() },
         };
         message.Entity.Add(entities);
-        return Normalize(message.ToByteArray(), receivedAt);
+        return Normalize(message.ToByteArray(), receivedAt, drops);
     }
 
-    private static IReadOnlyList<VehiclePosition> Normalize(byte[] payload, DateTimeOffset receivedAt) =>
-        new GtfsRtPositionNormalizer("mbta", "mbta-vp").Normalize(new RawRecord("mbta-vp", receivedAt, payload, Topic: null), new DropLog());
+    private static IReadOnlyList<VehiclePosition> Normalize(byte[] payload, DateTimeOffset receivedAt, DropLog? drops = null) =>
+        new GtfsRtPositionNormalizer("mbta", "mbta-vp").Normalize(
+            new RawRecord("mbta-vp", receivedAt, payload, Topic: null), drops ?? new DropLog());
 
     private static Rt.FeedEntity Entity(Rt.VehiclePosition vehicle) => new() { Id = vehicle.Vehicle?.Id ?? "x", Vehicle = vehicle };
 
     private static VehiclePosition Position(Rt.VehiclePosition vehicle) => Assert.Single(Normalize(_receivedAt, Entity(vehicle)));
 
-    /// <summary>The vehicle is skipped, and a valid one in the same snapshot is still read.</summary>
-    private static void AssertSkipped(Rt.FeedEntity entity)
+    /// <summary>
+    /// The vehicle is skipped and counted as dropped for <paramref name="reason"/> (not at all when <see langword="null"/>:
+    /// the entity is not a vehicle record), and a valid one in the same snapshot is still read.
+    /// </summary>
+    private static void AssertSkipped(Rt.FeedEntity entity, string? reason)
     {
         var other = Sample(v => v.Vehicle.Id = "y0001");
-        Assert.Equal("y0001", Assert.Single(Normalize(_receivedAt, entity, Entity(other))).VehicleId);
+        var drops = new DropLog();
+
+        Assert.Equal("y0001", Assert.Single(Normalize(drops, _receivedAt, entity, Entity(other))).VehicleId);
+        string[] expected = reason is null ? [] : [reason];
+        Assert.Equal(expected, drops.Reasons);
     }
 
     [Fact]
@@ -172,23 +184,25 @@ public sealed class GtfsRtPositionNormalizerTests
     {
         var receivedAt = _observedAt + GtfsRtPositionNormalizer.MaxRecordAge + TimeSpan.FromSeconds(1);
         var fresh = Sample(v => { v.Vehicle.Id = "y0001"; v.Timestamp = (ulong)receivedAt.ToUnixTimeSeconds(); });
+        var drops = new DropLog();
 
-        Assert.Equal("y0001", Assert.Single(Normalize(receivedAt, Entity(Sample()), Entity(fresh))).VehicleId);
+        Assert.Equal("y0001", Assert.Single(Normalize(drops, receivedAt, Entity(Sample()), Entity(fresh))).VehicleId);
+        Assert.Equal([PositionMetrics.Stale], drops.Reasons);
     }
 
-    private static readonly Dictionary<string, Action<Rt.VehiclePosition>> _unusable = new()
+    private static readonly Dictionary<string, (Action<Rt.VehiclePosition> Change, string Reason)> _unusable = new()
     {
-        ["no vehicle descriptor"] = v => v.Vehicle = null,
-        ["blank vehicle id"] = v => v.Vehicle.Id = " ",
-        ["no position"] = v => v.Position = null,
-        ["no timestamp"] = v => v.ClearTimestamp(),
-        ["zero timestamp"] = v => v.Timestamp = 0,
+        ["no vehicle descriptor"] = (v => v.Vehicle = null, PositionMetrics.Incomplete),
+        ["blank vehicle id"] = (v => v.Vehicle.Id = " ", PositionMetrics.Incomplete),
+        ["no position"] = (v => v.Position = null, PositionMetrics.BadLocation),
+        ["no timestamp"] = (v => v.ClearTimestamp(), PositionMetrics.Incomplete),
+        ["zero timestamp"] = (v => v.Timestamp = 0, PositionMetrics.Incomplete),
         // Past 9999-12-31 but positive as a long: the conversion would throw. (ulong.MaxValue becomes -1, i.e. 1969.)
-        ["timestamp past year 9999"] = v => v.Timestamp = 253_402_300_800,
-        ["timestamp long.MaxValue"] = v => v.Timestamp = long.MaxValue,
-        ["latitude NaN"] = v => v.Position.Latitude = float.NaN,
-        ["latitude 91"] = v => v.Position.Latitude = 91,
-        ["longitude -181"] = v => v.Position.Longitude = -181,
+        ["timestamp past year 9999"] = (v => v.Timestamp = 253_402_300_800, PositionMetrics.Incomplete),
+        ["timestamp long.MaxValue"] = (v => v.Timestamp = long.MaxValue, PositionMetrics.Incomplete),
+        ["latitude NaN"] = (v => v.Position.Latitude = float.NaN, PositionMetrics.BadLocation),
+        ["latitude 91"] = (v => v.Position.Latitude = 91, PositionMetrics.BadLocation),
+        ["longitude -181"] = (v => v.Position.Longitude = -181, PositionMetrics.BadLocation),
     };
 
     public static TheoryData<string> UnusableVehicles => [.. _unusable.Keys];
@@ -197,7 +211,9 @@ public sealed class GtfsRtPositionNormalizerTests
     [MemberData(nameof(UnusableVehicles))]
     public void Unusable_vehicle_is_skipped(string vehicle)
     {
-        AssertSkipped(Entity(Sample(_unusable[vehicle])));
+        var (change, reason) = _unusable[vehicle];
+
+        AssertSkipped(Entity(Sample(change)), reason);
     }
 
     [Fact]
@@ -206,13 +222,15 @@ public sealed class GtfsRtPositionNormalizerTests
         var entity = Entity(Sample());
         entity.IsDeleted = true;
 
-        AssertSkipped(entity);
+        AssertSkipped(entity, reason: null);
     }
 
     [Fact]
     public void Entity_without_a_vehicle_is_skipped()
     {
-        AssertSkipped(new Rt.FeedEntity { Id = "t1", TripUpdate = new Rt.TripUpdate { Trip = new Rt.TripDescriptor { TripId = "1" } } });
+        AssertSkipped(
+            new Rt.FeedEntity { Id = "t1", TripUpdate = new Rt.TripUpdate { Trip = new Rt.TripDescriptor { TripId = "1" } } },
+            reason: null);
     }
 
     [Fact]

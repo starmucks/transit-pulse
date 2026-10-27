@@ -22,10 +22,13 @@ public sealed class GtfsRtContractTests
         var record = new RawRecord(
             "mbta-vp", DateTimeOffset.Parse("2026-10-26T00:00:03.443Z", CultureInfo.InvariantCulture), payload, Topic: null);
 
-        var positions = new GtfsRtPositionNormalizer("mbta", "mbta-vp").Normalize(record, new DropLog());
+        var drops = new DropLog();
+        var positions = new GtfsRtPositionNormalizer("mbta", "mbta-vp").Normalize(record, drops);
 
         // One line per entity: an entity added to the fixture without an expectation fails here.
         Assert.Equal(lines.Length, Rt.FeedMessage.Parser.ParseFrom(payload).Entity.Count);
         Assert.Equal(expected, positions);
+        // Every vehicle without a position is counted with a reason: nothing is dropped silently.
+        Assert.Equal(lines.Count(line => line == "null"), drops.Reasons.Count);
     }
 }
