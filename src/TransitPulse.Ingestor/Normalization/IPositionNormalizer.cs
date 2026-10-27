@@ -5,8 +5,8 @@ namespace TransitPulse.Ingestor.Normalization;
 
 /// <summary>
 /// Feed adapter that turns one city's raw messages into the unified <see cref="VehiclePosition"/> model.
-/// One normalizer may read several raw feeds of its city: MBTA positions carry no delay, so its normalizer also
-/// reads trip updates, remembers their delays and returns nothing for them.
+/// One normalizer may read several raw feeds of its city (for example positions plus a feed it only takes context
+/// from, returning nothing for its messages); today each reads one.
 /// The pipeline calls it from a single reader, so implementations may keep state without locking.
 /// </summary>
 public interface IPositionNormalizer
