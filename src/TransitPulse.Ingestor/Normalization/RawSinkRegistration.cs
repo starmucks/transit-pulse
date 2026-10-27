@@ -65,6 +65,9 @@ internal static class RawSinkRegistration
         services.AddSingleton<IPositionNormalizer, SiriVmPositionNormalizer>();
         // Boston: the GTFS-RT adapter is city-neutral, so a city is its pair of feed ids.
         services.AddSingleton<IPositionNormalizer>(new GtfsRtPositionNormalizer(feedId: "mbta", rawFeedId: "mbta-vp"));
+        // The host registers metrics already; repeated here (a no-op then) so this registration stands on its own.
+        services.AddMetrics();
+        services.AddSingleton<PositionMetrics>();
         services.AddSingleton<PositionRouter>();
         services.AddSingleton<IPositionSink>(provider =>
         {
@@ -80,6 +83,7 @@ internal static class RawSinkRegistration
             provider.GetRequiredService<PositionRouter>(),
             provider.GetRequiredService<IPositionSink>(),
             provider.GetRequiredService<TimeProvider>(),
+            provider.GetRequiredService<PositionMetrics>(),
             provider.GetRequiredService<ILogger<NormalizingSink>>()));
     }
 }

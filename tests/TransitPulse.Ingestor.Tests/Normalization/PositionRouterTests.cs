@@ -1,15 +1,17 @@
+using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging.Testing;
 using TransitPulse.Ingestor.Normalization;
 using TransitPulse.Ingestor.Pipeline;
+using TransitPulse.Ingestor.Tests.Pipeline;
 
 namespace TransitPulse.Ingestor.Tests.Normalization;
 
 public sealed class PositionRouterTests
 {
     private static PositionRouter Create(params IPositionNormalizer[] normalizers) =>
-        new(normalizers, NullLogger<PositionRouter>.Instance);
+        new(normalizers, new PositionMetrics(TestMeters.Create()), NullLogger<PositionRouter>.Instance);
 
     [Fact]
     public void Record_goes_to_the_normalizer_of_its_feed()
@@ -64,7 +66,7 @@ public sealed class PositionRouterTests
     public void Failing_feed_is_logged_once_per_episode()
     {
         var logger = new FakeLogger<PositionRouter>();
-        var router = new PositionRouter([new FakeNormalizer("hsl", "hsl") { FailOnSeconds = 1 }], logger);
+        var router = new PositionRouter([new FakeNormalizer("hsl", "hsl") { FailOnSeconds = 1 }], new PositionMetrics(TestMeters.Create()), logger);
 
         for (var i = 0; i < 100; i++)
         {
@@ -110,4 +112,35 @@ public sealed class PositionRouterTests
 
         Assert.Single(router.Route(new RawRecord("hsl", FakeNormalizer.T0 - PositionRouter.MaxClockSkew, [0], null)));
     }
+
+    [Fact]
+    public void Counts_each_outcome_by_feed_and_reason()
+    {
+        var meters = TestMeters.Create();
+        using var accepted = new MetricCollector<long>(meters, FeedMetrics.MeterName, "transitpulse.positions.accepted");
+        using var dropped = new MetricCollector<long>(meters, FeedMetrics.MeterName, "transitpulse.positions.dropped");
+        using var skipped = new MetricCollector<long>(meters, FeedMetrics.MeterName, "transitpulse.positions.records_skipped");
+        var router = new PositionRouter(
+            [new FakeNormalizer("hsl", "hsl") { FailOnSeconds = 9 }, new FakeNormalizer("mbta", "mbta-vp") { SilentFeed = "mbta-vp" }],
+            new PositionMetrics(meters),
+            NullLogger<PositionRouter>.Instance);
+
+        router.Route(FakeNormalizer.Record("hsl", 1));
+        router.Route(FakeNormalizer.Record("hsl", 2));
+        router.Route(FakeNormalizer.Record("hsl", 2));
+        router.Route(FakeNormalizer.Record("hsl", 9));
+        router.Route(new RawRecord("hsl", FakeNormalizer.T0 - PositionRouter.MaxClockSkew - TimeSpan.FromSeconds(10), [3], null));
+        router.Route(FakeNormalizer.Record("mbta-vp"));
+
+        Assert.Equal(2, accepted.GetMeasurementSnapshot().Sum(m => m.Value));
+        Assert.Equal(
+            [("hsl", PositionMetrics.Duplicate), ("hsl", PositionMetrics.FromTheFuture)],
+            dropped.GetMeasurementSnapshot().Select(Key).Order());
+        Assert.Equal(
+            [("hsl", PositionMetrics.Unparsable), ("mbta-vp", PositionMetrics.Empty)],
+            skipped.GetMeasurementSnapshot().Select(Key).Order());
+    }
+
+    private static (string Feed, string Reason) Key(CollectedMeasurement<long> measurement) =>
+        ((string)measurement.Tags["feed.id"]!, (string)measurement.Tags["reason"]!);
 }

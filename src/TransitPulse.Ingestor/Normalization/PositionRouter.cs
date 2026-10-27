@@ -18,14 +18,17 @@ internal sealed partial class PositionRouter
     private readonly PositionDeduplicator _deduplicator = new();
     private readonly FailureEpisodes _normalizeFailures = new(FailureEpisodes.DefaultQuietPeriod);
     private readonly FailureEpisodes _clockSkews = new(FailureEpisodes.DefaultQuietPeriod);
+    private readonly PositionMetrics _metrics;
     private readonly ILogger<PositionRouter> _logger;
 
     /// <summary>Indexes the normalizers by the raw feeds they read.</summary>
     /// <param name="normalizers">One normalizer per city.</param>
+    /// <param name="metrics">Counts of accepted and dropped positions.</param>
     /// <param name="logger">Log for messages that fail to normalize.</param>
     /// <exception cref="InvalidOperationException">Two normalizers claim the same raw feed.</exception>
-    public PositionRouter(IEnumerable<IPositionNormalizer> normalizers, ILogger<PositionRouter> logger)
+    public PositionRouter(IEnumerable<IPositionNormalizer> normalizers, PositionMetrics metrics, ILogger<PositionRouter> logger)
     {
+        _metrics = metrics;
         _logger = logger;
         foreach (var normalizer in normalizers)
         {
@@ -62,12 +65,18 @@ internal sealed partial class PositionRouter
         {
             // Any adapter bug, not only a FormatException: one city's broken message must not stop the others.
             // The record is still in the raw archive, so it can be normalized again after a fix.
+            _metrics.Skipped(record.FeedId, PositionMetrics.Unparsable);
             if (_normalizeFailures.Fail(record.FeedId, record.ReceivedAt))
             {
                 LogNormalizeFailing(ex, record.FeedId, record.ReceivedAt);
             }
 
             return [];
+        }
+
+        if (positions.Count == 0)
+        {
+            _metrics.Skipped(record.FeedId, PositionMetrics.Empty);
         }
 
         if (_normalizeFailures.Succeed(record.FeedId, record.ReceivedAt) is var dropped and > 0)
@@ -85,6 +94,7 @@ internal sealed partial class PositionRouter
             // Keyed per vehicle: one bad clock among hundreds of vehicles must not end and restart a feed-wide episode.
             if (position.ObservedAt > latestPlausible)
             {
+                _metrics.Dropped(record.FeedId, PositionMetrics.FromTheFuture);
                 if (_clockSkews.Fail(VehicleKey(position), record.ReceivedAt))
                 {
                     LogFromTheFuture(position.VehicleId, position.FeedId, position.ObservedAt, record.ReceivedAt);
@@ -102,8 +112,13 @@ internal sealed partial class PositionRouter
             {
                 accepted.Add(position);
             }
+            else
+            {
+                _metrics.Dropped(record.FeedId, PositionMetrics.Duplicate);
+            }
         }
 
+        _metrics.Accepted(record.FeedId, accepted.Count);
         return accepted;
     }
 
