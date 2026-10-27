@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Threading.Channels;
+using TransitPulse.Ingestor.Normalization;
 using TransitPulse.Ingestor.Pipeline;
 
 namespace TransitPulse.Ingestor.Feeds.Http;
@@ -11,8 +12,10 @@ namespace TransitPulse.Ingestor.Feeds.Http;
 /// passed on unchanged as one <see cref="RawRecord"/>; a 304 answer or a body identical to the previous one is skipped.
 /// </summary>
 /// <remarks>
-/// A failed poll (network error, timeout, error status, oversized body) is logged and the next poll runs on schedule
-/// instead of ending the run: polls are independent, and a restart would forget the validators and the last hash.
+/// A failed poll (network error, timeout, error status, oversized body) does not end the run: polls are independent,
+/// and a restart would forget the validators and the last hash. The next poll runs on schedule, since a later one
+/// would only widen the gap in the archive; only a server that asks to slow down (429, or <c>Retry-After</c> on 503)
+/// is polled less often. Failures are logged once per episode, not once per poll.
 /// </remarks>
 internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
 {
@@ -22,15 +25,22 @@ internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
     /// </summary>
     public const string RequestorIdPlaceholder = "{requestorId}";
 
+    /// <summary>Longest pause a server can ask for: a wrong <c>Retry-After</c> must not stop a feed for hours.</summary>
+    internal static readonly TimeSpan MaxThrottle = TimeSpan.FromMinutes(30);
+
     private readonly HttpFeedOptions _feed;
     private readonly HttpClient _client;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<HttpPollingSource> _logger;
+    private readonly FailureEpisodes _failures = new(FailureEpisodes.DefaultQuietPeriod);
 
     private string _url;
     private EntityTagHeaderValue? _etag;
     private DateTimeOffset? _lastModified;
     private byte[]? _lastHash;
+
+    // Pause before the next poll that the server asked for; null polls on the configured interval.
+    private TimeSpan? _throttle;
 
     /// <summary>Creates the source; it owns <paramref name="handler"/> and disposes it.</summary>
     /// <param name="feed">Feed settings.</param>
@@ -73,7 +83,7 @@ internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
             }
 
             // Keeps the cadence: a slow poll shortens the pause after it, so polls do not drift later and later.
-            var wait = _feed.Interval - _timeProvider.GetElapsedTime(started);
+            var wait = (_throttle ?? _feed.Interval) - _timeProvider.GetElapsedTime(started);
             if (wait > TimeSpan.Zero)
             {
                 await Task.Delay(wait, _timeProvider, cancellationToken);
@@ -101,21 +111,20 @@ internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
             // The default completion option reads the whole body here, so the limit and the timeout cover it too.
             using var response = await _client.SendAsync(request, cancellationToken);
             var receivedAt = _timeProvider.GetUtcNow();
-            if (response.StatusCode == HttpStatusCode.NotModified)
+            var previousThrottle = _throttle;
+            _throttle = null;
+            if (!response.IsSuccessStatusCode && response.StatusCode != HttpStatusCode.NotModified)
             {
+                Throttle(response, receivedAt, previousThrottle);
+
+                // A 4xx (429 included) rejects the request before any data is produced; a 5xx may come after it.
+                PollFailed($"HTTP {(int)response.StatusCode}", renewRequestorId: (int)response.StatusCode >= 500);
                 return null;
             }
 
-            if (!response.IsSuccessStatusCode)
+            PollSucceeded(receivedAt);
+            if (response.StatusCode == HttpStatusCode.NotModified)
             {
-                LogPollFailed(FeedId, $"HTTP {(int)response.StatusCode}");
-
-                // A 4xx (429 included) rejects the request before any data is produced; a 5xx may come after it.
-                if ((int)response.StatusCode >= 500)
-                {
-                    RenewRequestorId();
-                }
-
                 return null;
             }
 
@@ -135,15 +144,52 @@ internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
         }
         catch (HttpRequestException e)
         {
-            LogPollFailed(FeedId, e.Message);
-            RenewRequestorId();
+            PollFailed(e.Message, renewRequestorId: true);
             return null;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            LogPollFailed(FeedId, $"no response within {_feed.Timeout:g}");
-            RenewRequestorId();
+            PollFailed($"no response within {_feed.Timeout:g}", renewRequestorId: true);
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Sets the pause before the next poll when the server asks to slow down: as long as <c>Retry-After</c> says,
+    /// or, for a 429 without it, twice the previous pause. Kept within the interval and <see cref="MaxThrottle"/>.
+    /// </summary>
+    private void Throttle(HttpResponseMessage response, DateTimeOffset receivedAt, TimeSpan? previous)
+    {
+        var retryAfter = response.Headers.RetryAfter;
+        var asked = retryAfter?.Delta ?? (retryAfter?.Date - receivedAt);
+        if (asked is null && response.StatusCode != HttpStatusCode.TooManyRequests)
+        {
+            return;
+        }
+
+        var wait = asked ?? (previous ?? _feed.Interval) * 2;
+        _throttle = wait < _feed.Interval ? _feed.Interval : wait > MaxThrottle ? MaxThrottle : wait;
+    }
+
+    private void PollFailed(string reason, bool renewRequestorId)
+    {
+        var starts = _failures.Fail(FeedId, _timeProvider.GetUtcNow());
+        if (starts)
+        {
+            LogPollsFailing(FeedId, reason);
+        }
+
+        if (renewRequestorId)
+        {
+            RenewRequestorId(log: starts);
+        }
+    }
+
+    private void PollSucceeded(DateTimeOffset at)
+    {
+        if (_failures.Succeed(FeedId, at) is var failed and > 0)
+        {
+            LogPollsRecovered(FeedId, failed);
         }
     }
 
@@ -154,7 +200,7 @@ internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
     /// Starts a new SIRI subscription after a poll whose response may have been produced but not received: the server
     /// counts those changes as delivered, so the same id would never return them. A new id returns a full snapshot.
     /// </summary>
-    private void RenewRequestorId()
+    private void RenewRequestorId(bool log)
     {
         if (_feed.Url.Contains(RequestorIdPlaceholder, StringComparison.Ordinal))
         {
@@ -163,12 +209,18 @@ internal sealed partial class HttpPollingSource : IFeedSource, IDisposable
             // Validators belong to the old URL's responses; the new subscription starts without them.
             _etag = null;
             _lastModified = null;
-            LogRequestorIdRenewed(FeedId);
+            if (log)
+            {
+                LogRequestorIdRenewed(FeedId);
+            }
         }
     }
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Poll of feed {FeedId} failed: {Reason}; next poll on schedule")]
-    private partial void LogPollFailed(string feedId, string reason);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Polls of feed {FeedId} fail: {Reason}; polling continues, failures are counted until it recovers")]
+    private partial void LogPollsFailing(string feedId, string reason);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Feed {FeedId} polls again; {Failed} polls failed")]
+    private partial void LogPollsRecovered(string feedId, long failed);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Feed {FeedId}: requestorId renewed after a failed poll; the next response is a full snapshot")]
     private partial void LogRequestorIdRenewed(string feedId);
