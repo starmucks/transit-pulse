@@ -36,8 +36,33 @@ internal sealed partial class ReplaySource(
     /// <inheritdoc />
     public TimeSpan? MaxSilence => null;
 
+    /// <summary>
+    /// True when the replay stopped on an error, such as an unreadable file. The host stops either way, so the
+    /// process reads this to exit with a failure code.
+    /// </summary>
+    public bool Failed { get; private set; }
+
     /// <inheritdoc />
     public async Task RunAsync(ChannelWriter<RawRecord> output, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ReplayAsync(output, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Thrown, the error would make the pipeline restart the source and hit the same file again and again.
+            Failed = true;
+            LogFailed(ex);
+        }
+
+        lifetime.StopApplication();
+
+        // Returning would make the pipeline start the source again; the stop request cancels this wait instead.
+        await Task.Delay(Timeout.InfiniteTimeSpan, timeProvider, cancellationToken);
+    }
+
+    private async Task ReplayAsync(ChannelWriter<RawRecord> output, CancellationToken cancellationToken)
     {
         var replay = options.Value;
         LogStarting(replay.From, replay.To, replay.Feeds, replay.Speed);
@@ -71,11 +96,6 @@ internal sealed partial class ReplaySource(
             var rate = count / Math.Max(elapsed.TotalSeconds, 0.001);
             LogFinished(count, elapsed, rate);
         }
-
-        lifetime.StopApplication();
-
-        // Returning would make the pipeline start the source again; the stop request cancels this wait instead.
-        await Task.Delay(Timeout.InfiniteTimeSpan, timeProvider, cancellationToken);
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Replaying {From:O} to {To:O} of {Feeds} at speed {Speed} (0 = as fast as possible)")]
@@ -86,4 +106,7 @@ internal sealed partial class ReplaySource(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Nothing to replay: the archive has no records of these feeds in the range; stopping")]
     private partial void LogNothingToReplay();
+
+    [LoggerMessage(Level = LogLevel.Critical, Message = "Replay failed; stopping")]
+    private partial void LogFailed(Exception exception);
 }

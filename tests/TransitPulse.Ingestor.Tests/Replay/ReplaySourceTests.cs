@@ -1,7 +1,10 @@
 using System.Globalization;
 using System.Threading.Channels;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using TransitPulse.Ingestor.Archive;
 using TransitPulse.Ingestor.Pipeline;
@@ -23,6 +26,7 @@ public sealed class ReplaySourceTests : IDisposable
     private readonly Channel<RawRecord> _output = Channel.CreateUnbounded<RawRecord>();
     private readonly CancellationTokenSource _stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
     private readonly List<RawRecord> _received = [];
+    private ReplaySource? _source;
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -90,6 +94,7 @@ public sealed class ReplaySourceTests : IDisposable
 
         // A returned source would be started again by the pipeline and replay the range once more.
         Assert.False(run.IsCompleted);
+        Assert.False(_source!.Failed);
         await StopAsync(run);
     }
 
@@ -113,6 +118,34 @@ public sealed class ReplaySourceTests : IDisposable
         await WaitForAsync(1);
         await StopAsync(run);
         Assert.False(_lifetime.StopRequested);
+    }
+
+    [Fact]
+    public async Task Unreadable_file_marks_the_replay_failed_and_stops_the_host()
+    {
+        var broken = Path.Combine(_dir.FullName, "a", "2026-10-21", "a-20261021T00Z-0.parquet");
+        Directory.CreateDirectory(Path.GetDirectoryName(broken)!);
+        await File.WriteAllBytesAsync(broken, [1, 2, 3, 4], Ct);
+
+        var run = Start(speed: 0);
+
+        await WaitUntilAsync(() => _lifetime.StopRequested);
+        Assert.True(_source!.Failed);
+
+        // Not thrown: the pipeline would restart the source and hit the same file again.
+        Assert.False(run.IsCompleted);
+        await StopAsync(run);
+    }
+
+    [Fact]
+    public void Registration_rejects_a_replay_without_settings_at_startup()
+    {
+        var configuration = new ConfigurationBuilder().Build();
+        using var provider = new ServiceCollection().AddSingleton<IConfiguration>(configuration).AddReplay().BuildServiceProvider();
+
+        var error = Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<ReplayOptions>>().Value);
+
+        Assert.Contains("Replay:Feeds must name", error.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -148,13 +181,13 @@ public sealed class ReplaySourceTests : IDisposable
 
     private Task Start(double speed, string[]? feeds = null)
     {
-        var source = new ReplaySource(
+        _source = new ReplaySource(
             Microsoft.Extensions.Options.Options.Create(Options(At("00:00:00"), At("01:00:00"), speed, feeds ?? ["a"])),
             Microsoft.Extensions.Options.Options.Create(new ArchiveOptions { RootDirectory = _dir.FullName }),
             _time,
             _lifetime,
             NullLogger<ReplaySource>.Instance);
-        return source.RunAsync(_output.Writer, _stop.Token);
+        return _source.RunAsync(_output.Writer, _stop.Token);
     }
 
     // One file per feed and hour 00, like the collector writes it.
