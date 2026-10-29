@@ -22,11 +22,12 @@ public sealed class NormalizingSinkTests
         IRawSink? archive = null,
         int channelCapacity = 100,
         ILogger<NormalizingSink>? logger = null,
-        IMeterFactory? meters = null)
+        IMeterFactory? meters = null,
+        bool waitWhenFull = false)
     {
         var metrics = new PositionMetrics(meters ?? TestMeters.Create());
         return new(archive ?? _archive, new PositionRouter([new FakeNormalizer("hsl", "hsl")], metrics, NullLogger<PositionRouter>.Instance),
-            positions, _time, metrics, logger ?? NullLogger<NormalizingSink>.Instance, channelCapacity);
+            positions, _time, metrics, logger ?? NullLogger<NormalizingSink>.Instance, channelCapacity, waitWhenFull);
     }
 
     private static async Task WaitForAsync(Func<bool> condition)
@@ -82,6 +83,31 @@ public sealed class NormalizingSinkTests
         var drops = skipped.GetMeasurementSnapshot();
         Assert.Equal(3, drops.Sum(m => m.Value));
         Assert.All(drops, m => Assert.Equal(PositionMetrics.Backpressure, m.Tags["reason"]));
+    }
+
+    [Fact]
+    public async Task Waiting_sink_holds_the_writer_instead_of_dropping()
+    {
+        var gate = new TaskCompletionSource();
+        var positions = new RecordingPositionSink { Gate = gate.Task };
+        var meters = TestMeters.Create();
+        using var skipped = new MetricCollector<long>(meters, FeedMetrics.MeterName, "transitpulse.positions.records_skipped");
+        using var sink = Create(positions, channelCapacity: 2, meters: meters, waitWhenFull: true);
+
+        await WriteAsync(sink, 1);
+        await positions.PublishStarted.WaitAsync(Ct);
+        await WriteAsync(sink, 2, 3);
+        var fourth = sink.WriteAsync(FakeNormalizer.Record("hsl", 4), Ct).AsTask();
+        await Task.Delay(100, Ct);
+
+        // Replay must publish every record: a full channel slows the writer down instead.
+        Assert.False(fourth.IsCompleted);
+        gate.SetResult();
+        await fourth.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+        await sink.CompleteAsync(Ct);
+
+        Assert.Equal(4, positions.Positions.Count);
+        Assert.Empty(skipped.GetMeasurementSnapshot());
     }
 
     [Fact]

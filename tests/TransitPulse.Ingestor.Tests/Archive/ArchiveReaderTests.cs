@@ -66,6 +66,18 @@ public sealed class ArchiveReaderTests : IDisposable
     }
 
     [Fact]
+    public async Task Row_groups_outside_the_range_are_skipped_on_both_sides()
+    {
+        // One group per record: groups before the start are skipped, the first one after the end ends the file.
+        await WriteAsync("a-20261021T00Z-0", rowGroupMaxBytes: 1,
+            ("00:00:01", "a1", null), ("00:00:02", "a2", null), ("00:00:03", "a3", null), ("00:00:04", "a4", null), ("00:00:05", "a5", null));
+
+        var records = await ReadAsync(["a"], "00:00:02", "00:00:04");
+
+        Assert.Equal(["a2", "a3"], records.Select(Payload));
+    }
+
+    [Fact]
     public async Task Files_of_one_hour_are_read_in_number_order()
     {
         // Within a feed the stored order wins over receive time; ordinal order would read -10 before -2.
