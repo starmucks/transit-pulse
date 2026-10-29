@@ -44,6 +44,12 @@ else
 }
 
 builder.Services.AddSingleton<FeedMetrics>();
+if (mode != IngestorMode.Archive)
+{
+    // Before the pipeline: hosted services stop in reverse order, so the totals come after the last record is published.
+    builder.Services.AddHostedService<RunSummary>();
+}
+
 builder.Services.AddHostedService<IngestionPipeline>();
 
 // Run in process, not served over HTTP: the collector has no web server, and memory is its tightest limit.
