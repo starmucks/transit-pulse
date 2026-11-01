@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using TransitPulse.Ingestor.Archive;
 using TransitPulse.Ingestor.Feeds.Hsl;
@@ -20,6 +21,15 @@ if (args is ["--repair", var repairInput, var repairOutput])
 if (args is ["--stats", var statsInput])
 {
     return await ArchiveStats.RunAsync(statsInput, Console.Out);
+}
+
+if (args is ["--profile", var profileInput, var profileFrom, var profileTo])
+{
+    return await ArchiveProfile.RunAsync(
+        profileInput,
+        DateOnly.ParseExact(profileFrom, "yyyy-MM-dd", CultureInfo.InvariantCulture),
+        DateOnly.ParseExact(profileTo, "yyyy-MM-dd", CultureInfo.InvariantCulture),
+        Console.Out);
 }
 
 var builder = Host.CreateApplicationBuilder(args);
