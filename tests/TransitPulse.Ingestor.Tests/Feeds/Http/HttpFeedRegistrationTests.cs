@@ -32,6 +32,26 @@ public sealed class HttpFeedRegistrationTests
     }
 
     [Theory]
+    [InlineData("Production", "transitpulse-ingestor")]
+    [InlineData("Development", "transitpulse-ingestor-local")]
+    public void Only_Entur_feeds_send_the_client_name_of_the_environment(string environment, string clientName)
+    {
+        // appsettings.Development.json overrides feeds by index: a reordered feed list must fail here.
+        var feeds = new ConfigurationBuilder()
+            .SetBasePath(AppContext.BaseDirectory)
+            .AddJsonFile("appsettings.json", optional: false)
+            .AddJsonFile($"appsettings.{environment}.json", optional: true)
+            .Build()
+            .GetSection(HttpFeedRegistration.SectionName)
+            .Get<List<HttpFeedOptions>>()!;
+
+        Assert.Contains(feeds, feed => feed.Url.Contains("api.entur.io", StringComparison.Ordinal));
+        Assert.All(feeds, feed => Assert.Equal(
+            feed.Url.Contains("api.entur.io", StringComparison.Ordinal) ? clientName : null,
+            feed.Headers.GetValueOrDefault("ET-Client-Name")));
+    }
+
+    [Theory]
     [InlineData("example.test/feed", "00:01:00")]
     [InlineData("ftp://example.test/feed", "00:01:00")]
     [InlineData("https://example.test/feed", "00:00:00")]

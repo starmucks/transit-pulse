@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "TransitPulse.Ingestor": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}
