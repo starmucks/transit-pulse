@@ -81,15 +81,7 @@ internal static class RawSinkRegistration
             .Validate(o => o.PositionsRetention > TimeSpan.Zero, "Kafka:PositionsRetention must be positive.")
             .ValidateOnStart();
         services.AddHostedService<KafkaTopicInitializer>();
-        // One normalizer per city; the router finds each by the raw feeds it claims.
-        services.AddSingleton<IPositionNormalizer, HslPositionNormalizer>();
-        services.AddSingleton<IPositionNormalizer, SiriVmPositionNormalizer>();
-        // Boston: the GTFS-RT adapter is city-neutral, so a city is its pair of feed ids.
-        services.AddSingleton<IPositionNormalizer>(new GtfsRtPositionNormalizer(feedId: "mbta", rawFeedId: "mbta-vp"));
-        // The host registers metrics already; repeated here (a no-op then) so this registration stands on its own.
-        services.AddMetrics();
-        services.AddSingleton<PositionMetrics>();
-        services.AddSingleton<PositionRouter>();
+        services.AddPositionRouter();
         services.AddSingleton<IPositionSink>(provider =>
         {
             var options = provider.GetRequiredService<IOptions<KafkaOptions>>().Value;
@@ -108,6 +100,25 @@ internal static class RawSinkRegistration
             provider.GetRequiredService<PositionMetrics>(),
             provider.GetRequiredService<ILogger<NormalizingSink>>(),
             waitWhenFull: mode == IngestorMode.Replay));
+    }
+
+    /// <summary>
+    /// Registers one normalizer per city and the <see cref="PositionRouter"/> over them: shared by the pipeline and
+    /// by the position profile, so a new city reaches both.
+    /// </summary>
+    /// <param name="services">Service collection to add to.</param>
+    /// <returns>The same service collection.</returns>
+    public static IServiceCollection AddPositionRouter(this IServiceCollection services)
+    {
+        // The router finds each normalizer by the raw feeds it claims.
+        services.AddSingleton<IPositionNormalizer, HslPositionNormalizer>();
+        services.AddSingleton<IPositionNormalizer, SiriVmPositionNormalizer>();
+        // Boston: the GTFS-RT adapter is city-neutral, so a city is its pair of feed ids.
+        services.AddSingleton<IPositionNormalizer>(new GtfsRtPositionNormalizer(feedId: "mbta", rawFeedId: "mbta-vp"));
+        // The host registers metrics already; repeated here (a no-op then) so this registration stands on its own.
+        services.AddMetrics();
+        services.AddSingleton<PositionMetrics>();
+        return services.AddSingleton<PositionRouter>();
     }
 
     /// <summary>Stands in for the archive in replay mode: the records come from the archive already.</summary>

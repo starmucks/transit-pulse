@@ -32,6 +32,15 @@ if (args is ["--profile", var profileInput, var profileFrom, var profileTo])
         Console.Out);
 }
 
+if (args is ["--profile-positions", var positionsInput, var positionsFrom, var positionsTo])
+{
+    return await ArchivePositionProfile.RunAsync(
+        positionsInput,
+        DateOnly.ParseExact(positionsFrom, "yyyy-MM-dd", CultureInfo.InvariantCulture),
+        DateOnly.ParseExact(positionsTo, "yyyy-MM-dd", CultureInfo.InvariantCulture),
+        Console.Out);
+}
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.AddServiceDefaults();

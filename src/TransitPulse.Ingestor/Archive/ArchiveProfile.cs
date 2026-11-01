@@ -16,11 +16,12 @@ namespace TransitPulse.Ingestor.Archive;
 internal static class ArchiveProfile
 {
     // IANA ids for Linux; Windows ids too, because InvariantGlobalization leaves Windows without the IANA mapping.
+    // Prefixes match both raw feed ids (mbta-vp) and normalized ones (mbta).
     private static readonly (string Prefix, string Iana, string Windows)[] _zones =
     [
         ("hsl", "Europe/Helsinki", "FLE Standard Time"),
-        ("entur-", "Europe/Oslo", "W. Europe Standard Time"),
-        ("mbta-", "America/New_York", "Eastern Standard Time"),
+        ("entur", "Europe/Oslo", "W. Europe Standard Time"),
+        ("mbta", "America/New_York", "Eastern Standard Time"),
     ];
 
     /// <summary>Prints the profile of every feed with archive files in the range.</summary>
@@ -109,7 +110,7 @@ internal static class ArchiveProfile
     private static string Format(SlotStats? slot) => slot is null
         ? $"{0,4} {"-",9} {"-",9} {"-",8}"
         : string.Create(CultureInfo.InvariantCulture,
-            $"{slot.Count,4} {slot.RateSum / slot.Count,9:F2} {slot.RateMax,9:F2} {slot.Bytes / 1048576.0 / slot.Count,8:F1}");
+            $"{slot.Count,4} {slot.RateSum / slot.Count,9:F2} {slot.RateMax,9:F2} {slot.Extra / 1048576.0 / slot.Count,8:F1}");
 
     // Names are "{feed}-{yyyyMMdd}T{HH}Z-{n}.parquet"; the hour is the UTC hour the records were received in.
     private static bool TryParseHour(string path, out DateTimeOffset hour)
@@ -123,7 +124,7 @@ internal static class ArchiveProfile
     }
 
     // Feeds of no single city (weather) stay in UTC.
-    private static TimeZoneInfo ZoneOf(string feed)
+    internal static TimeZoneInfo ZoneOf(string feed)
     {
         foreach (var (prefix, iana, windows) in _zones)
         {
@@ -136,7 +137,8 @@ internal static class ArchiveProfile
         return TimeZoneInfo.Utc;
     }
 
-    private sealed class SlotStats
+    // One hour of the day for one day type: a sample per day with its rate, plus a second amount summed (bytes here).
+    internal sealed class SlotStats
     {
         public int Count { get; private set; }
 
@@ -144,14 +146,14 @@ internal static class ArchiveProfile
 
         public double RateMax { get; private set; }
 
-        public long Bytes { get; private set; }
+        public long Extra { get; private set; }
 
-        public void Add(double rate, long bytes)
+        public void Add(double rate, long extra)
         {
             Count++;
             RateSum += rate;
             RateMax = Math.Max(RateMax, rate);
-            Bytes += bytes;
+            Extra += extra;
         }
     }
 }
