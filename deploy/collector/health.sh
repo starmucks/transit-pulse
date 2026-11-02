@@ -6,6 +6,7 @@
 set -euo pipefail
 
 archive=${ARCHIVE_DIR:-/var/lib/transitpulse/archive}
+app=${APP_DIR:-/opt/transitpulse/ingestor}
 unit=transitpulse-ingestor.service
 
 failures=0
@@ -19,12 +20,15 @@ report() {
 show() { systemctl show "$1" -p "$2" --value; }
 # GNU date reads an empty string as today's midnight, not an error: an empty time must mean "never" (0).
 epoch() { if [[ -n $1 ]]; then date -d "$1" +%s 2>/dev/null || echo 0; else echo 0; fi; }
-# Milliseconds since the collector's HSL broker socket last received bytes; empty without a connection.
-# ss -i prints the socket's counters on the line after the one naming the process.
-hsl_lastrcv() {
+# Milliseconds since each of the collector's HSL broker sockets last received bytes, one line per connection; nothing
+# without a connection. ss -i prints the socket's counters on the line after the one naming the process.
+hsl_lastrcvs() {
   ss -tnpi state established "( dport = :${HSL_PORT:-8883} )" 2>/dev/null |
-    grep -A1 "pid=$pid," | grep -o 'lastrcv:[0-9]*' | head -n1 | cut -d: -f2 || true
+    grep -A1 "pid=$pid," | grep -o 'lastrcv:[0-9]*' | cut -d: -f2 || true
 }
+# One broker connection per MQTT subscription; only entries of Feeds:Mqtt have a "Topics" key.
+hsl_expected=$(grep -c '"Topics"' "$app/appsettings.json" 2>/dev/null || true)
+[[ $hsl_expected =~ ^[1-9][0-9]*$ ]] || hsl_expected=1
 mib() { awk -v b="$1" 'BEGIN { printf "%.0f MiB", b / 1048576 }'; }
 
 # --- service: a crash restart is silent in systemd; NRestarts is reset by a manual restart or deploy.
@@ -39,6 +43,8 @@ elif (( restarts > 0 )); then
 else
   report OK service "active since $since, no crash restarts"
 fi
+# The commit publish.sh built from: shows at a glance whether the server runs what main has.
+report INFO version "$(cat "$app/VERSION" 2>/dev/null || echo unknown)"
 
 # --- memory: anon is the process's own memory; MemoryCurrent would also count reclaimable page cache.
 # .NET caps its heap at 75% of MemoryMax, so 60% of MemoryMax is 80% of the heap limit.
@@ -93,15 +99,20 @@ for dir in "$archive"/*/; do
       report OK feed "$feed: hour just started"
     fi
   elif [[ $feed == hsl ]]; then
-    lastrcv=$(hsl_lastrcv)
+    # Covers every broker connection (hsl, hsl-stop): pings are answered every 30 s, so a live one is never quiet long.
+    mapfile -t rcvs < <(hsl_lastrcvs)
     # A reconnect leaves about a second without a connection: look once more before calling it down.
-    if [[ -z $lastrcv ]]; then sleep 3; lastrcv=$(hsl_lastrcv); fi
-    if [[ -z $lastrcv ]]; then
+    if (( ${#rcvs[@]} < hsl_expected )); then sleep 3; mapfile -t rcvs < <(hsl_lastrcvs); fi
+    quietest=0
+    for rcv in "${rcvs[@]}"; do if (( rcv > quietest )); then quietest=$rcv; fi; done
+    if (( ${#rcvs[@]} == 0 )); then
       report FAIL feed "hsl: no connection to the broker"
-    elif (( lastrcv > 120000 )); then
-      report FAIL feed "hsl: nothing received for $(( lastrcv / 1000 ))s"
+    elif (( ${#rcvs[@]} < hsl_expected )); then
+      report FAIL feed "hsl: ${#rcvs[@]} of $hsl_expected broker connections"
+    elif (( quietest > 120000 )); then
+      report FAIL feed "hsl: a broker connection received nothing for $(( quietest / 1000 ))s"
     else
-      report OK feed "hsl: data this hour, broker last heard $(( lastrcv / 1000 ))s ago"
+      report OK feed "hsl: data this hour, ${#rcvs[@]} broker connections, quietest heard $(( quietest / 1000 ))s ago"
     fi
   else
     report OK feed "$feed: data this hour"
