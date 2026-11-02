@@ -19,6 +19,11 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- The GTFS fixture slice lives with the unit tests; linked, not copied. -->
+  <ItemGroup>
+    <None Include="..\TransitPulse.Infrastructure.Tests\Fixtures\gtfs\**" LinkBase="Fixtures\gtfs" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\TransitPulse.Infrastructure\TransitPulse.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\TransitPulse.Ingestor\TransitPulse.Ingestor.csproj" />
