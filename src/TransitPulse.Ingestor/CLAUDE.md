@@ -2,8 +2,10 @@
 
 - **Raw first.** Every message is archived exactly as received before anything else happens; the archive is the
   source of truth. Normalization and publishing are a branch that may drop under backpressure (ADR-0005), never the reverse.
-- **Two modes, `Ingestor:Mode`:** `archive` (default; the collector server) and `full` (local, adds Kafka).
-  A missing setting must keep meaning `archive`; never add Kafka-dependent code to the archive path.
+- **Three modes, `Ingestor:Mode`:** `archive` (default; the collector server), `full` (local, adds Kafka) and
+  `replay` (reads the archive back through the `full` pipeline). A missing setting must keep meaning `archive`; never
+  add Kafka-dependent code to the archive path. Replay writes no archive, and its normalizing channel waits instead
+  of dropping (the archive is the source, so nothing could rebuild a drop): the only exception to ADR-0005.
 - **Kafka protocol only** (ADR-0002): `Confluent.Kafka` client features, no Redpanda-specific APIs or admin endpoints.
   Topics are declared in code (`KafkaTopicInitializer`), not left to broker auto-creation.
 - **Message key is `{FeedId}/{VehicleId}`** (`PositionMessage.Key`): vehicle ids are unique only within a feed.

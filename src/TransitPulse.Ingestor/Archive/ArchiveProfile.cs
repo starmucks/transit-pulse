@@ -92,7 +92,7 @@ internal static class ArchiveProfile
             }
 
             await output.WriteLineAsync($"{feed} ({zone.Id} local time, UTC {from:yyyy-MM-dd} to {to:yyyy-MM-dd})");
-            await output.WriteLineAsync($"{"hour",4} {"days",4} {"rec/s",9} {"max",9} {"MB/h",8}   {"days",4} {"rec/s",9} {"max",9} {"MB/h",8}   (weekdays | weekends)");
+            await output.WriteLineAsync($"{"hour",4} {"days",4} {"rec/s",9} {"max",9} {"MiB/h",8}   {"days",4} {"rec/s",9} {"max",9} {"MiB/h",8}   (weekdays | weekends)");
             for (var slot = 0; slot < 24; slot++)
             {
                 await output.WriteLineAsync($"{slot,4:00} {Format(slots[0, slot])}   {Format(slots[1, slot])}");
