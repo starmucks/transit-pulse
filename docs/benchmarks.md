@@ -158,3 +158,25 @@ Parquet with zstd, as stored on the collector server. MiB per day, average of th
 
 About 2.9 GiB (3.1 GB) a day over a week, or about 87 GiB (94 GB) a month; HSL positions are 83 % of it. `entur-sky-vm` was polled
 every 15 s until 24.10 20:49 UTC and every 30 s after, so its weekday figure mixes both rates.
+
+## GTFS snapshot check
+
+Reading and checking whole schedule snapshots with `GtfsSnapshotCheck.Run` (stage 2, task 2.2): every file streamed
+from the zip once, references checked as rows arrive.
+
+**Data:** every snapshot the collector archived from 2026-10-21 to 2026-11-01: HSL 10, MBTA 4, Entur (Bergen) 21.
+**How:** a one-off console (Release build, workstation GC) per snapshot, zip read from a local HDD on the development
+PC; time is wall clock of the whole check, memory the process peak working set. Measured 2026-11-02.
+
+| Feed | Snapshots | Valid | `stop_times.txt` rows | Other large files | Time | Peak working set |
+|---|---|---|---|---|---|---|
+| HSL | 10 | 9 | 10.7 M (959 MB unpacked) | 381 k trips, 468 k shape points | 8.9–27.5 s | 79–99 MiB |
+| Entur (Bergen) | 21 | 21 | 3.8 M | 158 k trips, 3.8 M shape points | 5.4–42.3 s | 67–75 MiB |
+| MBTA | 4 | 4 | 2.9 M | 114 k trips, 387 k shape points | 2.4–4.3 s | 53–54 MiB |
+
+- The one rejected snapshot is HSL's export of 2026-10-27 02:30 UTC (654 kB instead of ~60 MB): rejected in 0.3 s with
+  the single problem `routes.txt: the file is empty, without a header row`.
+- Times vary up to eightfold for the same feed: the zip is read from a spinning disk with a cold or warm cache, so the
+  range shows the disk more than the parser. Memory does not depend on file size: rows are streamed, only id sets stay.
+- MBTA's 7 one-stop shuttle templates (`…-sample`, service `canonical` that runs on no day) failed the first version of
+  the "at least 2 stop times" rule; the rule now applies to trips of services that run on at least one day.
