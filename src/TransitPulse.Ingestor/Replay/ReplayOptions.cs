@@ -12,18 +12,21 @@ internal sealed class ReplayOptions
     /// <summary>Fastest paced replay; the brief's load target is x10 (x50 for the heaviest test).</summary>
     public const double MaxSpeed = 50;
 
-    /// <summary>Start of the replayed range, inclusive, compared with each record's receive time.</summary>
+    /// <summary>
+    /// Start of the replayed range, inclusive, compared with each record's receive time. A configured value without
+    /// an offset is UTC (<c>2026-10-26T14:00:00</c> is 14:00 UTC), not the machine's local time.
+    /// </summary>
     public DateTimeOffset From { get; set; }
 
-    /// <summary>End of the replayed range, exclusive.</summary>
+    /// <summary>End of the replayed range, exclusive; read as UTC like <see cref="From"/>.</summary>
     public DateTimeOffset To { get; set; }
 
     /// <summary>Feeds to replay, e.g. <c>hsl</c>, <c>entur-sky-vm</c>, <c>mbta-vp</c>.</summary>
     public List<string> Feeds { get; set; } = [];
 
     /// <summary>
-    /// Pace relative to the recording: 1 is real time, 10 is ten times faster; 0 sends records as fast as the
-    /// pipeline takes them, limited only by its bounded channel.
+    /// Pace relative to the recording, from 1 (real time) to <see cref="MaxSpeed"/>: 10 is ten times faster; 0 sends
+    /// records as fast as the pipeline takes them, limited only by its bounded channel.
     /// </summary>
     public double Speed { get; set; } = 1;
 }
@@ -41,9 +44,9 @@ internal sealed class ReplayOptionsValidator : IValidateOptions<ReplayOptions>
         }
 
         // Written as a range check so that NaN fails too.
-        if (!(options.Speed >= 0 && options.Speed <= ReplayOptions.MaxSpeed))
+        if (!(options.Speed == 0 || (options.Speed >= 1 && options.Speed <= ReplayOptions.MaxSpeed)))
         {
-            errors.Add($"Replay:Speed must be 0 (as fast as possible) or up to {ReplayOptions.MaxSpeed}.");
+            errors.Add($"Replay:Speed must be 0 (as fast as possible) or from 1 to {ReplayOptions.MaxSpeed}.");
         }
 
         if (options.Feeds.Count == 0)

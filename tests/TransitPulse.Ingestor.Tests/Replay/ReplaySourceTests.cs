@@ -82,6 +82,39 @@ public sealed class ReplaySourceTests : IDisposable
         await StopAsync(run);
     }
 
+    [Theory]
+    [InlineData("00:00:00.009", 2)]
+    [InlineData("00:00:00.010", 1)]
+    public async Task Waits_shorter_than_the_minimum_go_out_at_once(string second, int sentWithoutTime)
+    {
+        await WriteAsync("a", "00:00:00", second);
+
+        var run = Start(speed: 1);
+
+        // The clock never moves: a record that waited on a timer would not go out.
+        await WaitForAsync(1);
+        await AssertStillAsync(after: TimeSpan.Zero, count: sentWithoutTime);
+        await StopAsync(run);
+    }
+
+    [Fact]
+    public async Task Slow_stretch_is_caught_up_against_the_first_record()
+    {
+        await WriteAsync("a", "00:00:00", "00:00:10", "00:00:20", "00:00:30");
+
+        var run = Start(speed: 1);
+
+        await WaitForAsync(1);
+        // The second record goes out 15 s late: the third is already due and follows without a wait.
+        _time.Advance(TimeSpan.FromSeconds(25));
+        await WaitForAsync(3);
+        // The fourth keeps its place in the schedule: due 30 s after the first, 5 s from now.
+        await AssertStillAsync(after: TimeSpan.FromSeconds(4.9), count: 3);
+        _time.Advance(TimeSpan.FromSeconds(0.1));
+        await WaitForAsync(4);
+        await StopAsync(run);
+    }
+
     [Fact]
     public async Task Finished_replay_stops_the_host_and_waits_instead_of_returning()
     {
@@ -148,9 +181,28 @@ public sealed class ReplaySourceTests : IDisposable
         Assert.Contains("Replay:Feeds must name", error.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Registration_reads_a_range_without_an_offset_as_utc()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Replay:From"] = "2026-10-26T14:00:00",
+            ["Replay:To"] = "2026-10-26T17:00:00+02:00",
+            ["Replay:Feeds:0"] = "hsl",
+        }).Build();
+        using var provider = new ServiceCollection().AddSingleton<IConfiguration>(configuration).AddReplay().BuildServiceProvider();
+
+        var options = provider.GetRequiredService<IOptions<ReplayOptions>>().Value;
+
+        Assert.Equal(new DateTimeOffset(2026, 10, 26, 14, 0, 0, TimeSpan.Zero), options.From);
+        Assert.Equal(TimeSpan.Zero, options.From.Offset);
+        Assert.Equal(new DateTimeOffset(2026, 10, 26, 15, 0, 0, TimeSpan.Zero), options.To);
+    }
+
     [Theory]
     [InlineData("01:00:00", "01:00:00", 1, "a", "Replay:To must be later")]
     [InlineData("01:00:00", "02:00:00", -1, "a", "Replay:Speed must be")]
+    [InlineData("01:00:00", "02:00:00", 0.5, "a", "Replay:Speed must be")]
     [InlineData("01:00:00", "02:00:00", 51, "a", "Replay:Speed must be")]
     [InlineData("01:00:00", "02:00:00", double.NaN, "a", "Replay:Speed must be")]
     [InlineData("01:00:00", "02:00:00", 1, "", "Replay:Feeds must name")]
