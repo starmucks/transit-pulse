@@ -49,11 +49,14 @@ events.stop ──► Worker: StopEventSink ─► Postgres stop_events (upsert 
 - ✅ 2026-11-02: все 35 снимков архива (HSL 10, Entur 21, MBTA 4) — 34 валидны, HSL 27.10 02:30 отвергнут одной причиной; HSL ≤ 99 MiB и ≤ 28 с на 10,7 млн `stop_times` (`docs/benchmarks.md`, «GTFS snapshot check»).
 
 ### 2.3 Импорт GTFS в Postgres (#41)
-- [ ] Схема `gtfs.*` с версией снимка на фид; массовая загрузка через `COPY` (Npgsql binary import); переключение на новую версию одной транзакцией, старая удаляется после.
-- [ ] Новый проект `TransitPulse.Worker`: импорт по расписанию (раз в сутки) из папки снимков; Worker и его миграции — в AppHost.
-- [ ] Схема БД: EF Core 10 migrations или SQL-скрипты — решаем в плане шага (бриф: EF Core + COPY для массовой записи).
+- [x] Схема `gtfs.*` с версией снимка на фид; массовая загрузка через `COPY` (Npgsql binary import); переключение на новую версию одной транзакцией, старая удаляется после.
+  - Версия = LIST-партиция по `snapshot_id`: `COPY` в отдельную таблицу без индексов → PK → `ATTACH` (читатели не блокируются) → `is_active`; старая версия — `DROP` партиций отдельной транзакцией с `lock_timeout`. Тот же файл (SHA-256) не перечитывается; битый снимок или повтор ключа → откат, прежнее расписание остаётся (ADR-0008).
+- [x] Новый проект `TransitPulse.Worker`: импорт по расписанию (раз в сутки) из папки снимков; Worker и его миграции — в AppHost.
+  - Берёт самый свежий законченный снимок фида (есть `.zip.sha256`); ошибка одного фида не мешает остальным; отвергнутый файл не перечитывается до нового.
+- [x] Схема БД: решение автора 2026-11-02 — SQL-скрипты со своим раннером (`SchemaMigrator`, advisory lock), не EF Core migrations (ADR-0008).
 
 **Готово, когда:** интеграционный тест (Testcontainers) импортирует фикстурный снимок и повторный импорт того же снимка ничего не меняет; импорт реального снимка HSL — время и размер в БД записаны.
+- ✅ 2026-11-02: 8 тестов на `timescaledb-ha` (в т. ч. повторный импорт → `Unchanged`, читатель не блокирует импорт); HSL 31.10 — 131 с, 1 507 МБ; Entur 74 с, MBTA 28 с (`docs/benchmarks.md`, «GTFS import»).
 
 ### 2.4 Каркас Processor (#42)
 - [ ] `TransitPulse.Processor`: consumer group на `positions.raw`, ручной commit offset'ов, однопоточная обработка партиции, состояние машины в памяти (последние N точек).
@@ -123,10 +126,10 @@ events.stop ──► Worker: StopEventSink ─► Postgres stop_events (upsert 
 - [ ] ADR 1, 3, 4 приняты (ADR 6 принят на этапе 1).
 
 ## ADR этапа
-- ADR 1 — Modular monolith with four deployable units (появляются Processor и Worker; задача 2.4 или 2.3).
+- ADR 1 — Modular monolith with four deployable units (Worker появился в 2.3; ADR — в 2.4 вместе с Processor, решение автора 2026-11-02).
 - ADR 3 — Partition key `{FeedId}/{VehicleId}` and per-vehicle ordering; consumer group и однопоточная партиция (задача 2.4).
 - ADR 4 — At-least-once with idempotent receivers instead of exactly-once: снапшот + offset, детерминированные id, upsert (задача 2.10).
-- Возможно: хранение расписаний — версии снимков в Postgres против чтения zip в Processor (задача 2.3), если решение окажется спорным.
+- ADR-0008 — Store GTFS snapshots as partitions, with plain SQL migrations (задача 2.3).
 
 ## Решения, принятые в этой спецификации (утверждены 2026-11-02)
 1. **Processor этапа 2 — только Хельсинки**, импортёр расписаний — сразу для трёх городов (только разбор и загрузка). Так по брифу (этап 4), а общий импортёр проверяется на разных снимках с первого дня.

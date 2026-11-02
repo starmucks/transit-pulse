@@ -1,7 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Npgsql" />
     <PackageReference Include="Sylvan.Data.Csv" />
+  </ItemGroup>
+
+  <!-- Explicit resource names: the default ones are derived from the folder path and would mangle the leading digits. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Database\Migrations\*.sql" LogicalName="migrations/%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

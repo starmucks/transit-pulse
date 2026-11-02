@@ -5,6 +5,7 @@
     <Project Path="src/TransitPulse.Infrastructure/TransitPulse.Infrastructure.csproj" />
     <Project Path="src/TransitPulse.Ingestor/TransitPulse.Ingestor.csproj" />
     <Project Path="src/TransitPulse.ServiceDefaults/TransitPulse.ServiceDefaults.csproj" />
+    <Project Path="src/TransitPulse.Worker/TransitPulse.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/TransitPulse.Domain.Tests/TransitPulse.Domain.Tests.csproj" />
