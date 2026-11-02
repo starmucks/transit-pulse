@@ -54,11 +54,7 @@ if (mode == IngestorMode.Replay)
 }
 else
 {
-    builder.Services.AddOptions<HslMqttOptions>().BindConfiguration(HslMqttOptions.SectionName)
-        // A limit within the reconnect timeout would report every reconnect as a silent feed.
-        .Validate(o => o.MaxSilence is null || o.MaxSilence > o.SilenceTimeout, "Feeds:Hsl:MaxSilence must be longer than SilenceTimeout.")
-        .ValidateOnStart();
-    builder.Services.AddSingleton<IFeedSource, HslMqttSource>();
+    builder.Services.AddHslMqttFeeds(builder.Configuration);
     builder.Services.AddHttpFeeds(builder.Configuration);
 }
 

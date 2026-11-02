@@ -1,10 +1,13 @@
 namespace TransitPulse.Ingestor.Feeds.Hsl;
 
-/// <summary>HSL High-Frequency Positioning (HFP) feed settings, configuration section <c>Feeds:Hsl</c>.</summary>
+/// <summary>
+/// One MQTT subscription to the HSL High-Frequency Positioning (HFP) broker: an entry of the configuration list
+/// <c>Feeds:Mqtt</c>. Each entry is its own connection and its own feed in the archive.
+/// </summary>
 internal sealed class HslMqttOptions
 {
-    /// <summary>Configuration section name.</summary>
-    public const string SectionName = "Feeds:Hsl";
+    /// <summary>Feed id of every message this subscription receives, e.g. <c>hsl</c>.</summary>
+    public string FeedId { get; set; } = "";
 
     /// <summary>MQTT broker host; HSL serves HFP over TLS only.</summary>
     public string Host { get; set; } = "mqtt.hsl.fi";
@@ -12,21 +15,25 @@ internal sealed class HslMqttOptions
     /// <summary>MQTT over TLS port.</summary>
     public int Port { get; set; } = 8883;
 
-    /// <summary>Topic filter: vehicle positions of every ongoing journey, all modes.</summary>
-    public string Topic { get; set; } = "/hfp/v2/journey/ongoing/vp/#";
+    /// <summary>Topic filters, subscribed in one SUBSCRIBE; set in configuration only.</summary>
+    /// <remarks>
+    /// No default on purpose: the configuration binder appends configured items to a non-empty default array
+    /// instead of replacing it, which would silently subscribe to an extra topic.
+    /// </remarks>
+    public string[] Topics { get; set; } = [];
 
     /// <summary>
     /// No message for this long means the subscription is lost even if the connection still answers pings;
-    /// the source then reconnects. HFP carries hundreds of messages per second even at night, so a minute
-    /// of silence is a real fault.
+    /// the source then reconnects. Must exceed the longest normal gap between messages of the subscribed topics.
     /// </summary>
     public TimeSpan SilenceTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
-    /// Silence after which the feed is reported silent: longer than <see cref="SilenceTimeout"/> plus a reconnect, so a
-    /// report means reconnecting did not help (measured 2026-10-25/26: longest gap 102 s, each one a reconnect).
+    /// Silence after which the feed is reported silent; longer than <see cref="SilenceTimeout"/> plus a reconnect, so a
+    /// report means reconnecting did not help. <see langword="null"/> (the default) turns the report off until gaps
+    /// are measured in the archive.
     /// </summary>
-    public TimeSpan? MaxSilence { get; set; } = TimeSpan.FromMinutes(2);
+    public TimeSpan? MaxSilence { get; set; }
 
     /// <summary>
     /// Deadline for setting a connection up: TCP connect, TLS handshake, MQTT CONNECT and SUBSCRIBE. Without it a

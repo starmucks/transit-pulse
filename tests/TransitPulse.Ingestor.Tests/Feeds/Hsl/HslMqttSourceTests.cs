@@ -4,7 +4,6 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using TransitPulse.Ingestor.Feeds.Hsl;
 using TransitPulse.Ingestor.Pipeline;
@@ -26,11 +25,13 @@ public sealed class HslMqttSourceTests
         listener.Start();
         var settings = new HslMqttOptions
         {
+            FeedId = "hsl",
+            Topics = [VpTopic],
             Host = IPAddress.Loopback.ToString(),
             Port = ((IPEndPoint)listener.LocalEndpoint).Port,
             ConnectTimeout = TimeSpan.FromMilliseconds(300),
         };
-        var source = new HslMqttSource(Options.Create(settings), TimeProvider.System, NullLogger<HslMqttSource>.Instance);
+        var source = new HslMqttSource(settings, TimeProvider.System, NullLogger<HslMqttSource>.Instance);
 
         // Bounded so that a missing timeout fails the test with a cancellation instead of hanging the run.
         using var guard = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
@@ -64,6 +65,28 @@ public sealed class HslMqttSourceTests
         Assert.Equal("hsl", record.FeedId);
         Assert.Equal("/hfp/v2/journey/ongoing/vp/bus/0022/01234", record.Topic);
         Assert.Equal("""{"VP":{"veh":1234}}""", Encoding.UTF8.GetString(record.Payload));
+
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+    }
+
+    [Fact]
+    public async Task Records_carry_the_feed_id_of_a_subscription_to_several_filters()
+    {
+        using var broker = new FakeBroker();
+        var output = Channel.CreateUnbounded<RawRecord>();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        string[] topics = ["/hfp/v2/journey/ongoing/ars/#", "/hfp/v2/journey/ongoing/dep/#"];
+        var run = broker.CreateSource(feedId: "hsl-stop", topics: topics).RunAsync(output.Writer, stop.Token);
+
+        using var client = await broker.AcceptAsync();
+        await client.SendAsync(ConnAck(0), Ct);
+        await client.SendAsync(new byte[] { 0x90, 0x04, 0x00, 0x01, 0x00, 0x00 }, Ct);
+        await client.SendAsync(Publish("/hfp/v2/journey/ongoing/ars/bus/0018/00992", """{"ARS":{"veh":992}}"""), Ct);
+
+        var record = await output.Reader.ReadAsync(Ct).AsTask().WaitAsync(_timeout, Ct);
+        Assert.Equal("hsl-stop", record.FeedId);
+        Assert.Equal("/hfp/v2/journey/ongoing/ars/bus/0018/00992", record.Topic);
 
         await stop.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
@@ -146,6 +169,8 @@ public sealed class HslMqttSourceTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
     }
 
+    private const string VpTopic = "/hfp/v2/journey/ongoing/vp/#";
+
     private static readonly byte[] _subAck = [0x90, 0x03, 0x00, 0x01, 0x00];
 
     private static byte[] ConnAck(byte code) => [0x20, 0x02, 0x00, code];
@@ -166,16 +191,18 @@ public sealed class HslMqttSourceTests
 
         public FakeBroker() => _listener.Start();
 
-        public HslMqttSource CreateSource(TimeProvider? time = null)
+        public HslMqttSource CreateSource(TimeProvider? time = null, string feedId = "hsl", string[]? topics = null)
         {
             var settings = new HslMqttOptions
             {
+                FeedId = feedId,
+                Topics = topics ?? [VpTopic],
                 Host = IPAddress.Loopback.ToString(),
                 Port = ((IPEndPoint)_listener.LocalEndpoint).Port,
                 ConnectTimeout = _timeout,
                 SilenceTimeout = _timeout,
             };
-            return new HslMqttSource(Options.Create(settings), time ?? TimeProvider.System, NullLogger<HslMqttSource>.Instance, OpenTcpAsync);
+            return new HslMqttSource(settings, time ?? TimeProvider.System, NullLogger<HslMqttSource>.Instance, OpenTcpAsync);
         }
 
         /// <summary>Accepts the source's connection and reads its CONNECT and SUBSCRIBE.</summary>
