@@ -111,6 +111,31 @@ public sealed class NormalizingSinkTests
     }
 
     [Fact]
+    public async Task Cancellation_ends_the_wait_on_a_full_channel()
+    {
+        var gate = new TaskCompletionSource();
+        var positions = new RecordingPositionSink { Gate = gate.Task };
+        using var sink = Create(positions, channelCapacity: 2, waitWhenFull: true);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+
+        await WriteAsync(sink, 1);
+        await positions.PublishStarted.WaitAsync(Ct);
+        await WriteAsync(sink, 2, 3);
+        var fourth = sink.WriteAsync(FakeNormalizer.Record("hsl", 4), stop.Token).AsTask();
+        await Task.Delay(100, Ct);
+        Assert.False(fourth.IsCompleted);
+
+        await stop.CancelAsync();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => fourth.WaitAsync(TimeSpan.FromSeconds(10), Ct));
+        gate.SetResult();
+        await sink.CompleteAsync(Ct);
+        // Archived before the wait, never queued for publishing.
+        Assert.Equal(4, _archive.Records.Count);
+        Assert.Equal(3, positions.Positions.Count);
+    }
+
+    [Fact]
     public async Task Dropping_is_logged_once_per_episode()
     {
         var gate = new TaskCompletionSource();

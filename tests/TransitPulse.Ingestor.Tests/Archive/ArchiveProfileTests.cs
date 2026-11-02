@@ -56,6 +56,21 @@ public sealed class ArchiveProfileTests : IDisposable
         Assert.Contains("hsl (", output.ToString(), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("hsl", 2, 3)]
+    [InlineData("entur-sky-vm", 1, 2)]
+    [InlineData("mbta-vp", -5, -4)]
+    [InlineData("mbta", -5, -4)]
+    [InlineData("weather", 0, 0)]
+    public void Feeds_get_the_time_zone_of_their_city_and_other_feeds_stay_in_utc(string feed, int winterOffset, int summerOffset)
+    {
+        // Offsets rather than zone ids: the id is IANA or Windows depending on the platform.
+        var zone = ArchiveProfile.ZoneOf(feed);
+
+        Assert.Equal(TimeSpan.FromHours(winterOffset), zone.GetUtcOffset(new DateTimeOffset(2026, 1, 15, 12, 0, 0, TimeSpan.Zero)));
+        Assert.Equal(TimeSpan.FromHours(summerOffset), zone.GetUtcOffset(new DateTimeOffset(2026, 7, 15, 12, 0, 0, TimeSpan.Zero)));
+    }
+
     private async Task WriteAsync(string name, int records)
     {
         var dash = name.LastIndexOf('-');

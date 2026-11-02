@@ -46,4 +46,21 @@ public sealed class ArchivePositionProfileTests : IDisposable
         // Feeds without records in the range still get their table of zeros.
         Assert.Contains(report, line => line.StartsWith("mbta-vp positions", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public async Task Unreadable_file_is_reported_instead_of_thrown_and_fails_the_run_without_a_partial_report()
+    {
+        var directory = Path.Combine(_dir.FullName, "hsl", "2026-10-26");
+        Directory.CreateDirectory(directory);
+        await File.WriteAllBytesAsync(Path.Combine(directory, "hsl-20261026T06Z-0.parquet"), [1, 2, 3, 4], Ct);
+        var output = new StringWriter();
+
+        var exitCode = await ArchivePositionProfile.RunAsync(_dir.FullName, new DateOnly(2026, 10, 26), new DateOnly(2026, 10, 27), output, Ct);
+
+        Assert.Equal(1, exitCode);
+        var report = output.ToString();
+        Assert.StartsWith("UNREADABLE ", report, StringComparison.Ordinal);
+        Assert.Contains("hsl-20261026T06Z-0.parquet", report, StringComparison.Ordinal);
+        Assert.DoesNotContain(" positions (", report, StringComparison.Ordinal);
+    }
 }
