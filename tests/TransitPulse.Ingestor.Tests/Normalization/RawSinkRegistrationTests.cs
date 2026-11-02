@@ -101,11 +101,26 @@ public sealed class RawSinkRegistrationTests
     }
 
     [Fact]
+    public async Task Replay_mode_publishes_without_writing_the_archive()
+    {
+        var archive = Path.Combine(Path.GetTempPath(), $"tp-registration-{Guid.NewGuid():N}");
+        using var provider = Build(Configuration("replay", bootstrapServers: "127.0.0.1:1", ("Archive:RootDirectory", archive)));
+        var sink = provider.GetRequiredService<IRawSink>();
+
+        // No normalizer claims this feed, so nothing reaches the unreachable broker.
+        await sink.WriteAsync(new RawRecord("other", DateTimeOffset.UtcNow, [1], null), TestContext.Current.CancellationToken);
+
+        Assert.IsType<NormalizingSink>(sink);
+        Assert.IsType<KafkaSink>(provider.GetRequiredService<IPositionSink>());
+        Assert.False(Directory.Exists(archive));
+    }
+
+    [Fact]
     public void Unknown_mode_fails_registration()
     {
-        var error = Assert.Throws<InvalidOperationException>(() => new ServiceCollection().AddRawSink(Configuration("replay", null)));
+        var error = Assert.Throws<InvalidOperationException>(() => new ServiceCollection().AddRawSink(Configuration("live", null)));
 
-        Assert.Contains("'replay'", error.Message, StringComparison.Ordinal);
+        Assert.Contains("'live'", error.Message, StringComparison.Ordinal);
     }
 
     private static IConfiguration Configuration(string mode, string? bootstrapServers, (string Key, string Value)? setting = null)

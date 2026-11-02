@@ -7,7 +7,7 @@ namespace TransitPulse.Ingestor.Normalization;
 /// Wraps the raw archive and branches every record off to normalization: the record is archived first, then
 /// offered to a separate bounded channel that a background loop normalizes and publishes. When the channel is
 /// full the record is dropped from publishing, never delayed: a slow or failed broker must not hold back the
-/// archive, which is the source of truth and lets dropped positions be rebuilt by replay.
+/// archive, which is the source of truth and lets dropped positions be rebuilt by replay. Replay itself waits instead.
 /// </summary>
 internal sealed partial class NormalizingSink : IRawSink, IDisposable
 {
@@ -19,6 +19,7 @@ internal sealed partial class NormalizingSink : IRawSink, IDisposable
 
     private const string ChannelKey = "channel";
 
+    private readonly bool _waitWhenFull;
     private readonly IRawSink _archive;
     private readonly PositionRouter _router;
     private readonly IPositionSink _positions;
@@ -43,6 +44,10 @@ internal sealed partial class NormalizingSink : IRawSink, IDisposable
     /// <param name="metrics">Count of records dropped on a full channel.</param>
     /// <param name="logger">Log for dropped records and publish failures.</param>
     /// <param name="channelCapacity">Records waiting to be published before new ones are dropped.</param>
+    /// <param name="waitWhenFull">
+    /// Wait for room instead of dropping: for replay, whose source can be slowed down and whose records must all be
+    /// published, while a live feed must never be held back by the broker.
+    /// </param>
     public NormalizingSink(
         IRawSink archive,
         PositionRouter router,
@@ -50,8 +55,10 @@ internal sealed partial class NormalizingSink : IRawSink, IDisposable
         TimeProvider timeProvider,
         PositionMetrics metrics,
         ILogger<NormalizingSink> logger,
-        int channelCapacity = DefaultChannelCapacity)
+        int channelCapacity = DefaultChannelCapacity,
+        bool waitWhenFull = false)
     {
+        _waitWhenFull = waitWhenFull;
         _archive = archive;
         _router = router;
         _positions = positions;
@@ -74,6 +81,13 @@ internal sealed partial class NormalizingSink : IRawSink, IDisposable
     {
         // An archive failure propagates: the pipeline treats it as fatal, as it does without this sink.
         await _archive.WriteAsync(record, cancellationToken);
+
+        if (_waitWhenFull)
+        {
+            // The wait reaches the pipeline's bounded channel and from there the source: backpressure end to end.
+            await _channel.Writer.WriteAsync(record, cancellationToken);
+            return;
+        }
 
         // Logged per episode, not per record: while the broker is down this happens ~1 000 times a second, and
         // near the limit full and free alternate many times a second.

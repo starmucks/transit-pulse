@@ -130,7 +130,8 @@ internal static class ArchiveStats
     }
 
     // Names are "{feed}-{yyyyMMdd}T{HH}Z-{n}.parquet" under "{feed}/{date}/": ordinal order breaks at n = 10.
-    private static int CompareChronologically(string left, string right)
+    // Shared with ArchiveReader, so replay reads the files of an hour in the same order.
+    internal static int CompareChronologically(string left, string right)
     {
         var (leftHour, leftNumber) = SplitNumber(left);
         var (rightHour, rightNumber) = SplitNumber(right);
