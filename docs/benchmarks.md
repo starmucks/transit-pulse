@@ -180,3 +180,30 @@ PC; time is wall clock of the whole check, memory the process peak working set. 
   range shows the disk more than the parser. Memory does not depend on file size: rows are streamed, only id sets stay.
 - MBTA's 7 one-stop shuttle templates (`…-sample`, service `canonical` that runs on no day) failed the first version of
   the "at least 2 stop times" rule; the rule now applies to trips of services that run on at least one day.
+
+## GTFS import
+
+Importing whole snapshots into Postgres with `GtfsImporter` (stage 2, task 2.3): binary `COPY` into a new partition per
+snapshot, checked in the same pass, primary keys, `ATTACH`, switch to active (ADR-0008).
+
+**How:** the Worker (Debug build) on the development PC, one feed at a time, zip read from a local HDD; Postgres is the
+AppHost's `timescale/timescaledb-ha:pg17.11-ts2.30.2` container (`--memory=1g`, Docker Desktop on WSL 2). Time is the
+Worker's own measurement of `ImportAsync`; size is `pg_total_relation_size` of the snapshot's partitions. One run per
+row, measured 2026-11-02.
+
+| Feed, snapshot | `stop_times` rows | Primary key built | Time | Size in Postgres | of it `stop_times` |
+|---|---|---|---|---|---|
+| HSL 2026-10-31 14:33 | 10.67 M | during the copy | 128.7 s | 1806 MB | 869 MB table + 799 MB index |
+| HSL 2026-10-31 14:33 | 10.67 M | after the copy | 131.3 s | 1507 MB | 869 MB table + 516 MB index |
+| Entur (Bergen) 2026-11-01 14:34 | 3.80 M | during the copy | 73.5 s | 1237 MB | — |
+| MBTA 2026-10-31 02:32 | 2.89 M | during the copy | 28.4 s | 361 MB | — |
+
+- Building the key after the copy (the code since then) does not change the time but makes the indexes ~35 % smaller:
+  one sorted build fills B-tree pages, random inserts leave them about two-thirds full.
+- The import is 5–7 times slower than the check alone (HSL ≤ 28 s, above): the time goes into writing rows, not into
+  reading the zip or into index maintenance. Where exactly (row writes and WAL, ~100 M per-value writes on the client,
+  the container's memory limit) is not measured yet.
+- Postgres holds ~25–30 times the zip size: text keys (`trip_id`, `stop_id`) repeat in every `stop_times` row and its
+  index. While a feed switches versions both are on disk (HSL ~3 GB today).
+- A snapshot whose file is already active is skipped by its SHA-256 without reading the zip; the broken HSL export of
+  2026-10-27 02:30 is rejected with the same single problem as the check alone and is not read again by the Worker.
