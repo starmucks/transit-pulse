@@ -16,7 +16,14 @@ namespace TransitPulse.Infrastructure.Gtfs;
 /// </param>
 public sealed class GtfsImporter(NpgsqlDataSource dataSource, TimeSpan? cleanupLockTimeout = null)
 {
-    private static readonly string[] _tables = ["routes", "stops", "calendar", "calendar_dates", "shapes", "trips", "stop_times"];
+    // Primary keys as in 0001_gtfs_schema.sql: built after the copy, then adopted by ATTACH. A key that differs from the
+    // parent's would not fail, ATTACH would build a second index; the importer tests count one index per partition.
+    private static readonly (string Name, string Key)[] _tables =
+    [
+        ("routes", "snapshot_id, route_id"), ("stops", "snapshot_id, stop_id"), ("calendar", "snapshot_id, service_id"),
+        ("calendar_dates", "snapshot_id, service_id, date"), ("shapes", "snapshot_id, shape_id, sequence"),
+        ("trips", "snapshot_id, trip_id"), ("stop_times", "snapshot_id, trip_id, stop_sequence"),
+    ];
 
     private readonly TimeSpan _cleanupLockTimeout = cleanupLockTimeout ?? TimeSpan.FromSeconds(10);
 
@@ -69,6 +76,12 @@ public sealed class GtfsImporter(NpgsqlDataSource dataSource, TimeSpan? cleanupL
         {
             await transaction.RollbackAsync(cancellationToken);
             return (GtfsImportOutcome.Rejected, null, report);
+        }
+
+        if (await AddKeysAsync(connection, id, cancellationToken) is { } duplicate)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return (GtfsImportOutcome.Rejected, null, report with { Problems = [.. report.Problems, duplicate] });
         }
 
         await AttachAsync(connection, id, cancellationToken);
@@ -208,9 +221,31 @@ public sealed class GtfsImporter(NpgsqlDataSource dataSource, TimeSpan? cleanupL
 
         // Plain tables, attached as partitions only after the copy: CREATE TABLE ... PARTITION OF would hold ACCESS
         // EXCLUSIVE on the parent, blocking every reader, for the whole import. The CHECK spares ATTACH a table scan.
+        // No index yet: one sorted build after the copy is faster than millions of random B-tree inserts.
         await ExecuteAsync(connection, ForEachTable(id,
-            "CREATE TABLE gtfs.{0}_{1} (LIKE gtfs.{0} INCLUDING ALL, CHECK (snapshot_id = {1}))"), cancellationToken);
+            "CREATE TABLE gtfs.{0}_{1} (LIKE gtfs.{0} INCLUDING ALL EXCLUDING INDEXES, CHECK (snapshot_id = {1}))"), cancellationToken);
         return id;
+    }
+
+    // Returns the first duplicate key found as a problem; the transaction is then aborted and must roll back.
+    private static async Task<string?> AddKeysAsync(NpgsqlConnection connection, int id, CancellationToken cancellationToken)
+    {
+        foreach (var table in _tables)
+        {
+            try
+            {
+                await ExecuteAsync(connection, string.Create(CultureInfo.InvariantCulture,
+                    $"ALTER TABLE gtfs.{table.Name}_{id} ADD PRIMARY KEY ({table.Key})"), cancellationToken);
+            }
+            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
+            {
+                // The check does not look for duplicate keys such as a repeated stop_sequence; the primary key does.
+                // Detail (the key values) is redacted unless the connection string sets Include Error Detail.
+                return $"{table.Name}.txt: duplicate key: {ex.Detail ?? ex.ConstraintName}";
+            }
+        }
+
+        return null;
     }
 
     // ATTACH takes only SHARE UPDATE EXCLUSIVE on the parent, which readers do not conflict with.
@@ -228,11 +263,13 @@ public sealed class GtfsImporter(NpgsqlDataSource dataSource, TimeSpan? cleanupL
 
     // One statement per table; table names are constants and the id an integer, never input.
     private static string ForEachTable(int id, string format) =>
-        string.Join(";", _tables.Select(table => string.Format(CultureInfo.InvariantCulture, format, table, id)));
+        string.Join(";", _tables.Select(table => string.Format(CultureInfo.InvariantCulture, format, table.Name, id)));
 
     private static async Task ExecuteAsync(NpgsqlConnection connection, string sql, CancellationToken cancellationToken, params object[] values)
     {
-        await using var command = new NpgsqlCommand(sql, connection);
+        // No 30 s default: the primary key of ~10 million HSL stop_times takes longer to build. The import stops through
+        // the cancellation token, and waits for readers are bounded by lock_timeout.
+        await using var command = new NpgsqlCommand(sql, connection) { CommandTimeout = 0 };
         foreach (var value in values)
         {
             command.Parameters.Add(new NpgsqlParameter { Value = value });
@@ -248,26 +285,17 @@ public sealed class GtfsImporter(NpgsqlDataSource dataSource, TimeSpan? cleanupL
             string table, string columns, IEnumerable<T> rows, Action<T> check, Func<NpgsqlBinaryImporter, T, CancellationToken, Task> write)
         {
             var sql = string.Create(CultureInfo.InvariantCulture, $"COPY gtfs.{table}_{snapshotId} (snapshot_id, {columns}) FROM STDIN (FORMAT BINARY)");
-            try
+            await using var writer = await connection.BeginBinaryImportAsync(sql, cancellationToken);
+            foreach (var row in rows)
             {
-                await using var writer = await connection.BeginBinaryImportAsync(sql, cancellationToken);
-                foreach (var row in rows)
-                {
-                    check(row);
-                    await writer.StartRowAsync(cancellationToken);
-                    await writer.WriteAsync(snapshotId, NpgsqlDbType.Integer, cancellationToken);
-                    await write(writer, row, cancellationToken);
-                }
+                check(row);
+                await writer.StartRowAsync(cancellationToken);
+                await writer.WriteAsync(snapshotId, NpgsqlDbType.Integer, cancellationToken);
+                await write(writer, row, cancellationToken);
+            }
 
-                // Without Complete the server discards the rows: an exception above never leaves half a table.
-                await writer.CompleteAsync(cancellationToken);
-            }
-            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
-            {
-                // The check does not look for duplicate keys such as a repeated stop_sequence; the primary key does.
-                // Detail (the key values) is redacted unless the connection string sets Include Error Detail.
-                throw new GtfsFormatException($"{table}.txt", $"duplicate key: {ex.Detail ?? ex.ConstraintName}");
-            }
+            // Without Complete the server discards the rows: an exception above never leaves half a table.
+            await writer.CompleteAsync(cancellationToken);
         }
     }
 }

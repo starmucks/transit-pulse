@@ -35,6 +35,10 @@ public sealed class GtfsImporterTests(PostgresFixture postgres) : IClassFixture<
 
         Assert.Equal(result.SnapshotId, await ScalarAsync<int>(database, "SELECT snapshot_id FROM gtfs.snapshot WHERE is_active"));
         Assert.Equal(7, await ScalarAsync<long>(database, PartitionCount));
+        // One index per partition: ATTACH adopted the primary key built after the copy instead of building its own.
+        Assert.Equal(7, await ScalarAsync<long>(database,
+            "SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid = i.indrelid JOIN pg_namespace n ON n.oid = c.relnamespace " +
+            "WHERE n.nspname = 'gtfs' AND c.relispartition"));
         // 25:35:00 of the service day: past midnight, still the trip's day.
         Assert.Equal(25 * 3600 + 35 * 60, await ScalarAsync<int>(database,
             "SELECT arrival_sec FROM gtfs.stop_times WHERE trip_id = '1009_20261030_Ke_2_2535' AND stop_sequence = 1"));
