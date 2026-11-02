@@ -10,6 +10,7 @@
 
   <!-- Tests against real infrastructure in Docker (Testcontainers); Docker must be running. -->
   <ItemGroup>
+    <PackageReference Include="Testcontainers.PostgreSql" />
     <PackageReference Include="Testcontainers.Redpanda" />
     <PackageReference Include="xunit.v3" />
   </ItemGroup>
@@ -19,6 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\TransitPulse.Infrastructure\TransitPulse.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\TransitPulse.Ingestor\TransitPulse.Ingestor.csproj" />
   </ItemGroup>
 
