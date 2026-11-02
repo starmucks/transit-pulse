@@ -14,6 +14,8 @@ public sealed class GtfsSnapshotCheck
     private readonly HashSet<string> _routes = new(StringComparer.Ordinal);
     private readonly HashSet<string> _stops = new(StringComparer.Ordinal);
     private readonly HashSet<string> _services = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _runningServices = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _idleTrips = new(StringComparer.Ordinal);
     private readonly HashSet<string> _shapes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _callsPerTrip = new(StringComparer.Ordinal);
     private readonly List<(string Stop, string Parent)> _parents = [];
@@ -81,6 +83,10 @@ public sealed class GtfsSnapshotCheck
     {
         Count("calendar.txt");
         _services.Add(calendar.ServiceId);
+        if (RunsOnSomeDay(calendar))
+        {
+            _runningServices.Add(calendar.ServiceId);
+        }
     }
 
     /// <summary>Registers a service; one may exist only in <c>calendar_dates.txt</c>.</summary>
@@ -89,6 +95,10 @@ public sealed class GtfsSnapshotCheck
     {
         Count("calendar_dates.txt");
         _services.Add(date.ServiceId);
+        if (date.Added)
+        {
+            _runningServices.Add(date.ServiceId);
+        }
     }
 
     /// <summary>Registers a shape.</summary>
@@ -117,6 +127,11 @@ public sealed class GtfsSnapshotCheck
         if (!_services.Contains(trip.ServiceId))
         {
             Problem("trips.txt: service_id in neither calendar", $"{trip.TripId} -> {trip.ServiceId}");
+        }
+
+        if (!_runningServices.Contains(trip.ServiceId))
+        {
+            _idleTrips.Add(trip.TripId);
         }
 
         if (trip.ShapeId is { } shape && !_shapes.Contains(shape))
@@ -187,8 +202,9 @@ public sealed class GtfsSnapshotCheck
 
         foreach (var (trip, calls) in _callsPerTrip)
         {
-            // A trip needs a first and a last stop; fewer calls cannot be a journey.
-            if (calls < 2)
+            // A trip needs a first and a last stop. Trips of services that never run are exempt: MBTA keeps one-stop
+            // shuttle templates ("…-sample", service "canonical" with no day) that no vehicle ever reports.
+            if (calls < 2 && !_idleTrips.Contains(trip))
             {
                 Problem("trips.txt: trip with fewer than 2 stop times", $"{trip} ({calls})");
             }
@@ -216,6 +232,21 @@ public sealed class GtfsSnapshotCheck
         {
             Problem($"{file}: duplicate id", id);
         }
+    }
+
+    // Seven consecutive dates hold every weekday once, so a longer range needs only one weekday set.
+    private static bool RunsOnSomeDay(GtfsCalendar calendar)
+    {
+        for (var date = calendar.Start; date <= calendar.End && date < calendar.Start.AddDays(7); date = date.AddDays(1))
+        {
+            var day = date.DayOfWeek == DayOfWeek.Sunday ? GtfsWeekdays.Sunday : (GtfsWeekdays)(1 << ((int)date.DayOfWeek - 1));
+            if (calendar.Days.HasFlag(day))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void Count(string file) => _rows[file] = _rows.GetValueOrDefault(file) + 1;

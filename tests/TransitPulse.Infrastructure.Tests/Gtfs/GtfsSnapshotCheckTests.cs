@@ -69,11 +69,29 @@ public sealed class GtfsSnapshotCheckTests
     public void Trip_with_a_single_stop_time_is_rejected()
     {
         var files = GtfsFixture.Tram9Files();
+        // The slice's service is for Wednesdays between a Friday and a Sunday, so it never runs: give it a date.
+        files["calendar_dates.txt"] += "1009_20261030_20261101_Ke,20261030,1\n";
         var lines = files["stop_times.txt"].Split('\n');
         var trip = lines[1].Split(',')[0];
         files["stop_times.txt"] = string.Join('\n', lines.Where((line, i) => i <= 1 || !line.StartsWith(trip + ",", StringComparison.Ordinal)));
 
         Assert.Equal([$"trips.txt: trip with fewer than 2 stop times: 1 (first: {trip} (1))"], Check(files).Problems);
+    }
+
+    [Theory]
+    [InlineData("idle,0,0,0,0,0,0,0,20261023,20261212", "", true)]   // MBTA's shuttle templates: no weekday at all
+    [InlineData("idle,0,0,1,0,0,0,0,20261030,20261101", "", true)]   // Wednesdays, but the range is Friday to Sunday
+    [InlineData("idle,0,0,0,0,0,0,0,20261023,20261212", "idle,20261102,1", false)]
+    [InlineData("idle,1,0,0,0,0,0,0,20261102,20261102", "", false)] // a single Monday
+    public void Only_trips_of_services_that_run_need_two_stop_times(string calendar, string date, bool valid)
+    {
+        var files = GtfsFixture.Tram9Files();
+        files["calendar.txt"] += calendar + "\n";
+        files["calendar_dates.txt"] += date.Length > 0 ? date + "\n" : "";
+        files["trips.txt"] += "1009,idle,one-stop-sample,Template,0,1009_20260828_1,1,2,3\n";
+        files["stop_times.txt"] += "one-stop-sample,14:28:00,14:28:00,1020453,1,,0,1,0.000,1\n";
+
+        Assert.Equal(valid, Check(files).IsValid);
     }
 
     [Fact]
@@ -98,6 +116,7 @@ public sealed class GtfsSnapshotCheckTests
     public void Stop_times_file_with_a_header_only_leaves_every_trip_without_calls()
     {
         var files = GtfsFixture.Tram9Files();
+        files["calendar_dates.txt"] += "1009_20261030_20261101_Ke,20261030,1\n";
         files["stop_times.txt"] = files["stop_times.txt"].Split('\n')[0] + "\n";
 
         var report = Check(files);
