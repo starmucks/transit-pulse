@@ -18,7 +18,46 @@ public sealed class MqttWireTests
     {
         byte[] expected = [0x82, 8, 0, 1, 0, 3, (byte)'a', (byte)'/', (byte)'#', 0];
 
-        Assert.Equal(expected, MqttWire.Subscribe(1, "a/#"));
+        Assert.Equal(expected, MqttWire.Subscribe(1, ["a/#"]));
+    }
+
+    [Fact]
+    public void Subscribe_lists_every_filter_with_its_own_qos()
+    {
+        byte[] expected = [0x82, 11, 0, 7, 0, 1, (byte)'a', 0, 0, 2, (byte)'b', (byte)'/', 0];
+
+        Assert.Equal(expected, MqttWire.Subscribe(7, ["a", "b/"]));
+    }
+
+    [Fact]
+    public void Subscribe_without_filters_is_rejected()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => MqttWire.Subscribe(1, []));
+    }
+
+    [Fact]
+    public void SubAck_granting_every_filter_refuses_none()
+    {
+        byte[] body = [0, 1, 0x00, 0x00];
+
+        Assert.Empty(MqttWire.RefusedFilters(body, ["a", "b"]));
+    }
+
+    [Fact]
+    public void SubAck_names_each_refused_filter_by_position()
+    {
+        byte[] body = [0, 1, 0x00, 0x80, 0x80];
+
+        Assert.Equal(["b", "c"], MqttWire.RefusedFilters(body, ["a", "b", "c"]));
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0, 1, 0x00 })] // fewer codes than filters
+    [InlineData(new byte[] { 0, 1, 0x00, 0x00, 0x00 })] // more codes than filters
+    [InlineData(new byte[] { 0 })] // not even a packet identifier
+    public void SubAck_with_a_wrong_number_of_codes_is_invalid(byte[] body)
+    {
+        Assert.Throws<InvalidDataException>(() => MqttWire.RefusedFilters(body, ["a", "b"]));
     }
 
     [Theory]

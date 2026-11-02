@@ -31,15 +31,46 @@ internal static class MqttWire
         return Packet(0x10, body);
     }
 
-    /// <summary>SUBSCRIBE to one topic filter at QoS 0.</summary>
+    /// <summary>SUBSCRIBE to several topic filters at QoS 0 in one packet.</summary>
     /// <param name="packetId">Non-zero packet identifier echoed in SUBACK.</param>
-    /// <param name="topicFilter">Topic filter, wildcards allowed.</param>
-    public static byte[] Subscribe(ushort packetId, string topicFilter)
+    /// <param name="topicFilters">Topic filters, wildcards allowed; SUBACK answers them in this order.</param>
+    /// <exception cref="ArgumentException">No filter is given: the spec forbids an empty SUBSCRIBE.</exception>
+    public static byte[] Subscribe(ushort packetId, IReadOnlyList<string> topicFilters)
     {
+        ArgumentOutOfRangeException.ThrowIfZero(topicFilters.Count, nameof(topicFilters));
         var body = new List<byte> { (byte)(packetId >> 8), (byte)packetId };
-        AddString(body, topicFilter);
-        body.Add(0); // requested QoS
+        foreach (var filter in topicFilters)
+        {
+            AddString(body, filter);
+            body.Add(0); // requested QoS
+        }
+
         return Packet(0x82, body);
+    }
+
+    /// <summary>Reads a SUBACK body: one return code per filter of the SUBSCRIBE, in its order.</summary>
+    /// <param name="body">Body from <see cref="TryReadPacket"/>: packet identifier, then the return codes.</param>
+    /// <param name="topicFilters">The filters the SUBSCRIBE carried.</param>
+    /// <returns>Filters the broker refused (return code 0x80); empty when all were granted.</returns>
+    /// <exception cref="InvalidDataException">The number of return codes differs from the number of filters.</exception>
+    public static List<string> RefusedFilters(ReadOnlySpan<byte> body, IReadOnlyList<string> topicFilters)
+    {
+        var codes = body.Length < 2 ? [] : body[2..];
+        if (codes.Length != topicFilters.Count)
+        {
+            throw new InvalidDataException($"SUBACK carries {codes.Length} return codes for {topicFilters.Count} topic filters.");
+        }
+
+        var refused = new List<string>();
+        for (var i = 0; i < codes.Length; i++)
+        {
+            if (codes[i] == 0x80)
+            {
+                refused.Add(topicFilters[i]);
+            }
+        }
+
+        return refused;
     }
 
     /// <summary>Finds the first complete packet at the start of <paramref name="buffer"/>.</summary>
