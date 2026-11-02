@@ -1,17 +1,13 @@
-using System.IO.Compression;
-using System.Text;
 using TransitPulse.Infrastructure.Gtfs;
 
 namespace TransitPulse.Infrastructure.Tests.Gtfs;
 
 public sealed class GtfsFeedTests
 {
-    private static readonly string _tram9 = Path.Combine(AppContext.BaseDirectory, "Fixtures", "gtfs", "hsl-tram-9");
-
     [Fact]
     public void Reads_every_file_of_a_real_snapshot_slice()
     {
-        using var feed = Feed(FixtureFiles());
+        using var feed = GtfsFixture.Feed(GtfsFixture.Tram9Files());
 
         Assert.Equal(new GtfsRoute("1009", "9", "Länsisatama - Päärautatieas. - Kallio - Pasila as. - Ilmala", 0), Assert.Single(feed.Routes()));
         Assert.Equal(54, feed.Stops().Count());
@@ -27,7 +23,7 @@ public sealed class GtfsFeedTests
     [Fact]
     public void Keeps_times_past_midnight_and_reads_a_blank_parent_station_as_none()
     {
-        using var feed = Feed(FixtureFiles());
+        using var feed = GtfsFixture.Feed(GtfsFixture.Tram9Files());
 
         var nightStart = feed.StopTimes().First(time => time.TripId == "1009_20261030_Ke_2_2535" && time.StopSequence == 1);
         Assert.Equal(new TimeSpan(1, 1, 35, 0), nightStart.Departure);
@@ -39,9 +35,9 @@ public sealed class GtfsFeedTests
     [Fact]
     public void Missing_file_is_reported_when_read()
     {
-        var files = FixtureFiles();
+        var files = GtfsFixture.Tram9Files();
         files.Remove("routes.txt");
-        using var feed = Feed(files);
+        using var feed = GtfsFixture.Feed(files);
 
         Assert.False(feed.Contains("routes.txt"));
         var error = Assert.Throws<GtfsFormatException>(() => feed.Routes().ToList());
@@ -51,7 +47,7 @@ public sealed class GtfsFeedTests
     [Fact]
     public void Calendar_dates_tell_added_from_removed_days()
     {
-        using var feed = Feed(new() { ["calendar_dates.txt"] = "service_id,date,exception_type\nS,20261102,1\nS,20261103,2\n" });
+        using var feed = GtfsFixture.Feed(new() { ["calendar_dates.txt"] = "service_id,date,exception_type\nS,20261102,1\nS,20261103,2\n" });
 
         Assert.Equal(
             [new GtfsCalendarDate("S", new DateOnly(2026, 11, 2), true), new GtfsCalendarDate("S", new DateOnly(2026, 11, 3), false)],
@@ -63,29 +59,9 @@ public sealed class GtfsFeedTests
     [InlineData("calendar.txt", "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\nS,1,1,1,1,2,0,0,20261102,20261231\n", "friday must be 0 or 1")]
     public void Calendar_values_outside_their_codes_are_rejected(string file, string csv, string expected)
     {
-        using var feed = Feed(new() { [file] = csv });
+        using var feed = GtfsFixture.Feed(new() { [file] = csv });
 
         var error = Assert.Throws<GtfsFormatException>(() => file == "calendar.txt" ? feed.Calendars().ToList<object>() : feed.CalendarDates().ToList<object>());
         Assert.Contains(expected, error.Message, StringComparison.Ordinal);
-    }
-
-    private static Dictionary<string, string> FixtureFiles() =>
-        Directory.GetFiles(_tram9, "*.txt").ToDictionary(path => Path.GetFileName(path), path => File.ReadAllText(path));
-
-    /// <summary>Packs the files into a zip in memory, as the snapshot server would deliver them.</summary>
-    private static GtfsFeed Feed(Dictionary<string, string> files)
-    {
-        var buffer = new MemoryStream();
-        using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
-        {
-            foreach (var (name, content) in files)
-            {
-                using var entry = zip.CreateEntry(name).Open();
-                entry.Write(Encoding.UTF8.GetBytes(content));
-            }
-        }
-
-        buffer.Position = 0;
-        return new GtfsFeed(new ZipArchive(buffer, ZipArchiveMode.Read));
     }
 }
