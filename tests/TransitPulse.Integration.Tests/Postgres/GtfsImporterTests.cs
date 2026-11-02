@@ -1,4 +1,3 @@
-using System.IO.Compression;
 using Npgsql;
 using TransitPulse.Infrastructure.Database;
 using TransitPulse.Infrastructure.Gtfs;
@@ -7,12 +6,17 @@ namespace TransitPulse.Integration.Tests.Postgres;
 
 public sealed class GtfsImporterTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>, IDisposable
 {
+    // Every table in the schema, attached or not: a rolled-back import must not leave plain gtfs.routes_N tables behind.
+    private const string TableCount = "SELECT count(*) FROM pg_tables WHERE schemaname = 'gtfs'";
+
+    // gtfs.snapshot and the seven partitioned parents, plus seven partitions per snapshot.
+    private const long TablesWithoutSnapshots = 8;
+    private const long TablesWithOneSnapshot = 15;
+
     // Table partitions only: pg_inherits also links each partition's primary key index to the parent's (relkind 'I').
     private const string PartitionCount =
         "SELECT count(*) FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhparent JOIN pg_namespace n ON n.oid = c.relnamespace " +
         "WHERE n.nspname = 'gtfs' AND c.relkind = 'p'";
-
-    private static readonly string _tram9 = Path.Combine(AppContext.BaseDirectory, "Fixtures", "gtfs", "hsl-tram-9");
 
     private readonly string _directory = Directory.CreateTempSubdirectory("gtfs-import-").FullName;
 
@@ -92,11 +96,30 @@ public sealed class GtfsImporterTests(PostgresFixture postgres) : IClassFixture<
         Assert.Contains("routes.txt has no rows", result.Report!.Problems);
         Assert.Equal(active.SnapshotId, await ScalarAsync<int>(database, "SELECT snapshot_id FROM gtfs.snapshot WHERE is_active"));
         Assert.Equal(1, await ScalarAsync<long>(database, "SELECT count(*) FROM gtfs.snapshot"));
-        Assert.Equal(7, await ScalarAsync<long>(database, PartitionCount));
+        Assert.Equal(TablesWithOneSnapshot, await ScalarAsync<long>(database, TableCount));
     }
 
     [Fact]
-    public async Task Duplicate_stop_sequence_rejects_the_snapshot()
+    public async Task Bad_value_in_the_middle_of_stop_times_rejects_the_snapshot_and_leaves_nothing_behind()
+    {
+        var database = await MigratedDatabaseAsync();
+
+        // The copy of stop_times is already streaming when the row breaks the format.
+        var result = await new GtfsImporter(database).ImportAsync("hsl", Zip("bad-row.zip", files =>
+        {
+            var lines = files["stop_times.txt"].TrimEnd('\n').Split('\n');
+            lines[lines.Length / 2] = "1009_20261030_Ke_1_1428,14:28:00,14:28:00,1203416,first,,0,1,0.000,1";
+            files["stop_times.txt"] = string.Join('\n', lines) + "\n";
+        }), Ct);
+
+        Assert.Equal(GtfsImportOutcome.Rejected, result.Outcome);
+        Assert.Contains(result.Report!.Problems, problem => problem.StartsWith("stop_times.txt", StringComparison.Ordinal));
+        Assert.Equal(0, await ScalarAsync<long>(database, "SELECT count(*) FROM gtfs.snapshot"));
+        Assert.Equal(TablesWithoutSnapshots, await ScalarAsync<long>(database, TableCount));
+    }
+
+    [Fact]
+    public async Task Duplicate_stop_sequence_rejects_the_snapshot_and_leaves_nothing_behind()
     {
         var database = await MigratedDatabaseAsync();
 
@@ -107,27 +130,39 @@ public sealed class GtfsImporterTests(PostgresFixture postgres) : IClassFixture<
         }), Ct);
 
         Assert.Equal(GtfsImportOutcome.Rejected, result.Outcome);
-        Assert.Contains(result.Report!.Problems, problem => problem.StartsWith("stop_times.txt: duplicate key", StringComparison.Ordinal));
+        Assert.Contains("stop_times.txt: duplicate key (snapshot_id, trip_id, stop_sequence)", result.Report!.Problems);
+        Assert.Equal(0, await ScalarAsync<long>(database, "SELECT count(*) FROM gtfs.snapshot"));
+        Assert.Equal(TablesWithoutSnapshots, await ScalarAsync<long>(database, TableCount));
+    }
+
+    [Fact]
+    public async Task Feed_with_calendar_dates_only_is_imported()
+    {
+        var database = await MigratedDatabaseAsync();
+
+        // Entur publishes no calendar.txt: every service is a list of dates.
+        var result = await new GtfsImporter(database).ImportAsync("entur-sky", Zip("dates-only.zip", files =>
+        {
+            files.Remove("calendar.txt");
+            files["calendar_dates.txt"] = "service_id,date,exception_type\n1009_20261030_20261101_Ke,20261028,1\n";
+        }), Ct);
+
+        Assert.Equal(GtfsImportOutcome.Imported, result.Outcome);
+        Assert.Equal(0, await ScalarAsync<long>(database, "SELECT count(*) FROM gtfs.calendar"));
+        Assert.Equal(1, await ScalarAsync<long>(database, "SELECT count(*) FROM gtfs.calendar_dates WHERE added"));
     }
 
     [Fact]
     public async Task A_reader_does_not_block_the_import_and_delays_only_the_drop_of_the_old_version()
     {
         var database = await MigratedDatabaseAsync();
-        var importer = new GtfsImporter(database, cleanupLockTimeout: TimeSpan.FromMilliseconds(200));
+        var importer = new GtfsImporter(database, cleanupRetryDelay: TimeSpan.Zero);
         await importer.ImportAsync("hsl", Zip("old.zip"), Ct);
         var newZip = Zip("new.zip", RenameRoute);
 
         GtfsImportResult blocked;
-        await using (var reader = await database.OpenConnectionAsync(Ct))
-        await using (var transaction = await reader.BeginTransactionAsync(Ct))
+        await using (await ReadingAsync(database))
         {
-            // A long schedule read in progress, as Processor will do on start.
-            await using (var read = new NpgsqlCommand("SELECT count(*) FROM gtfs.routes", reader, transaction))
-            {
-                await read.ExecuteScalarAsync(Ct);
-            }
-
             blocked = await importer.ImportAsync("hsl", newZip, Ct);
         }
 
@@ -135,12 +170,44 @@ public sealed class GtfsImporterTests(PostgresFixture postgres) : IClassFixture<
 
         Assert.Equal(GtfsImportOutcome.Imported, blocked.Outcome);
         Assert.Equal(1, blocked.StaleSnapshots);
+        Assert.Null(blocked.CleanupFailure);
         Assert.Equal(GtfsImportOutcome.Unchanged, retried.Outcome);
         Assert.Equal(0, retried.StaleSnapshots);
-        Assert.Equal(7, await ScalarAsync<long>(database, PartitionCount));
+        Assert.Equal(TablesWithOneSnapshot, await ScalarAsync<long>(database, TableCount));
+    }
+
+    [Fact]
+    public async Task Old_file_whose_version_is_not_dropped_yet_becomes_active_again_without_a_copy()
+    {
+        var database = await MigratedDatabaseAsync();
+        var importer = new GtfsImporter(database, cleanupRetryDelay: TimeSpan.Zero);
+        var oldZip = Zip("old.zip");
+        var old = await importer.ImportAsync("hsl", oldZip, Ct);
+
+        GtfsImportResult back;
+        await using (await ReadingAsync(database))
+        {
+            await importer.ImportAsync("hsl", Zip("new.zip", RenameRoute), Ct);
+            back = await importer.ImportAsync("hsl", oldZip, Ct);
+        }
+
+        Assert.Equal(GtfsImportOutcome.Reactivated, back.Outcome);
+        Assert.Equal(old.SnapshotId, back.SnapshotId);
+        Assert.Equal(old.SnapshotId, await ScalarAsync<int>(database, "SELECT snapshot_id FROM gtfs.snapshot WHERE is_active"));
+        Assert.Equal("Länsisatama - Päärautatieas. - Kallio - Pasila as. - Ilmala", await ScalarAsync<string>(database,
+            $"SELECT long_name FROM gtfs.routes WHERE snapshot_id = {old.SnapshotId}"));
     }
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);
+
+    // A schedule read in progress: an open transaction that has read gtfs.routes holds ACCESS SHARE on it until disposed.
+    private static async Task<NpgsqlConnection> ReadingAsync(NpgsqlDataSource database)
+    {
+        var reader = await database.OpenConnectionAsync(Ct);
+        await using var begin = new NpgsqlCommand("BEGIN; SELECT count(*) FROM gtfs.routes", reader);
+        await begin.ExecuteNonQueryAsync(Ct);
+        return reader;
+    }
 
     private static void RenameRoute(Dictionary<string, string> files) =>
         files["routes.txt"] = "route_id,route_short_name,route_long_name,route_type\n1009,9,Renamed,0\n";
@@ -153,20 +220,8 @@ public sealed class GtfsImporterTests(PostgresFixture postgres) : IClassFixture<
     }
 
     // The tram 9 slice zipped to a file, optionally edited first.
-    private string Zip(string name, Action<Dictionary<string, string>>? edit = null)
-    {
-        var files = Directory.GetFiles(_tram9, "*.txt").ToDictionary(path => Path.GetFileName(path), File.ReadAllText);
-        edit?.Invoke(files);
-        var path = Path.Combine(_directory, name);
-        using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
-        foreach (var (file, content) in files)
-        {
-            using var writer = new StreamWriter(zip.CreateEntry(file).Open());
-            writer.Write(content);
-        }
-
-        return path;
-    }
+    private string Zip(string name, Action<Dictionary<string, string>>? edit = null) =>
+        GtfsZips.Tram9(Path.Combine(_directory, name), edit);
 
     private static async Task<T> ScalarAsync<T>(NpgsqlDataSource database, string sql)
     {

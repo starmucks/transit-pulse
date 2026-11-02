@@ -3,7 +3,7 @@
 -- an old version goes away with DROP TABLE of its partitions, not a DELETE of millions of rows.
 --
 -- No foreign keys on data tables: GtfsSnapshotCheck validates references while the import copies,
--- and a per-row FK check would slow COPY of ~15 million HSL stop_times.
+-- and a per-row FK check would slow COPY of ~11 million HSL stop_times.
 
 CREATE SCHEMA gtfs;
 

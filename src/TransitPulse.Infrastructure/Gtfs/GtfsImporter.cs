@@ -8,16 +8,25 @@ namespace TransitPulse.Infrastructure.Gtfs;
 /// <summary>
 /// Makes a GTFS snapshot zip the active schedule of its feed. The snapshot is copied into new partitions and checked with
 /// <see cref="GtfsSnapshotCheck"/> in the same pass, then activated in that one transaction: readers see the old schedule
-/// or the new one, never a mix, and a rejected or failed import leaves nothing behind. Old versions are dropped afterwards.
+/// or the new one, never a mix, and a rejected or failed import leaves nothing behind. Old versions are dropped afterwards,
+/// once no reader holds the tables.
 /// </summary>
+/// <remarks>
+/// "Never a mix" holds for a reader that picks the feed's active <c>snapshot_id</c> once and filters by it, or reads in
+/// one REPEATABLE READ transaction.
+/// </remarks>
 /// <param name="dataSource">Database with the <c>gtfs</c> schema.</param>
-/// <param name="cleanupLockTimeout">
-/// How long dropping an old version may wait for readers (default 10 s); past it the drop is left to the next import.
+/// <param name="cleanupRetryDelay">
+/// Pause between attempts to drop old versions while readers hold the tables (default 2 s); after
+/// <see cref="CleanupAttempts"/> attempts the drop is left to the next import.
 /// </param>
-public sealed class GtfsImporter(NpgsqlDataSource dataSource, TimeSpan? cleanupLockTimeout = null)
+public sealed class GtfsImporter(NpgsqlDataSource dataSource, TimeSpan? cleanupRetryDelay = null)
 {
+    /// <summary>How many times one import tries to drop old versions.</summary>
+    public const int CleanupAttempts = 5;
+
     // Primary keys as in 0001_gtfs_schema.sql: built after the copy, then adopted by ATTACH. A key that differs from the
-    // parent's would not fail, ATTACH would build a second index; the importer tests count one index per partition.
+    // parent's makes ATTACH fail ("multiple primary keys"); the importer tests also count one index per partition.
     private static readonly (string Name, string Key)[] _tables =
     [
         ("routes", "snapshot_id, route_id"), ("stops", "snapshot_id, stop_id"), ("calendar", "snapshot_id, service_id"),
@@ -25,13 +34,15 @@ public sealed class GtfsImporter(NpgsqlDataSource dataSource, TimeSpan? cleanupL
         ("trips", "snapshot_id, trip_id"), ("stop_times", "snapshot_id, trip_id, stop_sequence"),
     ];
 
-    private readonly TimeSpan _cleanupLockTimeout = cleanupLockTimeout ?? TimeSpan.FromSeconds(10);
+    private readonly TimeSpan _cleanupRetryDelay = cleanupRetryDelay is { } delay && delay < TimeSpan.Zero
+        ? throw new ArgumentOutOfRangeException(nameof(cleanupRetryDelay), delay, "The delay cannot be negative.")
+        : cleanupRetryDelay ?? TimeSpan.FromSeconds(2);
 
     /// <summary>Imports one snapshot unless it is already the feed's active one.</summary>
     /// <param name="feedId">Feed the snapshot belongs to, e.g. <c>hsl</c>.</param>
     /// <param name="zipPath">The snapshot zip.</param>
     /// <param name="cancellationToken">Stops the import; the transaction rolls back.</param>
-    /// <returns>What happened, the active snapshot id unless rejected, and how many old versions still wait to be dropped.</returns>
+    /// <returns>What happened, the active snapshot id unless rejected, and what is left of the old versions.</returns>
     public async Task<GtfsImportResult> ImportAsync(string feedId, string zipPath, CancellationToken cancellationToken)
     {
         byte[] sha256;
@@ -40,11 +51,16 @@ public sealed class GtfsImporter(NpgsqlDataSource dataSource, TimeSpan? cleanupL
             sha256 = await SHA256.HashDataAsync(file, cancellationToken);
         }
 
-        // Leftovers of an earlier blocked cleanup go first: one of them may hold this very file's hash.
-        await DropInactiveAsync(feedId, cancellationToken);
         var (outcome, id, report) = await LoadAsync(feedId, zipPath, sha256, cancellationToken);
-        var stale = await DropInactiveAsync(feedId, cancellationToken);
-        return new(outcome, id, report, stale);
+        try
+        {
+            return new(outcome, id, report, await DropInactiveAsync(feedId, cancellationToken));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The new version is committed by now: a failed cleanup is reported, not turned into a failed import.
+            return new(outcome, id, report, 0, ex);
+        }
     }
 
     private async Task<(GtfsImportOutcome, int?, GtfsSnapshotReport?)> LoadAsync(
@@ -52,11 +68,18 @@ public sealed class GtfsImporter(NpgsqlDataSource dataSource, TimeSpan? cleanupL
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        // Imports of one feed take turns; a transaction-level lock ends with the transaction, pool or not.
-        await ExecuteAsync(connection, "SELECT pg_advisory_xact_lock(hashtext($1))", cancellationToken, feedId);
-        if (await ActiveWithHashAsync(connection, feedId, sha256, cancellationToken) is { } active)
+        await LockFeedAsync(connection, feedId, cancellationToken);
+        if (await WithHashAsync(connection, feedId, sha256, cancellationToken) is var (known, isActive))
         {
-            return (GtfsImportOutcome.Unchanged, active, null);
+            if (isActive)
+            {
+                return (GtfsImportOutcome.Unchanged, known, null);
+            }
+
+            // An old version readers kept from being dropped: its partitions are attached, so switch back to it.
+            await ActivateAsync(connection, feedId, known, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return (GtfsImportOutcome.Reactivated, known, null);
         }
 
         using var feed = GtfsFeed.Open(zipPath);
@@ -85,48 +108,79 @@ public sealed class GtfsImporter(NpgsqlDataSource dataSource, TimeSpan? cleanupL
         }
 
         await AttachAsync(connection, id, cancellationToken);
-        // Two statements: a unique index is checked row by row, so flipping both rows in one UPDATE could collide.
-        await ExecuteAsync(connection, "UPDATE gtfs.snapshot SET is_active = false WHERE feed_id = $1 AND is_active", cancellationToken, feedId);
-        await ExecuteAsync(connection, "UPDATE gtfs.snapshot SET is_active = true WHERE snapshot_id = $1", cancellationToken, id);
+        await ActivateAsync(connection, feedId, id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return (GtfsImportOutcome.Imported, id, report);
     }
 
-    // Returns how many inactive snapshots are left: 0, unless a reader held a table past the lock timeout.
+    // Returns how many old versions are left: 0, unless readers held the tables on every attempt.
     private async Task<int> DropInactiveAsync(string feedId, CancellationToken cancellationToken)
     {
+        for (var attempt = 1; ; attempt++)
+        {
+            var left = await TryDropInactiveAsync(dataSource, feedId, cancellationToken);
+            if (left == 0 || attempt == CleanupAttempts)
+            {
+                return left;
+            }
+
+            await Task.Delay(_cleanupRetryDelay, cancellationToken);
+        }
+    }
+
+    private static async Task<int> TryDropInactiveAsync(NpgsqlDataSource dataSource, string feedId, CancellationToken cancellationToken)
+    {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await LockFeedAsync(connection, feedId, cancellationToken);
+        var ids = new List<int>();
+        await using (var select = new NpgsqlCommand("SELECT snapshot_id FROM gtfs.snapshot WHERE feed_id = $1 AND NOT is_active", connection))
+        {
+            select.Parameters.Add(new NpgsqlParameter { Value = feedId });
+            await using var reader = await select.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                ids.Add(reader.GetInt32(0));
+            }
+        }
+
+        if (ids.Count == 0)
+        {
+            return 0;
+        }
+
         try
         {
-            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-            // DROP of a partition takes ACCESS EXCLUSIVE on the parent, and new readers queue behind a waiting DROP.
-            var timeout = string.Create(CultureInfo.InvariantCulture, $"{(long)_cleanupLockTimeout.TotalMilliseconds}ms");
-            await ExecuteAsync(connection, "SELECT set_config('lock_timeout', $1, true)", cancellationToken, timeout);
-            await using var delete = new NpgsqlCommand("DELETE FROM gtfs.snapshot WHERE feed_id = $1 AND NOT is_active RETURNING snapshot_id", connection);
-            delete.Parameters.Add(new NpgsqlParameter { Value = feedId });
-            var ids = new List<int>();
-            await using (var reader = await delete.ExecuteReaderAsync(cancellationToken))
-            {
-                while (await reader.ReadAsync(cancellationToken))
-                {
-                    ids.Add(reader.GetInt32(0));
-                }
-            }
-
-            foreach (var id in ids)
-            {
-                await ExecuteAsync(connection, ForEachTable(id, "DROP TABLE IF EXISTS gtfs.{0}_{1}"), cancellationToken);
-            }
-
-            await transaction.CommitAsync(cancellationToken);
-            return 0;
+            // DROP of a partition needs ACCESS EXCLUSIVE on its parent. NOWAIT takes all seven at once or fails at once:
+            // waiting would queue every new reader behind it, and taking them one by one could deadlock with a reader.
+            await ExecuteAsync(connection,
+                $"LOCK TABLE {string.Join(", ", _tables.Select(table => "gtfs." + table.Name))} IN ACCESS EXCLUSIVE MODE NOWAIT",
+                cancellationToken);
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.LockNotAvailable)
         {
-            await using var count = new NpgsqlCommand("SELECT count(*) FROM gtfs.snapshot WHERE feed_id = $1 AND NOT is_active", connection);
-            count.Parameters.Add(new NpgsqlParameter { Value = feedId });
-            return (int)(long)(await count.ExecuteScalarAsync(cancellationToken))!;
+            return ids.Count;
         }
+
+        foreach (var id in ids)
+        {
+            await ExecuteAsync(connection, ForEachTable(id, "DROP TABLE gtfs.{0}_{1}"), cancellationToken);
+        }
+
+        await ExecuteAsync(connection, "DELETE FROM gtfs.snapshot WHERE snapshot_id = ANY($1)", cancellationToken, ids.ToArray());
+        await transaction.CommitAsync(cancellationToken);
+        return 0;
+    }
+
+    // Imports and cleanups of one feed take turns; a transaction-level lock ends with the transaction, pool or not.
+    private static Task LockFeedAsync(NpgsqlConnection connection, string feedId, CancellationToken cancellationToken) =>
+        ExecuteAsync(connection, "SELECT pg_advisory_xact_lock(hashtext($1))", cancellationToken, feedId);
+
+    // Two statements: a unique index is checked row by row, so flipping both rows in one UPDATE could collide.
+    private static async Task ActivateAsync(NpgsqlConnection connection, string feedId, int id, CancellationToken cancellationToken)
+    {
+        await ExecuteAsync(connection, "UPDATE gtfs.snapshot SET is_active = false WHERE feed_id = $1 AND is_active", cancellationToken, feedId);
+        await ExecuteAsync(connection, "UPDATE gtfs.snapshot SET is_active = true WHERE snapshot_id = $1", cancellationToken, id);
     }
 
     // Reference order, as in GtfsSnapshotCheck.Run: the check needs routes, stops, calendars and shapes before trips.
@@ -240,8 +294,8 @@ public sealed class GtfsImporter(NpgsqlDataSource dataSource, TimeSpan? cleanupL
             catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
             {
                 // The check does not look for duplicate keys such as a repeated stop_sequence; the primary key does.
-                // Detail (the key values) is redacted unless the connection string sets Include Error Detail.
-                return $"{table.Name}.txt: duplicate key: {ex.Detail ?? ex.ConstraintName}";
+                // Not ex.Detail: without Include Error Detail, Npgsql puts a "Detail redacted" notice there, not the key.
+                return $"{table.Name}.txt: duplicate key ({table.Key})";
             }
         }
 
@@ -252,13 +306,16 @@ public sealed class GtfsImporter(NpgsqlDataSource dataSource, TimeSpan? cleanupL
     private static Task AttachAsync(NpgsqlConnection connection, int id, CancellationToken cancellationToken) =>
         ExecuteAsync(connection, ForEachTable(id, "ALTER TABLE gtfs.{0} ATTACH PARTITION gtfs.{0}_{1} FOR VALUES IN ({1})"), cancellationToken);
 
-    private static async Task<int?> ActiveWithHashAsync(NpgsqlConnection connection, string feedId, byte[] sha256, CancellationToken cancellationToken)
+    // The feed's snapshot of this file, active or an old version not dropped yet; null when the file is new.
+    private static async Task<(int Id, bool IsActive)?> WithHashAsync(
+        NpgsqlConnection connection, string feedId, byte[] sha256, CancellationToken cancellationToken)
     {
         await using var command = new NpgsqlCommand(
-            "SELECT snapshot_id FROM gtfs.snapshot WHERE feed_id = $1 AND sha256 = $2 AND is_active", connection);
+            "SELECT snapshot_id, is_active FROM gtfs.snapshot WHERE feed_id = $1 AND sha256 = $2", connection);
         command.Parameters.Add(new NpgsqlParameter { Value = feedId });
         command.Parameters.Add(new NpgsqlParameter { Value = sha256 });
-        return await command.ExecuteScalarAsync(cancellationToken) as int?;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? (reader.GetInt32(0), reader.GetBoolean(1)) : null;
     }
 
     // One statement per table; table names are constants and the id an integer, never input.
@@ -267,8 +324,9 @@ public sealed class GtfsImporter(NpgsqlDataSource dataSource, TimeSpan? cleanupL
 
     private static async Task ExecuteAsync(NpgsqlConnection connection, string sql, CancellationToken cancellationToken, params object[] values)
     {
-        // No 30 s default: the primary key of ~10 million HSL stop_times takes longer to build. The import stops through
-        // the cancellation token, and waits for readers are bounded by lock_timeout.
+        // No 30 s default: the primary key of ~10 million HSL stop_times takes longer to build, and the feed lock may wait
+        // for a running import. The import stops through the cancellation token. (COPY is not affected: its timeout
+        // applies to each network read or write, not to the whole copy.)
         await using var command = new NpgsqlCommand(sql, connection) { CommandTimeout = 0 };
         foreach (var value in values)
         {
@@ -303,9 +361,13 @@ public sealed class GtfsImporter(NpgsqlDataSource dataSource, TimeSpan? cleanupL
 /// <summary>Outcome of <see cref="GtfsImporter.ImportAsync"/>.</summary>
 /// <param name="Outcome">What happened to the snapshot.</param>
 /// <param name="SnapshotId">The feed's active snapshot after the call; <see langword="null"/> when this one was rejected.</param>
-/// <param name="Report">What the check found; <see langword="null"/> when the file was already active and not read.</param>
-/// <param name="StaleSnapshots">Old versions a reader kept from being dropped; the next import retries.</param>
-public sealed record GtfsImportResult(GtfsImportOutcome Outcome, int? SnapshotId, GtfsSnapshotReport? Report, int StaleSnapshots);
+/// <param name="Report">What the check found; <see langword="null"/> when the file was known and not read.</param>
+/// <param name="StaleSnapshots">Old versions readers kept from being dropped; the next import retries.</param>
+/// <param name="CleanupFailure">
+/// Why dropping old versions failed after the outcome was committed; <paramref name="StaleSnapshots"/> is then unknown.
+/// </param>
+public sealed record GtfsImportResult(
+    GtfsImportOutcome Outcome, int? SnapshotId, GtfsSnapshotReport? Report, int StaleSnapshots, Exception? CleanupFailure = null);
 
 /// <summary>What <see cref="GtfsImporter.ImportAsync"/> did with a snapshot.</summary>
 public enum GtfsImportOutcome
@@ -315,6 +377,9 @@ public enum GtfsImportOutcome
 
     /// <summary>The same file is already active; nothing was read.</summary>
     Unchanged,
+
+    /// <summary>The file is an old version not dropped yet; it became active again without being read.</summary>
+    Reactivated,
 
     /// <summary>Failed the check; the previous schedule stays active.</summary>
     Rejected,
