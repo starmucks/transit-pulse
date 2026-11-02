@@ -34,9 +34,22 @@ internal sealed partial class GtfsImportService(
         while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 
-    private async Task ImportAllAsync(CancellationToken cancellationToken)
+    /// <summary>One pass: imports the newest complete snapshot of every feed; failures are logged, never thrown.</summary>
+    /// <param name="cancellationToken">Stops the pass at the next feed or database call.</param>
+    internal async Task ImportAllAsync(CancellationToken cancellationToken)
     {
-        var snapshots = GtfsSnapshotDirectory.Latest(options.Value.SnapshotDirectory);
+        IReadOnlyList<GtfsSnapshotFile> snapshots;
+        try
+        {
+            snapshots = GtfsSnapshotDirectory.Latest(options.Value.SnapshotDirectory);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // A disk gone or a folder without access must not stop the host; the next pass looks again.
+            LogListingFailed(ex, Path.GetFullPath(options.Value.SnapshotDirectory));
+            return;
+        }
+
         if (snapshots.Count == 0)
         {
             LogNoSnapshots(Path.GetFullPath(options.Value.SnapshotDirectory));
@@ -64,13 +77,20 @@ internal sealed partial class GtfsImportService(
                     case GtfsImportOutcome.Unchanged:
                         LogUnchanged(snapshot.FeedId, file, result.SnapshotId);
                         break;
+                    case GtfsImportOutcome.Reactivated:
+                        LogReactivated(snapshot.FeedId, file, result.SnapshotId);
+                        break;
                     case GtfsImportOutcome.Rejected:
                         _rejected[snapshot.FeedId] = snapshot.Path;
                         LogRejected(snapshot.FeedId, file, string.Join("; ", result.Report!.Problems));
                         break;
                 }
 
-                if (result.StaleSnapshots > 0)
+                if (result.CleanupFailure is { } cleanupFailure)
+                {
+                    LogCleanupFailed(cleanupFailure, snapshot.FeedId);
+                }
+                else if (result.StaleSnapshots > 0)
                 {
                     LogStale(snapshot.FeedId, result.StaleSnapshots);
                 }
@@ -88,6 +108,15 @@ internal sealed partial class GtfsImportService(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "No complete GTFS snapshot under {Directory}")]
     private partial void LogNoSnapshots(string directory);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "GTFS snapshots under {Directory} could not be listed; the next pass retries")]
+    private partial void LogListingFailed(Exception exception, string directory);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "GTFS {FeedId}: {File} is an old version still kept; snapshot {SnapshotId} is active again")]
+    private partial void LogReactivated(string feedId, string file, int? snapshotId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "GTFS {FeedId}: dropping old snapshots failed; the next import retries")]
+    private partial void LogCleanupFailed(Exception exception, string feedId);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "GTFS {FeedId}: {File} imported as snapshot {SnapshotId}, {StopTimes} stop times in {Elapsed}")]
     private partial void LogImported(string feedId, string file, int? snapshotId, long stopTimes, TimeSpan elapsed);

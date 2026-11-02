@@ -1,4 +1,3 @@
-using System.IO.Compression;
 using Npgsql;
 using TransitPulse.Infrastructure.Database;
 using TransitPulse.Infrastructure.Gtfs;
@@ -7,7 +6,6 @@ namespace TransitPulse.Integration.Tests.Postgres;
 
 public sealed class GtfsImporterTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>, IDisposable
 {
-    // Table partitions only: pg_inherits also links each partition's primary key index to the parent's (relkind 'I').
     // Every table in the schema, attached or not: a rolled-back import must not leave plain gtfs.routes_N tables behind.
     private const string TableCount = "SELECT count(*) FROM pg_tables WHERE schemaname = 'gtfs'";
 
@@ -15,11 +13,10 @@ public sealed class GtfsImporterTests(PostgresFixture postgres) : IClassFixture<
     private const long TablesWithoutSnapshots = 8;
     private const long TablesWithOneSnapshot = 15;
 
+    // Table partitions only: pg_inherits also links each partition's primary key index to the parent's (relkind 'I').
     private const string PartitionCount =
         "SELECT count(*) FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhparent JOIN pg_namespace n ON n.oid = c.relnamespace " +
         "WHERE n.nspname = 'gtfs' AND c.relkind = 'p'";
-
-    private static readonly string _tram9 = Path.Combine(AppContext.BaseDirectory, "Fixtures", "gtfs", "hsl-tram-9");
 
     private readonly string _directory = Directory.CreateTempSubdirectory("gtfs-import-").FullName;
 
@@ -223,20 +220,8 @@ public sealed class GtfsImporterTests(PostgresFixture postgres) : IClassFixture<
     }
 
     // The tram 9 slice zipped to a file, optionally edited first.
-    private string Zip(string name, Action<Dictionary<string, string>>? edit = null)
-    {
-        var files = Directory.GetFiles(_tram9, "*.txt").ToDictionary(path => Path.GetFileName(path), File.ReadAllText);
-        edit?.Invoke(files);
-        var path = Path.Combine(_directory, name);
-        using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
-        foreach (var (file, content) in files)
-        {
-            using var writer = new StreamWriter(zip.CreateEntry(file).Open());
-            writer.Write(content);
-        }
-
-        return path;
-    }
+    private string Zip(string name, Action<Dictionary<string, string>>? edit = null) =>
+        GtfsZips.Tram9(Path.Combine(_directory, name), edit);
 
     private static async Task<T> ScalarAsync<T>(NpgsqlDataSource database, string sql)
     {
