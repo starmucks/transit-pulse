@@ -16,7 +16,7 @@ var postgres = builder.AddPostgres("postgres", password: postgresPassword, port:
     .WithContainerRuntimeArgs("--memory=1g")
     .WithLifetime(ContainerLifetime.Persistent);
 
-postgres.AddDatabase("transitpulse");
+var database = postgres.AddDatabase("transitpulse");
 
 builder.AddRedis("redis", port: 16379, password: redisPassword)
     .WithImageTag("8.8.3-alpine")
@@ -61,5 +61,13 @@ builder.AddProject<Projects.TransitPulse_Ingestor>("ingestor")
     .WithEnvironment("Ingestor__Mode", "full")
     .WithEnvironment("Kafka__BootstrapServers", redpanda.GetEndpoint("kafka").Property(EndpointProperty.HostAndPort))
     .WaitFor(redpanda);
+
+// GTFS snapshots as the collector lays them out; GtfsSnapshotDirectory in user secrets points at another copy.
+var gtfsSnapshots = builder.Configuration["GtfsSnapshotDirectory"]
+    ?? Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", "..", "data", "gtfs"));
+builder.AddProject<Projects.TransitPulse_Worker>("worker")
+    .WithReference(database)
+    .WithEnvironment("GtfsImport__SnapshotDirectory", gtfsSnapshots)
+    .WaitFor(database);
 
 await builder.Build().RunAsync();
