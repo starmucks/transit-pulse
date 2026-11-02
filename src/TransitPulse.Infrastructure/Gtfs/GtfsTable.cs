@@ -83,8 +83,8 @@ public sealed class GtfsTable : IDisposable
 
     /// <summary>A field that may be empty or absent.</summary>
     /// <param name="column">Column index, or -1 for an absent column.</param>
-    /// <returns>The text, or <see langword="null"/> when empty.</returns>
-    public string? OptionalText(int column) => column >= 0 && _reader.GetString(column) is { Length: > 0 } text ? text : null;
+    /// <returns>The text, or <see langword="null"/> when empty or only spaces (HSL writes <c>parent_station</c> as one space).</returns>
+    public string? OptionalText(int column) => Field(column).IsEmpty ? null : _reader.GetString(column);
 
     /// <summary>A required decimal number, such as a coordinate.</summary>
     /// <param name="column">Column index.</param>
@@ -130,6 +130,7 @@ public sealed class GtfsTable : IDisposable
     // Spaces around a value break no feed we read, but would fail number and time parsing.
     private ReadOnlySpan<char> Field(int column) => column >= 0 ? _reader.GetFieldSpan(column).Trim() : [];
 
-    private GtfsFormatException Error(int column, string problem) =>
+    /// <summary>An exception for a value of the current row that parses but is not allowed.</summary>
+    internal GtfsFormatException Error(int column, string problem) =>
         new(_fileName, $"data row {_reader.RowNumber}, {_reader.GetName(column)} {problem}: '{_reader.GetString(column)}'");
 }

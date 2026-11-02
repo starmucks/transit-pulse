@@ -1,0 +1,2 @@
+service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date
+1009_20261030_20261101_Ke,0,0,1,0,0,0,0,20261030,20261101
