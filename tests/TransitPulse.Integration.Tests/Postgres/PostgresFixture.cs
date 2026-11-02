@@ -20,7 +20,8 @@ public sealed class PostgresFixture : IAsyncLifetime
         var name = $"test_{Interlocked.Increment(ref _databases)}";
         await using (var server = NpgsqlDataSource.Create(_container.GetConnectionString()))
         {
-            await server.CreateCommand($"CREATE DATABASE {name}").ExecuteNonQueryAsync();
+            await using var create = server.CreateCommand($"CREATE DATABASE {name}");
+            await create.ExecuteNonQueryAsync();
         }
 
         var dataSource = NpgsqlDataSource.Create(new NpgsqlConnectionStringBuilder(_container.GetConnectionString()) { Database = name }.ConnectionString);

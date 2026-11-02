@@ -1,3 +1,4 @@
+using System.Data;
 using Npgsql;
 
 namespace TransitPulse.Infrastructure.Database;
@@ -55,8 +56,12 @@ public static class SchemaMigrator
         }
         finally
         {
-            // A session lock outlives Dispose: the pool keeps the physical connection open.
-            await ExecuteAsync(connection, null, $"SELECT pg_advisory_unlock({LockKey})", CancellationToken.None);
+            // A session lock outlives Dispose: the pool keeps the physical connection open. A broken connection has
+            // lost the lock with its session, and unlocking there would hide the error that broke it.
+            if (connection.State == ConnectionState.Open)
+            {
+                await ExecuteAsync(connection, null, $"SELECT pg_advisory_unlock({LockKey})", CancellationToken.None);
+            }
         }
     }
 
@@ -89,7 +94,9 @@ public static class SchemaMigrator
     private static async Task ExecuteAsync(
         NpgsqlConnection connection, NpgsqlTransaction? transaction, string sql, CancellationToken cancellationToken)
     {
-        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        // No 30 s default: waiting for another process's migration or building an index on a large table takes longer.
+        // Migration stops through the cancellation token.
+        await using var command = new NpgsqlCommand(sql, connection, transaction) { CommandTimeout = 0 };
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 }

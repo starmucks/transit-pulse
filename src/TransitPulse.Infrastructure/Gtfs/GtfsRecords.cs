@@ -26,7 +26,7 @@ public sealed record GtfsStop(string StopId, string? Name, double? Lat, double? 
 public sealed record GtfsTrip(string TripId, string RouteId, string ServiceId, int? DirectionId, string? ShapeId, string? Headsign);
 
 /// <summary>A row of <c>stop_times.txt</c>: when a trip calls at one stop.</summary>
-/// <remarks>A struct: HSL has about 15 million rows, read once and passed straight on.</remarks>
+/// <remarks>A struct: HSL has about 11 million rows, read once and passed straight on.</remarks>
 /// <param name="TripId">Trip that calls.</param>
 /// <param name="StopSequence">Order of the call within the trip; increasing, not necessarily consecutive.</param>
 /// <param name="StopId">Stop called at.</param>

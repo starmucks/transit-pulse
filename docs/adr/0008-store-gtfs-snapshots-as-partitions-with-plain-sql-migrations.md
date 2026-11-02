@@ -20,9 +20,9 @@ partition (by `snapshot_id`) of each GTFS table. The schema is plain numbered SQ
 - **Import, one transaction:** copy each file with binary `COPY` into a plain table (`LIKE` the parent, no indexes,
   `CHECK (snapshot_id = N)`) while `GtfsSnapshotCheck` checks the rows; build the primary keys; `ATTACH PARTITION`;
   switch `is_active`. A rejected or failed import rolls back and leaves nothing. A file already active (same SHA-256)
-  is skipped without reading.
-- **Old versions** are dropped afterwards, in their own transaction under `lock_timeout` (10 s); if a reader holds a
-  table, the drop waits for the next import.
+  is skipped without reading; an old version not dropped yet becomes active again.
+- **Old versions** are dropped afterwards, in their own transaction, only when `LOCK TABLE <7 parents> IN ACCESS
+  EXCLUSIVE MODE NOWAIT` gets all seven at once (5 tries, 2 s apart); otherwise the next import tries again.
 - **Migrations:** each script in its own transaction, recorded in `public.schema_migrations`, under a session advisory
   lock so concurrent starts apply a script once. The Worker applies them on start.
 
@@ -35,6 +35,10 @@ partition (by `snapshot_id`) of each GTFS table. The schema is plain numbered SQ
   a day rewrites them into WAL, leaves dead tuples and puts VACUUM on a small VPS; dropping a partition is instant.
 - **`CREATE TABLE ... PARTITION OF` before the copy.** It holds ACCESS EXCLUSIVE on the parent until commit: every
   reader of the schedule would stop for the whole import (~2 min for HSL). `ATTACH` needs only SHARE UPDATE EXCLUSIVE.
+- **`DROP` under `lock_timeout`.** A `DROP` waiting for one reader queues every new reader behind it, the parents
+  already dropped stay locked meanwhile (up to 6 × the timeout), and taking locks one by one can deadlock with a
+  reader. `DETACH PARTITION CONCURRENTLY` avoids the queue but cannot run in a transaction and can leave a partition
+  half-detached.
 - **Primary key in place during the copy.** Same import time on HSL (128.7 s vs 131.3 s), but the `stop_times` index
   is 799 MB instead of 516 MB (snapshot 1806 vs 1507 MB): random inserts leave B-tree pages about two-thirds full.
 - **Processor reads the zip itself.** No database step, but 10.7 million rows parsed on every start and no shared
@@ -42,13 +46,15 @@ partition (by `snapshot_id`) of each GTFS table. The schema is plain numbered SQ
 
 ## Consequences
 
-- Readers see the old or the new schedule, never a mix, and are never blocked by an import; a broken export keeps the
-  previous schedule active.
+- Readers see the old or the new schedule, never a mix, if they pick the active `snapshot_id` once and filter by it
+  (or read in one REPEATABLE READ transaction). An import never blocks them; dropping an old version does, for the
+  milliseconds the `DROP`s take. A broken export keeps the previous schedule active.
+- A fresh database whose newest export is broken has no schedule for that feed until the next export: the Worker does
+  not fall back to an older file.
 - Disk holds two versions of a feed while it switches (~3 GB peak for HSL today). Text keys (`trip_id`, `stop_id`)
   repeated in every `stop_times` row are most of the size; integer surrogate keys are left open until the Processor's
   queries (task 2.5) show whether the size matters.
-- Primary keys are listed in the migration and again in `GtfsImporter`; a mismatch would not fail but make `ATTACH`
-  build a second index, so the importer tests count one index per partition.
+- Primary keys are listed in the migration and again in `GtfsImporter`; a mismatch makes `ATTACH` fail ("multiple
+  primary keys"), and the importer tests also count one index per partition.
 - Only the newest snapshot of a feed is active; replaying an older day with its own schedule needs a later option.
-- Schema changes are hand-written SQL with no model diffing; `SchemaMigrator` uses the 30 s default command timeout,
-  which a migration that builds a large index will have to raise.
+- Schema changes are hand-written SQL with no model diffing.
