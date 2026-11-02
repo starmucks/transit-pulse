@@ -83,6 +83,20 @@ public sealed class HslMqttSourceTests
     }
 
     [Fact]
+    public async Task Refused_subscription_ends_the_run_with_an_error_naming_the_filter()
+    {
+        using var broker = new FakeBroker();
+        var run = broker.CreateSource().RunAsync(Channel.CreateUnbounded<RawRecord>().Writer, Ct);
+
+        using var client = await broker.AcceptAsync();
+        await client.SendAsync(ConnAck(0), Ct);
+        await client.SendAsync(new byte[] { 0x90, 0x03, 0x00, 0x01, 0x80 }, Ct);
+
+        var error = await Assert.ThrowsAsync<IOException>(() => run.WaitAsync(_timeout, Ct));
+        Assert.Contains("refused the subscription to /hfp/v2/journey/ongoing/vp/#", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Connection_closed_right_after_connecting_ends_the_run_with_an_error()
     {
         using var broker = new FakeBroker();

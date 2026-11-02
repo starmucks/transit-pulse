@@ -197,7 +197,7 @@ internal sealed partial class HslMqttSource(
 
             // Clean session with a random id: HFP is QoS 0, so there is nothing for the broker to keep between connections.
             await stream.WriteAsync(MqttWire.Connect($"transitpulse-{Guid.NewGuid():N}", KeepAliveSeconds), setupTimeout.Token);
-            await stream.WriteAsync(MqttWire.Subscribe(1, settings.Topic), setupTimeout.Token);
+            await stream.WriteAsync(MqttWire.Subscribe(1, [settings.Topic]), setupTimeout.Token);
             return stream;
         }
         catch (Exception ex)
@@ -235,9 +235,13 @@ internal sealed partial class HslMqttSource(
                     break;
                 case MqttWire.ConnAck when body.Length < 2 || body[1] != 0:
                     throw new IOException($"HSL MQTT broker refused the connection (CONNACK code {(body.Length < 2 ? -1 : body[1])}).");
-                case MqttWire.SubAck when body.Length < 3 || body[2] == 0x80:
-                    throw new IOException($"HSL MQTT broker refused the subscription to {options.Value.Topic}.");
                 case MqttWire.SubAck:
+                    var refused = MqttWire.RefusedFilters(body, [options.Value.Topic]);
+                    if (refused.Count > 0)
+                    {
+                        throw new IOException($"HSL MQTT broker refused the subscription to {string.Join(", ", refused)}.");
+                    }
+
                     LogSubscribed(options.Value.Host, options.Value.Topic);
                     break;
             }
