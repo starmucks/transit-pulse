@@ -6,6 +6,7 @@
 set -euo pipefail
 
 archive=${ARCHIVE_DIR:-/var/lib/transitpulse/archive}
+app=${APP_DIR:-/opt/transitpulse/ingestor}
 unit=transitpulse-ingestor.service
 
 failures=0
@@ -26,7 +27,7 @@ hsl_lastrcvs() {
     grep -A1 "pid=$pid," | grep -o 'lastrcv:[0-9]*' | cut -d: -f2 || true
 }
 # One broker connection per MQTT subscription; only entries of Feeds:Mqtt have a "Topics" key.
-hsl_expected=$(grep -c '"Topics"' "${APP_DIR:-/opt/transitpulse/ingestor}/appsettings.json" 2>/dev/null || true)
+hsl_expected=$(grep -c '"Topics"' "$app/appsettings.json" 2>/dev/null || true)
 [[ $hsl_expected =~ ^[1-9][0-9]*$ ]] || hsl_expected=1
 mib() { awk -v b="$1" 'BEGIN { printf "%.0f MiB", b / 1048576 }'; }
 
@@ -42,6 +43,8 @@ elif (( restarts > 0 )); then
 else
   report OK service "active since $since, no crash restarts"
 fi
+# The commit publish.sh built from: shows at a glance whether the server runs what main has.
+report INFO version "$(cat "$app/VERSION" 2>/dev/null || echo unknown)"
 
 # --- memory: anon is the process's own memory; MemoryCurrent would also count reclaimable page cache.
 # .NET caps its heap at 75% of MemoryMax, so 60% of MemoryMax is 80% of the heap limit.
