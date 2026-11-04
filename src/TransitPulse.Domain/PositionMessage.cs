@@ -1,14 +1,14 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using TransitPulse.Domain;
 
-namespace TransitPulse.Ingestor.Kafka;
+namespace TransitPulse.Domain;
 
 /// <summary>
 /// Wire format of <c>positions.raw</c>: the key routes all positions of one vehicle to one partition (and so keeps
-/// them in order), the value is the position as camelCase JSON readable in the broker console.
+/// them in order), the value is the position as camelCase JSON readable in the broker console. Shared by the services
+/// that write and read the topic.
 /// </summary>
-internal static class PositionMessage
+public static class PositionMessage
 {
     /// <summary>
     /// <c>{FeedId}/{VehicleId}</c>. The feed is included because vehicle ids are only unique within a feed:

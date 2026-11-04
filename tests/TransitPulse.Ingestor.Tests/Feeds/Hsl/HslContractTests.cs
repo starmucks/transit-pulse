@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json.Nodes;
 using TransitPulse.Domain;
 using TransitPulse.Ingestor.Feeds.Hsl;
-using TransitPulse.Ingestor.Kafka;
 using TransitPulse.Ingestor.Pipeline;
 using TransitPulse.Ingestor.Tests.Normalization;
 
