@@ -9,7 +9,9 @@ namespace TransitPulse.Ingestor.Feeds.Hsl;
 /// <summary>
 /// Feed adapter for Helsinki: turns one HFP <c>VP</c> message (one vehicle) into a <see cref="VehiclePosition"/>.
 /// <list type="bullet">
-/// <item><c>VehicleId</c> is <c>{oper}/{veh}</c>; the delay sign is flipped (HFP <c>dl</c> is positive when ahead).</item>
+/// <item><c>VehicleId</c> is <c>{operator_id}/{vehicle_number}</c> from the MQTT topic, without prefix zeroes; a record
+/// without them is dropped as incomplete.</item>
+/// <item>The delay sign is flipped (HFP <c>dl</c> is positive when ahead).</item>
 /// <item><c>TripId</c> is the GTFS-RT trip descriptor <c>{route}/{direction_id}/{yyyyMMdd}/{HH:mm:ss}</c>, with
 /// hours past 24 after midnight, as in HSL's own trip updates; HFP carries no GTFS <c>trip_id</c>.</item>
 /// <item>Placeholder journeys (<c>jrn</c> 9999, parked trains) keep the position but get no trip, route or delay.</item>
@@ -29,6 +31,10 @@ internal sealed class HslPositionNormalizer : IPositionNormalizer
     // Journeys of the previous operating day start at most at 03:xx (measured over four nights); a later start
     // observed 12 h on is a vehicle still reporting an old journey, not a journey of the next calendar day.
     private const int LatestNightStartHour = 5;
+
+    // /hfp/v2/journey/ongoing/vp/{mode}/{operator_id}/{vehicle_number}/...: both come before the free text of the topic.
+    private const int TopicOperatorSegment = 7;
+    private const int TopicVehicleSegment = 8;
 
     // Helsinki is UTC+2 or +3. The offset only chooses between two departures 24 h apart, so being an hour off in
     // summer cannot change the choice, and the build needs no time zone data (InvariantGlobalization).
@@ -56,7 +62,7 @@ internal sealed class HslPositionNormalizer : IPositionNormalizer
             return [];
         }
 
-        if (vp is not { Oper: { } oper, Veh: { } veh, Tst: { } tst })
+        if (VehicleId(record.Topic) is not { } vehicleId || vp.Tst is not { } tst)
         {
             drops.Drop(PositionMetrics.Incomplete);
             return [];
@@ -75,7 +81,7 @@ internal sealed class HslPositionNormalizer : IPositionNormalizer
         [
             new VehiclePosition(
                 FeedId,
-                string.Create(CultureInfo.InvariantCulture, $"{oper}/{veh}"),
+                vehicleId,
                 placeholder ? null : TripId(vp, observedAt),
                 placeholder ? null : vp.Route,
                 lat,
@@ -86,6 +92,24 @@ internal sealed class HslPositionNormalizer : IPositionNormalizer
                 Occupancy(vp.Occu),
                 observedAt),
         ];
+    }
+
+    // The topic names the operator that owns the vehicle. The payload's oper is the one running the trip: under
+    // subcontracting two owners' vehicles with the same number share it, and their tracks would merge into one.
+    private static string? VehicleId(string? topic)
+    {
+        // One more range than needed: Split leaves the rest of the topic in the last one instead of cutting it up.
+        Span<Range> segments = stackalloc Range[TopicVehicleSegment + 2];
+        var text = topic.AsSpan();
+        var count = text.Split(segments, '/');
+        if (count <= TopicVehicleSegment
+            || !int.TryParse(text[segments[TopicOperatorSegment]], NumberStyles.None, CultureInfo.InvariantCulture, out var owner)
+            || !int.TryParse(text[segments[TopicVehicleSegment]], NumberStyles.None, CultureInfo.InvariantCulture, out var vehicle))
+        {
+            return null;
+        }
+
+        return string.Create(CultureInfo.InvariantCulture, $"{owner}/{vehicle}");
     }
 
     // A pattern, not Math.Abs: Math.Abs(int.MinValue) throws and would fail the whole feed for one value.

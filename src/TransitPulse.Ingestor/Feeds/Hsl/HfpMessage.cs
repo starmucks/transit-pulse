@@ -11,10 +11,9 @@ internal sealed record HfpMessage(HfpVehiclePosition? VP);
 
 /// <summary>
 /// The fields of a <c>VP</c> event the normalizer uses; the rest (<c>line</c>, <c>stop</c>, … whose JSON types vary)
-/// are skipped. Every field is nullable: the feed sends <c>null</c> for values a vehicle does not know.
+/// are skipped. Every field is nullable: the feed sends <c>null</c> for values a vehicle does not know. <c>oper</c> and
+/// <c>veh</c> are skipped too: only the MQTT topic identifies the vehicle (see <see cref="HslPositionNormalizer"/>).
 /// </summary>
-/// <param name="Oper">Operator number; with <paramref name="Veh"/> identifies the vehicle.</param>
-/// <param name="Veh">Vehicle number, unique within the operator.</param>
 /// <param name="Tst">When the vehicle measured the position (UTC, <c>Z</c>).</param>
 /// <param name="Spd">Speed in m/s.</param>
 /// <param name="Hdg">Heading in degrees clockwise from north.</param>
@@ -28,8 +27,6 @@ internal sealed record HfpMessage(HfpVehiclePosition? VP);
 /// <param name="Jrn">Journey number; <c>9999</c> marks a placeholder journey (e.g. a parked train).</param>
 /// <param name="Occu">Occupancy, 0–100: buses send only 0 or 100 (full), ferries a measured percentage.</param>
 internal sealed record HfpVehiclePosition(
-    int? Oper,
-    int? Veh,
     DateTimeOffset? Tst,
     float? Spd,
     float? Hdg,

@@ -139,7 +139,7 @@ Transit Pulse — пет-проект: система мониторинга г�
         "drst":0,"oday":"2026-10-02","jrn":1912,"line":39,"start":"21:31","loc":"GPS",
         "stop":null,"route":"1009","occu":0}}
 ```
-`spd` — скорость (м/с), `hdg` — курс, `dl` — отклонение от расписания (с), `odo` — одометр, `drst` — двери, `occu` — загруженность, `oper`+`veh` — уникальный идентификатор машины. Структура топика содержит режим транспорта, оператора, номер машины, маршрут, направление, время старта рейса, следующую остановку и геохэш.
+`spd` — скорость (м/с), `hdg` — курс, `dl` — отклонение от расписания (с), `odo` — одометр, `drst` — двери, `occu` — загруженность, `oper` — оператор, выполняющий рейс (при субподряде отличается от владельца машины). Машину однозначно определяет пара `operator_id/vehicle_number` из топика. Структура топика содержит режим транспорта, оператора-владельца, номер машины, маршрут, направление, время старта рейса, следующую остановку и геохэш.
 
 **Поля SIRI-VM** (`MonitoredVehicleJourney`, из реального ответа Бергена): `LineRef` (`SKY:Line:6`), `DatedVehicleJourneyRef` (рейс), `VehicleMode`, `PublishedLineName`, `OperatorRef`, `OriginRef/OriginName`, `DestinationRef/DestinationName`, `Monitored`, `InCongestion`, `VehicleLocation` (`Latitude`/`Longitude`), `Bearing`, `Occupancy` (`seatsAvailable`…), `Delay` (ISO 8601 duration, `PT5M43S`), `VehicleStatus`, `VehicleRef`, `MonitoredCall` (`StopPointRef`, `Order`, `StopPointName`, `VehicleAtStop`), `RecordedAtTime` (время замера). Особенности: у части записей нет `VehicleMode`; данные менее свежие (медиана возраста записи ~40 с) — адаптер должен отбрасывать устаревшие записи по `RecordedAtTime`.
 
@@ -267,7 +267,7 @@ Transit Pulse — пет-проект: система мониторинга г�
   - `SiriVmPositionNormalizer` (Берген): **потоковый разбор XML через `XmlReader`** (ответы до нескольких МБ не держим целиком в памяти), парсинг ISO 8601 duration (`PT5M43S`), отбрасывание устаревших записей по `RecordedAtTime`.
   - `GtfsRtPositionNormalizer` (Бостон; общий для любого GTFS-RT-фида): полный protobuf-снимок; отдельной дельты снимков нет — машину без нового `timestamp` отсекает дедуп по `ObservedAt`; задержки адаптер не даёт (`null`) — её считает Processor.
   - Новый город = новый нормализатор (+ конфигурация), город на GTFS-RT — только конфигурация; остальная система не меняется.
-- Нормализация различий: идентификаторы (`oper/veh` vs `VehicleRef` vs `vehicle.id`), единицы скорости, формат задержки, словари загруженности (HSL `occu` / SIRI `Occupancy` / GTFS `OccupancyStatus`) → единый enum, часовые пояса → `DateTimeOffset` UTC.
+- Нормализация различий: идентификаторы (`operator_id/vehicle_number` из топика vs `VehicleRef` vs `vehicle.id`), единицы скорости, формат задержки, словари загруженности (HSL `occu` / SIRI `Occupancy` / GTFS `OccupancyStatus`) → единый enum, часовые пояса → `DateTimeOffset` UTC.
 - Единая модель:
   ```csharp
   public sealed record VehiclePosition(

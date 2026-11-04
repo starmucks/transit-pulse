@@ -29,8 +29,9 @@ public sealed class ArchivePositionProfileTests : IDisposable
         var directory = Path.Combine(_dir.FullName, "hsl", "2026-10-26");
         Directory.CreateDirectory(directory);
         var file = await ArchiveFile.CreateAsync(Path.Combine(directory, "hsl-20261026T06Z-0.parquet"), rowGroupMaxBytes: 1_000_000, Ct);
-        await file.AddAsync(new RawRecord("hsl", _hour.AddSeconds(1), Encoding.UTF8.GetBytes(Payload), null), Ct);
-        await file.AddAsync(new RawRecord("hsl", _hour.AddSeconds(2), Encoding.UTF8.GetBytes(Payload), null), Ct);
+        const string Topic = "/hfp/v2/journey/ongoing/vp/tram/0040/00108/1002";
+        await file.AddAsync(new RawRecord("hsl", _hour.AddSeconds(1), Encoding.UTF8.GetBytes(Payload), Topic), Ct);
+        await file.AddAsync(new RawRecord("hsl", _hour.AddSeconds(2), Encoding.UTF8.GetBytes(Payload), Topic), Ct);
         await file.CompleteAsync(Ct);
         var output = new StringWriter();
 

@@ -9,6 +9,8 @@
 - **Kafka protocol only** (ADR-0002): `Confluent.Kafka` client features, no Redpanda-specific APIs or admin endpoints.
   Topics are declared in code (`KafkaTopicInitializer`), not left to broker auto-creation.
 - **Message key is `{FeedId}/{VehicleId}`** (`PositionMessage.Key`): vehicle ids are unique only within a feed.
+- **HSL `VehicleId` comes from the MQTT topic** (`operator_id/vehicle_number`), never from the payload's `oper`: that is
+  the operator running the trip, and under subcontracting two vehicles share `oper`/`veh`.
 - **Native AOT** (ADR-0003): the publish fails on any new trim/AOT warning. Only Parquet.Net and Confluent.Kafka are
   collapsed (see the csproj); Confluent.Kafka stays a `TrimmerRootAssembly`. Check a new library with
   `deploy/collector/publish.sh` before relying on it. Bind configuration with options classes or plain strings, not

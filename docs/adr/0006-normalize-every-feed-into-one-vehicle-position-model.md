@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-27
+- **Updated:** 2026-11-04: the HSL vehicle id comes from the MQTT topic, not the payload (#56)
 
 ## Context
 
@@ -9,8 +10,8 @@ Stage 1 collects positions from three cities that share neither format nor proto
 Entur answers incremental SIRI-VM XML polls, MBTA serves full GTFS-RT protobuf snapshots. Goal C2a asks that a new
 source is a new adapter, with no change to Processor or API.
 
-The feeds differ in more than syntax. Vehicle ids are `oper`/`veh`, `VehicleRef` and `vehicle.id`. HSL's `dl` is
-positive when ahead, SIRI `Delay` is an `xs:duration` positive when late, and MBTA sends no delay at all (none in
+The feeds differ in more than syntax. Vehicle ids are `operator_id`/`vehicle_number` in the MQTT topic, `VehicleRef`
+and `vehicle.id`. HSL's `dl` is positive when ahead, SIRI `Delay` is an `xs:duration` positive when late, and MBTA sends no delay at all (none in
 1.83 M trip updates of 2026-10-26). HSL reports occupancy 0 for every vehicle by default, and unset GTFS-RT fields
 read as 0. A new SIRI subscription replays hours-old records; a GTFS-RT snapshot keeps vehicles that stopped
 reporting (1.7% of MBTA records are older than 5 min) and repeats unchanged ones (23%). The raw archive stores every
@@ -28,7 +29,8 @@ adapter follows these conventions:
 - **One meaning per field.** Delay is in seconds, positive when late; time is UTC; speed is m/s; occupancy is the
   GTFS-RT scale. A delay the feed does not send is not derived in the Ingestor: MBTA's `DelaySec` stays `null` and
   Processor computes it against the schedule.
-- **Source ids as sent.** `VehicleId` is unique within its `FeedId`. `TripId` is the id the city's schedule uses
+- **Source ids as sent.** `VehicleId` is unique within its `FeedId`; HSL's is parsed from the MQTT topic, without
+  prefix zeroes. `TripId` is the id the city's schedule uses
   where the feed has one (Entur `SKY:ServiceJourney:…`, MBTA `trip_id` including `ADDED-…` and `…-OL1`), and the
   GTFS-RT trip descriptor `{route}/{direction}/{date}/{start}` for HSL, which sends no `trip_id`.
 - **Freshness and repeats are shared rules.** Records measured over 5 min before receipt are dropped by the
