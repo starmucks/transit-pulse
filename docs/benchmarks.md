@@ -160,6 +160,26 @@ operator running the trip, which differs under subcontracting. Measured on the s
 - Identifying vehicles by topic adds 202 positions to the hour's 4 272 223 that the deduplicator passes on (0.005 %),
   so the position counts above, measured with `oper`/`veh`, stay valid.
 
+### Plausibility filter
+
+The rule behind `VehicleTrack`: a move is a jump when it is over 200 m and over 60 m/s, measured from the time the
+vehicle's current coordinates were first reported. A jump is set aside, and the next position decides whether it was a
+glitch or a real move. A one-off Python simulation of the rule over three HSL archive hours, after deduplication, with
+vehicles identified by topic. Not yet measured for Bergen and Boston.
+
+| Hour (UTC) | Positions | Dropped | Longest run of drops | Accepted again, p95 |
+|---|---:|---:|---:|---:|
+| Tue 2026-10-27 14:00 | 4 272 425 | 82 (0.0019 %) | 3 | 2.0 s |
+| Fri 2026-10-30 06:00 | 4 175 317 | 122 (0.0029 %) | 2 | 3.4 s |
+| Sun 2026-11-01 12:00 | 2 293 584 | 72 (0.0031 %) | 1 | 2.9 s |
+
+- Trains cause 59–80 % of the drops (48, 97 and 56 an hour), at most 0.03 % of train positions.
+- No vehicle was still being dropped at the end of an hour. The longest wait for the next accepted position was 37.8 s,
+  which includes the vehicle's own silence.
+- The distance condition matters: on the first hour, 1 188 consecutive moves exceed 60 m/s, and only 88 of them are over
+  200 m. In those 88, the vehicle stayed at the new place 65 times, so a filter that only compared with the last accepted
+  point would keep rejecting it.
+
 ### Archive volume per day
 
 Parquet with zstd, as stored on the collector server. MiB per day, average of the days of each type.
