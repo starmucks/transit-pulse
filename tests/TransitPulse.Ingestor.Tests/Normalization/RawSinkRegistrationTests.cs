@@ -51,7 +51,7 @@ public sealed class RawSinkRegistrationTests
 
         var receivedAt = new DateTimeOffset(2026, 10, 22, 7, 0, 0, TimeSpan.Zero);
 
-        var positions = provider.GetRequiredService<PositionRouter>().Route(new RawRecord("hsl", receivedAt, payload, null));
+        var positions = provider.GetRequiredService<PositionRouter>().Route(new RawRecord("hsl", receivedAt, payload, "/hfp/v2/journey/ongoing/vp/tram/0040/00108/1002"));
 
         Assert.Equal("40/108", Assert.Single(positions).VehicleId);
     }

@@ -74,7 +74,7 @@ IFeedSource ──► Channel<RawRecord> (bounded, ждёт) ──► ArchiveSi
 ✅ 2026-10-24: влито PR #27 — интеграционный тест читает позиции обратно (каждая машина в одной партиции, по времени); `archive` — режим по умолчанию, проверен тестом на поставляемом `appsettings.json`; AOT-сборка без предупреждений, на сервере с 24.10 20:49 UTC.
 
 ### 1.5 Адаптер HSL (JSON) (#17)
-- [x] Нормализация HFP `VP`: `oper/veh` → `VehicleId`, `dl` → `DelaySec` (знак обратный: у HFP `+` = впереди), `occu` → `OccupancyLevel` (0 → `null`), `tst` → UTC; рейс и маршрут — из payload (`route`/`dir`/`oday`/`start`), топик не нужен. `TripId` — trip descriptor GTFS-RT с часами ≥ 24 после полуночи; заглушки `jrn 9999` — без рейса и задержки.
+- [x] Нормализация HFP `VP`: ~~`oper/veh` → `VehicleId`~~ `operator_id/vehicle_number` из топика → `VehicleId` (исправлено в #56), `dl` → `DelaySec` (знак обратный: у HFP `+` = впереди), `occu` → `OccupancyLevel` (0 → `null`), `tst` → UTC; рейс и маршрут — из payload (`route`/`dir`/`oday`/`start`). `TripId` — trip descriptor GTFS-RT с часами ≥ 24 после полуночи; заглушки `jrn 9999` — без рейса и задержки.
 - [x] Контрактные тесты на сохранённых реальных сообщениях (`tests/.../Fixtures/hsl/` + README с источником и лицензией).
 
 **Готово, когда:** контрактные тесты зелёные; локально в Redpanda Console видны позиции `hsl`.

@@ -137,8 +137,28 @@ Python script with pyarrow over the archive file.
 
 - Trams send each message four times (399 608 of the hour's tram measurements, a few 3 or 8 times); the copies
   arrive 11 ms after the first one at the median, 91 ms at p95. Dropping them loses no data.
-- The deduplicator also drops messages older than the vehicle's last position (out of order): 0.85 % of this hour,
-  13 % of metro messages. Together with the copies that is 22.5 %, the profile's weekday average for 16:00.
+- The deduplicator also drops messages older than the vehicle's last position (out of order): 58 045 or 1.05 % of this
+  hour, 4.6 % of metro messages; some are copies counted above. `--profile-positions` reports 22.3 % dropped for this
+  hour, against a weekday average of 22.5 % for 16:00.
+- Metro sends a new fix with a millisecond `tst` and, in between, about one message a second that repeats known
+  coordinates with a whole-second `tst`: of 144 006 accepted metro messages, 26 483 bring new coordinates (98 % of them
+  with milliseconds) and 117 523 do not. So speed computed between consecutive messages is not meaningful.
+- Dropping metro's 7 007 out-of-order messages (95 % with a whole-second `tst`) loses almost nothing: 5 836 repeat the
+  last accepted coordinates, 842 earlier ones, 260 reach the stream in a later message, and 69 (0.05 % of the mode's
+  messages) are lost.
+
+### HSL vehicle identity
+
+[HSL documents](https://digitransit.fi/en/developers/apis/5-realtime-api/vehicle-positions/high-frequency-positioning/)
+that `operator_id/vehicle_number` in the MQTT topic uniquely identifies a vehicle, while the payload's `oper` is the
+operator running the trip, which differs under subcontracting. Measured on the same hour with a one-off Python script:
+
+- 1 342 vehicles by topic, 1 337 ids by `oper`/`veh`. Five of those ids each cover two vehicles (`oper` 17, owners 17
+  and 20): 32 830 messages, 0.6 %. The two buses behind `17/18` were 8.6–17.1 km apart (median 11.5 km), comparing
+  messages at most 1 s apart.
+- `oper` differs from the owner in 20.6 % of messages, mostly `oper` 6 on vehicles of owner 18.
+- Identifying vehicles by topic adds 202 positions to the hour's 4 272 223 that the deduplicator passes on (0.005 %),
+  so the position counts above, measured with `oper`/`veh`, stay valid.
 
 ### Archive volume per day
 

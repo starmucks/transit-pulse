@@ -17,6 +17,8 @@ public sealed class HslPositionNormalizerTests
         "line":30,"start":"09:58","loc":"GPS","stop":1030425,"route":"1002","occu":0}}
         """;
 
+    private const string SampleTopic = "/hfp/v2/journey/ongoing/vp/tram/0040/00108/1002/1/Katajanokka/09:58/1030425/5/60;24/19/65/64";
+
     private static IReadOnlyList<VehiclePosition> Normalize(params (string Field, string Json)[] changes) =>
         Normalize(new DropLog(), changes);
 
@@ -33,8 +35,8 @@ public sealed class HslPositionNormalizerTests
 
     private static VehiclePosition Position(params (string Field, string Json)[] changes) => Assert.Single(Normalize(changes));
 
-    private static RawRecord Record(string payload) =>
-        new("hsl", DateTimeOffset.UnixEpoch, Encoding.UTF8.GetBytes(payload), Topic: null);
+    private static RawRecord Record(string payload, string? topic = SampleTopic) =>
+        new("hsl", DateTimeOffset.UnixEpoch, Encoding.UTF8.GetBytes(payload), topic);
 
     [Fact]
     public void Real_message_maps_every_field()
@@ -117,16 +119,48 @@ public sealed class HslPositionNormalizerTests
     [InlineData("lat", "null", PositionMetrics.BadLocation)]
     [InlineData("long", "null", PositionMetrics.BadLocation)]
     [InlineData("tst", "null", PositionMetrics.Incomplete)]
-    [InlineData("oper", "null", PositionMetrics.Incomplete)]
-    [InlineData("veh", "null", PositionMetrics.Incomplete)]
     [InlineData("lat", "91", PositionMetrics.BadLocation)]
     [InlineData("long", "-181", PositionMetrics.BadLocation)]
-    public void Vehicle_without_valid_coordinates_time_or_identity_is_skipped(string field, string json, string reason)
+    public void Vehicle_without_valid_coordinates_or_time_is_skipped(string field, string json, string reason)
     {
         var drops = new DropLog();
 
         Assert.Empty(Normalize(drops, (field, json)));
         Assert.Equal([reason], drops.Reasons);
+    }
+
+    [Fact]
+    public void Vehicle_is_identified_by_the_topics_owner_not_by_the_payloads_operator()
+    {
+        var topic = "/hfp/v2/journey/ongoing/vp/bus/0020/00016/5583K/2/Aviapolis/15:26/4180212/5/60;24/28/96/06";
+
+        var position = Assert.Single(new HslPositionNormalizer().Normalize(Record(Sample, topic), new DropLog()));
+
+        // The sample's payload says oper 40, veh 108.
+        Assert.Equal("20/16", position.VehicleId);
+    }
+
+    [Fact]
+    public void Payload_without_oper_and_veh_still_yields_a_position()
+    {
+        Assert.Equal("40/108", Position(("oper", "null"), ("veh", "null")).VehicleId);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("/hfp/v2/journey/ongoing/vp/tram")]
+    [InlineData("/hfp/v2/journey/ongoing/vp/tram/0040")]
+    [InlineData("/hfp/v2/journey/ongoing/vp/tram/0040/")]
+    [InlineData("/hfp/v2/journey/ongoing/vp/tram/x040/00108/1002")]
+    [InlineData("/hfp/v2/journey/ongoing/vp/tram/0040/00108x/1002")]
+    [InlineData("/hfp/v2/journey/ongoing/vp/tram/-040/00108/1002")]
+    public void Without_a_usable_topic_the_vehicle_is_skipped_even_though_the_payload_names_one(string? topic)
+    {
+        var drops = new DropLog();
+
+        Assert.Empty(new HslPositionNormalizer().Normalize(Record(Sample, topic), drops));
+        Assert.Equal([PositionMetrics.Incomplete], drops.Reasons);
     }
 
     [Theory]
