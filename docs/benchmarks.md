@@ -179,6 +179,60 @@ Parquet with zstd, as stored on the collector server. MiB per day, average of th
 About 2.9 GiB (3.1 GB) a day over a week, or about 87 GiB (94 GB) a month; HSL positions are 83 % of it. `entur-sky-vm` was polled
 every 15 s until 24.10 20:49 UTC and every 30 s after, so its weekday figure mixes both rates.
 
+## HSL stop events feed
+
+HSL's own stop events (`arr`, `ars`, `pde`, `dep`, `pas`, `wait`), collected as feed `hsl-stop` since 2026-11-02
+09:10 UTC over a second MQTT connection: the reference for arrival detection (stage 2, task 2.1). The week above ended
+before the feed started, so its tables do not include it.
+
+### Volume
+
+**Data:** Tue 2026-11-03 00:00–24:00 UTC, the first full day. **How:** records from the collector's log of closed
+archive files, bytes from the file sizes.
+
+| Feed | Records | MiB | Bytes per record |
+|---|---:|---:|---:|
+| `hsl-stop` | 2 386 848 | 126.9 | 56 |
+| `hsl` | 81 246 690 | 2 757.5 | 36 |
+
+- `hsl-stop` adds 2.9 % of the records and 4.6 % of the bytes of `hsl`. All feeds together: 3 474 MiB that day.
+- 27.6 events/s on average, 45/s at the peak hour (06:00 UTC), 0.27/s at the lowest (01:00 UTC).
+- On 04.11, the hours from 03:00 to 16:00 UTC are within 3 % of the same hours on 03.11.
+
+### Collector memory
+
+**How:** `sar -r` on the collector server, one sample every 10 minutes; the highest "memory used" of each day, without
+page cache. The feed has run since 02.11 09:10 UTC; 04.11 covers the day up to 17:30 UTC.
+
+| Days | Highest memory used | Lowest memory available |
+|---|---:|---:|
+| 27.10–01.11, without `hsl-stop` | 1 053–1 088 MiB | 628–675 MiB |
+| 02.11–04.11, with `hsl-stop` | 1 061–1 084 MiB | 646–665 MiB |
+
+- The second connection did not raise the daily peak, including the hours of Boston's evening peak (about 23:00 UTC).
+- The process's own memory is a sawtooth, so one reading says little: on 04.11 at about 17:20 UTC, `anon` read 609 and
+  653 MiB and `RSS` 666 and 745 MiB within minutes, at the same traffic.
+- In the 56 hours after the deploy: no restarts, no out-of-memory kills, 53 s of memory pressure in total.
+
+## Source delay
+
+How old a record is when the collector receives it: receive time minus the time the source gives. This is the floor of
+any "source to map" latency, before any of our processing.
+
+**Data:** the archive hour 2026-11-04 16:00 UTC. For the MQTT feeds, 20 000 consecutive messages from the middle of the
+hour. **How:** a one-off Python script with pyarrow over the archive files. The server's clock is NTP-synchronized.
+
+| Feed | Source time | Records | p50 | p95 | p99 | Max |
+|---|---|---:|---:|---:|---:|---:|
+| `hsl` (`vp`) | `tsi` | 20 000 | 0.55 s | 1.16 s | 2.15 s | 19.5 s |
+| `hsl-stop` | `tsi` | 20 000 | 0.47 s | 9.53 s | 31.0 s | 4 815 s |
+| `entur-sky-vm` | `RecordedAtTime` | 54 991 | 9.22 s | 27.3 s | 32.6 s | 42.3 s |
+
+- `tsi` is in whole seconds, so the HSL figures read up to 1 s high.
+- `hsl-stop` events can arrive late (here up to 80 minutes), so comparing with them has to use the event's time, not
+  the receive time.
+- The `entur-sky-vm` age includes the wait for our next poll, every 30 s. Boston is not measured here.
+
 ## GTFS snapshot check
 
 Reading and checking whole schedule snapshots with `GtfsSnapshotCheck.Run` (stage 2, task 2.2): every file streamed
