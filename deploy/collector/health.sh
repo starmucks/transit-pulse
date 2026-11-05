@@ -210,8 +210,39 @@ else
   report OK gtfs "last run at $gtfs_last; latest: ${latest%, }"
 fi
 
+recent_log=$(journalctl -u "$unit" --since -1h -o cat --no-pager 2>/dev/null || true)
+
+# --- HSL broker drops in the last hour: normally 0-2 a day. The service, its files and its connections all look fine
+# meanwhile, so nothing above notices. The cause can be on either side; what is lost during a drop is lost either way.
+drops=$(grep -c 'MQTT feed .*connection ended' <<<"$recent_log" || true)
+if (( drops > 3 )); then
+  report FAIL drops "HSL broker connections ended $drops times in the last hour: data is being lost"
+else
+  report OK drops "$drops HSL broker connection drops in the last hour"
+fi
+
+# --- size of the last finished HSL hour against the same hour a week ago: the same weekday and hour differ by under 2 %
+# (2026-10-29 and 2026-11-04), so this sees a partial loss that "data this hour" cannot. An hour's file closes a little
+# after the hour ends, and files of quiet night hours are too small to compare.
+hour_bytes() {
+  { find "$archive/hsl/$(date -u -d "$1 hours ago" +%F)" -maxdepth 1 -name "hsl-$(date -u -d "$1 hours ago" +%Y%m%dT%H)Z-*.parquet" -printf '%s\n' 2>/dev/null || true; } |
+    awk '{ total += $1 } END { print total + 0 }'
+}
+hours_back=1
+if (( minute < 5 )); then hours_back=2; fi
+hour_now=$(hour_bytes "$hours_back")
+hour_before=$(hour_bytes $((hours_back + 7 * 24)))
+hour_name=$(date -u -d "$hours_back hours ago" +%H:00)
+if (( hour_before < 20 * 1048576 )); then
+  report INFO hour "hsl $hour_name: $(mib "$hour_now"); a week ago too small to compare"
+elif (( hour_now * 100 < hour_before * 70 )); then
+  report FAIL hour "hsl $hour_name: $(mib "$hour_now"), $(( hour_now * 100 / hour_before ))% of $(mib "$hour_before") a week ago (a public holiday lowers it too)"
+else
+  report OK hour "hsl $hour_name: $(mib "$hour_now"), $(( hour_now * 100 / hour_before ))% of the same hour a week ago"
+fi
+
 # --- errors logged in the last hour (Entur's HTTP 429 is a warning and is not counted).
-errors=$(journalctl -u "$unit" --since -1h -o cat --no-pager 2>/dev/null | grep -cE '^(fail|crit):' || true)
+errors=$(grep -cE '^(fail|crit):' <<<"$recent_log" || true)
 if (( errors > 0 )); then
   report WARN errors "$errors error entries in the last hour (journalctl -u $unit --since -1h)"
 else
