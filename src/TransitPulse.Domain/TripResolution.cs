@@ -23,4 +23,7 @@ public enum TripResolution
 
     /// <summary>Several runs fit the descriptor, and it has nothing to tell them apart.</summary>
     Ambiguous,
+
+    /// <summary>No schedule has been loaded yet, so nothing could be looked up.</summary>
+    NoSchedule,
 }

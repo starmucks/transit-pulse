@@ -11,6 +11,7 @@ builder.Services.AddOptions<ProcessorKafkaOptions>()
     .Validate(o => !string.IsNullOrWhiteSpace(o.BootstrapServers), "Kafka:BootstrapServers is required.")
     .Validate(o => o.CommitInterval > TimeSpan.Zero, "Kafka:CommitInterval must be positive.")
     .ValidateOnStart();
+builder.Services.AddSingleton(new CurrentTripSchedule("hsl"));
 // In this order: hosted services start one after another, so the loop finds its topics in place.
 builder.Services.AddSingleton<ProcessorMetrics>();
 builder.Services.AddHostedService<ProcessorTopicInitializer>();

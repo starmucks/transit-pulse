@@ -7,7 +7,8 @@ namespace TransitPulse.Processor;
 /// What the Processor keeps for one partition: the tracks of its vehicles and how far it has read. Kept per partition
 /// so a partition's state can leave with it in a rebalance. Not thread-safe: used only by the consume loop.
 /// </summary>
-internal sealed class PartitionState
+/// <param name="schedule">Where accepted positions look up their trips.</param>
+internal sealed class PartitionState(CurrentTripSchedule schedule)
 {
     private readonly Dictionary<string, VehicleTrack> _tracks = [];
     private long? _committedOffset;
@@ -22,15 +23,15 @@ internal sealed class PartitionState
     /// <param name="offset">The message's offset.</param>
     /// <param name="key">The message's key: identifies the vehicle within the system.</param>
     /// <param name="value">The message's value, written by <see cref="PositionMessage.Value"/>.</param>
-    /// <returns>Whether the position goes on, or why it was dropped.</returns>
-    public MessageVerdict Process(long offset, string? key, ReadOnlySpan<byte> value)
+    /// <returns>The verdict and, for an accepted position, what the trip lookup found.</returns>
+    public ProcessedMessage Process(long offset, string? key, ReadOnlySpan<byte> value)
     {
         // An unreadable message moves the offset too: it would fail the same way on every retry and block the partition.
         NextOffset = offset + 1;
 
         if (key is null || !TryParse(value, out var position))
         {
-            return MessageVerdict.Unreadable;
+            return new ProcessedMessage(MessageVerdict.Unreadable, null);
         }
 
         if (!_tracks.TryGetValue(key, out var track))
@@ -41,9 +42,9 @@ internal sealed class PartitionState
 
         return track.Check(position) switch
         {
-            PositionCheck.Accepted => MessageVerdict.Accepted,
-            PositionCheck.OutOfOrder => MessageVerdict.OutOfOrder,
-            PositionCheck.ImpossibleJump => MessageVerdict.ImpossibleJump,
+            PositionCheck.Accepted => new ProcessedMessage(MessageVerdict.Accepted, schedule.Resolve(position)),
+            PositionCheck.OutOfOrder => new ProcessedMessage(MessageVerdict.OutOfOrder, null),
+            PositionCheck.ImpossibleJump => new ProcessedMessage(MessageVerdict.ImpossibleJump, null),
             var check => throw new InvalidOperationException($"Unknown position check {check}."),
         };
     }
