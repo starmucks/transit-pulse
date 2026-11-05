@@ -356,3 +356,48 @@ row, measured 2026-11-02.
   index. While a feed switches versions both are on disk (HSL ~3 GB today).
 - A snapshot whose file is already active is skipped by its SHA-256 without reading the zip; the broken HSL export of
   2026-10-27 02:30 is rejected with the same single problem as the check alone and is not read again by the Worker.
+
+## Trip lookup
+
+How many HSL positions find their GTFS trip by route, direction, service day and first departure (stage 2, task 2.5).
+
+**How:** a one-off Python simulation of `TripSchedule`, not yet the real pipeline. Every archive hour from 2026-10-21 20:00
+to 2026-11-05 07:59 UTC: 354 files, 1 070 420 116 records, every 10th read, duplicates not removed. Each hour uses the
+latest snapshot that existed when it started (the broken export of 2026-10-27 skipped; snapshots up to 3 days old), and
+the service days are today ± 1 in Helsinki. The base is 106 542 682 sampled positions with a trip descriptor; 505 951
+placeholder journeys are outside it.
+
+| Result | Share of positions |
+|---|---:|
+| Found by `route_id` | 97.556 % |
+| Found by route variant (start of `trip_id`) | 1.991 % |
+| **Found** | **99.547 %** |
+| Route unknown | 0.411 % |
+| Ambiguous | 0.036 % |
+| Trip exists, its service does not run that day | 0.005 % |
+| No such departure | 0.000 % (355) |
+| Service day not held | 0.000 % (97) |
+
+- **Worst hour:** 95.50 % (2026-10-31 09:00); none of the 353 files with at least 1 000 sampled positions is below 95 %.
+- **Variants are a night effect:** 0.00 % of positions in the 13:00 UTC hour, 24.94 % at 02:00, 11.08 % at 23:00.
+- **Snapshot age did not show:** over snapshots up to 3 days old, one journey (`31M1`, 355 positions) had no such
+  departure. The change to winter time on 2026-10-25 did not show either (99.79 % that day).
+- **Ambiguous** is six routes (`1006`, `1003`, `1010`, `1004`, `1002`, `1008`); most of it is one journey each weekday
+  on `1006` and `1003`.
+
+Unknown route codes, none of them in any of the 11 snapshots. The description comes from MQTT topics in one archive hour
+per code, except the last row:
+
+| Code | Sampled positions | Seen on | What runs |
+|---|---:|---:|---|
+| `1009TX` | 162 148 | 15 days | Trams, headsign "Ei linjalla" (not in service), `desi` 000 |
+| `1012 8` | 122 420 | 1 day (10-31) | Trams, headsign "KOEAJO" (test run) |
+| `1013E` | 72 874 | 7 days | Trams, "Ei linjalla", `desi` 000 |
+| `1011 8` | 49 687 | 1 day (10-31) | Trams, "KOEAJO" |
+| `6918` | 15 521 | 6 days | One bus, headsign "Hirsala" |
+| `6919` | 14 841 | 5 days | Not seen in the hour checked |
+| `1012 4`, `7455A` | 615 | 1 day each | Not checked |
+
+- The four tram codes are 93 % of the unknown positions. Without them 99.93 % of positions find their trip.
+- These positions correctly stay without a trip, so they produce no stop events or training labels. Their `RouteId` is
+  still not a line: anything grouping by line has to use the route of the found trip.
