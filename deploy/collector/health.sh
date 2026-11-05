@@ -212,28 +212,35 @@ fi
 
 recent_log=$(journalctl -u "$unit" --since -1h -o cat --no-pager 2>/dev/null || true)
 
-# --- HSL broker drops in the last hour: normally 0-2 a day. The service, its files and its connections all look fine
-# meanwhile, so nothing above notices. The cause can be on either side; what is lost during a drop is lost either way.
-drops=$(grep -c 'MQTT feed .*connection ended' <<<"$recent_log" || true)
+# --- HSL broker drops in the last hour, of either connection: normally 0-2 a day. The service, its files and its
+# connections all look fine meanwhile, so nothing above notices. The cause can be on either side; what is lost during a
+# drop is lost either way. A connection that lasted under 10 s is logged as a failed feed, not as an ended connection.
+drops=$(grep -cE 'MQTT feed .*connection ended|Feed hsl[^ ]* failed' <<<"$recent_log" || true)
 if (( drops > 3 )); then
-  report FAIL drops "HSL broker connections ended $drops times in the last hour: data is being lost"
+  report FAIL drops "HSL broker connections ended or failed $drops times in the last hour: data is being lost"
 else
-  report OK drops "$drops HSL broker connection drops in the last hour"
+  report OK drops "$drops HSL broker connections ended or failed in the last hour"
 fi
 
-# --- size of the last finished HSL hour against the same hour a week ago: the same weekday and hour differ by under 2 %
-# (2026-10-29 and 2026-11-04), so this sees a partial loss that "data this hour" cannot. An hour's file closes a little
-# after the hour ends, and files of quiet night hours are too small to compare.
+# --- size of the last finished HSL hour against the same weekday and Helsinki hour a week ago: 90-104 % over
+# 2026-11-01..05 and 99-101 % for 2026-10-28 against 2026-11-04, so this sees a partial loss that "data this hour" cannot.
+# Local time, since traffic follows it: comparing UTC hours gave 14 false failures in the week after the clocks changed.
+# An hour's file closes a little after the hour ends; quiet night hours are too small to compare. Needs 8 days of files
+# on this server: the check is inactive without them.
 hour_bytes() {
-  { find "$archive/hsl/$(date -u -d "$1 hours ago" +%F)" -maxdepth 1 -name "hsl-$(date -u -d "$1 hours ago" +%Y%m%dT%H)Z-*.parquet" -printf '%s\n' 2>/dev/null || true; } |
+  { find "$archive/hsl/$(date -u -d "@$1" +%F)" -maxdepth 1 -name "hsl-$(date -u -d "@$1" +%Y%m%dT%H)Z-*.parquet" -printf '%s\n' 2>/dev/null || true; } |
     awk '{ total += $1 } END { print total + 0 }'
 }
 hours_back=1
-if (( minute < 5 )); then hours_back=2; fi
-hour_now=$(hour_bytes "$hours_back")
-hour_before=$(hour_bytes $((hours_back + 7 * 24)))
-hour_name=$(date -u -d "$hours_back hours ago" +%H:00)
-if (( hour_before < 20 * 1048576 )); then
+if (( now % 3600 < 300 )); then hours_back=2; fi
+hour_start=$(( now / 3600 * 3600 - hours_back * 3600 ))
+hour_week_ago=$(TZ=Europe/Helsinki date -d "$(TZ=Europe/Helsinki date -d "@$hour_start" '+%F %H:00') 7 days ago" +%s)
+hour_now=$(hour_bytes "$hour_start")
+hour_before=$(hour_bytes "$hour_week_ago")
+hour_name=$(date -u -d "@$hour_start" +%H:00)
+if (( hour_before == 0 )); then
+  report INFO hour "hsl $hour_name: $(mib "$hour_now"); no file from a week ago, check inactive"
+elif (( hour_before < 20 * 1048576 )); then
   report INFO hour "hsl $hour_name: $(mib "$hour_now"); a week ago too small to compare"
 elif (( hour_now * 100 < hour_before * 70 )); then
   report FAIL hour "hsl $hour_name: $(mib "$hour_now"), $(( hour_now * 100 / hour_before ))% of $(mib "$hour_before") a week ago (a public holiday lowers it too)"
