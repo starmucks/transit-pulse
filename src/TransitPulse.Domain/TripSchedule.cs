@@ -61,6 +61,9 @@ public sealed class TripSchedule
         }
     }
 
+    /// <summary>How many scheduled runs the schedule holds.</summary>
+    public int RunCount => _trips.Length;
+
     /// <summary>Finds the scheduled run a descriptor refers to. Allocates nothing, so it can run for every message.</summary>
     /// <param name="descriptor">The position's trip id; <see langword="null"/> when it has none.</param>
     /// <param name="trip">The run when the result is <see cref="TripResolution.Found"/>, otherwise <see langword="null"/>.</param>
