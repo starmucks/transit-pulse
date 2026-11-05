@@ -13,6 +13,9 @@ command -v python3 >/dev/null || { echo "python3 is required (gtfs-snapshot.sh c
 
 id transitpulse >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin transitpulse
 
+install -m 644 "$src/90-transitpulse.conf" /etc/sysctl.d/90-transitpulse.conf
+sysctl -p /etc/sysctl.d/90-transitpulse.conf
+
 # Checked before touching the running service: a binary that cannot write and read an archive is never installed.
 install -m 755 "$src/TransitPulse.Ingestor" /tmp/TransitPulse.Ingestor.new
 runuser -u transitpulse -- /tmp/TransitPulse.Ingestor.new --self-test
