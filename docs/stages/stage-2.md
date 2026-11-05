@@ -69,7 +69,7 @@ events.stop ──► Worker: StopEventSink ─► Postgres stop_events (upsert 
 - [x] Processor в AppHost; метрики (обработано, отброшено, lag).
 
 **Готово, когда:** локально в Aspire Processor читает живой `full` Ingestor, lag виден в Dashboard; unit-тесты фильтра правдоподобия.
-- 2026-11-05: один поток — ~115 000 сообщ./с на ПК при цели 12 000 (C2), вживую p95 36 мс и 10,7 % ядра (`docs/benchmarks.md`, «Processor throughput»). ADR-0009, ADR-0010. Lag читался через `dotnet-counters`; в самом Dashboard не проверялся.
+- 2026-11-05: один поток — ~115 000 сообщ./с на ПК при цели 12 000 (C2), вживую p95 36 мс и 10,7 % ядра (`docs/benchmarks.md`, «Processor throughput»). ADR-0009, ADR-0010. Lag читался через `dotnet-counters`; приёмник OTLP получил `lag`, `lag_time` и `messages` — тот же канал, что у Dashboard. Саму страницу Dashboard глазами не смотрели.
 
 ### 2.5 Расписание в Processor: рейс машины (#43)
 - [ ] Загрузка активных дней службы (сегодня ± 1 по часовому поясу фида) из Postgres в компактные структуры; перезагрузка при смене дня и новой версии снимка.
