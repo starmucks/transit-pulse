@@ -63,8 +63,10 @@ builder.AddProject<Projects.TransitPulse_Ingestor>("ingestor")
     .WaitFor(redpanda);
 
 builder.AddProject<Projects.TransitPulse_Processor>("processor")
+    .WithReference(database)
     .WithEnvironment("Kafka__BootstrapServers", redpanda.GetEndpoint("kafka").Property(EndpointProperty.HostAndPort))
-    .WaitFor(redpanda);
+    .WaitFor(redpanda)
+    .WaitFor(database);
 
 // GTFS snapshots as the collector lays them out; GtfsSnapshotDirectory in user secrets points at another copy.
 var gtfsSnapshots = builder.Configuration["GtfsSnapshotDirectory"]
