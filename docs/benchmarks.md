@@ -160,6 +160,81 @@ operator running the trip, which differs under subcontracting. Measured on the s
 - Identifying vehicles by topic adds 202 positions to the hour's 4 272 223 that the deduplicator passes on (0.005 %),
   so the position counts above, measured with `oper`/`veh`, stay valid.
 
+### Plausibility filter
+
+The rule behind `VehicleTrack`: a move is a jump when it is over 200 m and over 60 m/s, measured from the time the
+vehicle's current coordinates were first reported. A jump is set aside, and the next position decides whether it was a
+glitch or a real move. A one-off Python simulation of the rule over three HSL archive hours, after deduplication, with
+vehicles identified by topic. Not yet measured for Bergen and Boston.
+
+| Hour (UTC) | Positions | Dropped | Longest run of drops | Accepted again, p95 |
+|---|---:|---:|---:|---:|
+| Tue 2026-10-27 14:00 | 4 272 425 | 82 (0.0019 %) | 3 | 2.0 s |
+| Fri 2026-10-30 06:00 | 4 175 317 | 122 (0.0029 %) | 2 | 3.4 s |
+| Sun 2026-11-01 12:00 | 2 293 584 | 72 (0.0031 %) | 1 | 2.9 s |
+
+- Trains cause 59–80 % of the drops (48, 97 and 56 an hour), at most 0.03 % of train positions.
+- No vehicle was still being dropped at the end of an hour. The longest wait for the next accepted position was 37.8 s,
+  which includes the vehicle's own silence.
+- The distance condition matters: on the first hour, 1 188 consecutive moves exceed 60 m/s, and only 88 of them are over
+  200 m. In those 88, the vehicle stayed at the new place 65 times, so a filter that only compared with the last accepted
+  point would keep rejecting it.
+
+The real pipeline gives the same result. Replaying 2026-10-27 14:00 UTC through the Ingestor and the Processor on
+2026-11-05: 4 272 425 positions, 82 impossible jumps, 0 out of order, 0 unreadable, 4 272 343 published.
+
+### Processor throughput
+
+**How:** one archive hour (2026-10-27 14:00 UTC, HSL) was replayed into separate topics, then a Release build of the
+Processor read all of it with a new consumer group. The speed is the growth of its output topic, sampled every 5 s, without
+the first and last samples. One process on a development PC, with Redpanda in Docker limited to one core and 1 GB.
+
+| | Result |
+|---|---:|
+| Speed | **about 115 000 messages/s** (3 619 311 in 31.5 s) |
+| CPU | 102 % of one core |
+| Peak working set | 215 MiB |
+
+- The C2 target for this topic is 12 000 positions/s, so one loop has about ten times that on this machine. It has not been
+  measured on the target server.
+- This stage of the Processor only filters and republishes. Matching, stop detection and bunching will take a share of this.
+
+**Live, 2026-11-05 08:53–08:58 UTC, all three cities, Debug build, not the peak:**
+
+| | Result |
+|---|---:|
+| Input | 869 positions/s |
+| Time from `positions.raw` to being read | p50 23 ms, p95 36 ms, p99 44 ms (medians of 30 samples; the highest p95 was 46 ms) |
+| Unread messages at the last sample | 0 |
+| CPU, working set | 10.7 % of one core, 85 MiB |
+| Dropped as impossible jumps | 6 of 260 465 |
+
+The time counts from the moment the Ingestor handed the message to its Kafka client, so it includes that client's batching
+(20 ms) and leaves out the source and the Ingestor's own work before that. A run over a weekday peak is task 2.11.
+
+### Archive copy during the morning peak, 2026-11-05
+
+Copying the archive from the collector server with three parallel transfers, started at 05:41 UTC, ran into the Helsinki
+morning peak and cost part of the HSL stream. Compared with the same hours a week earlier, read from the archive:
+
+| Hour (UTC) | Records | Points at 1 per 10 s per vehicle |
+|---|---:|---:|
+| 06:00 | 3 355 855 of 5 591 876 (60 %) | 293 404 of 437 275 (67 %) |
+| 07:00 | 3 748 455 of 4 891 318 (77 %) | 296 100 of 370 283 (80 %) |
+
+- Records began arriving late at 06:05 (p95 18 s against 0.5 s), before the first disconnect at 06:16. The rate then fell to
+  3 % of normal in the worst 5 minutes (06:50), with 256 s of silence, the longest of the incident.
+- Idle CPU on the server fell from about 85 % to 0–5 %, with system time at 72 %. `kcompactd` took a whole core with free
+  memory and no reclaim. After the copy stopped at 06:54 the server recovered within minutes, and the rate reached 99 % at
+  07:25. A restart of the collector at 07:08 cost another dip (24 % at 07:10).
+- Every vehicle stayed visible in every 5-minute window. The stop events feed `hsl-stop` kept 94–97 % of the previous day.
+- A separate connection from another machine was also closed by the broker once in 4.5 minutes at about 07:22, so the source
+  may have contributed. This cannot be separated.
+- Since then: proactive compaction is off; the copy pauses when idle CPU falls below 40 %. The same copy tool then moved
+  3.22 GiB in 19:39 during the day (2.8 MiB/s), with 3 pauses and no disconnects.
+
+The window 2026-11-05 06:05–07:30 UTC is left out of model training and evaluation.
+
 ### Archive volume per day
 
 Parquet with zstd, as stored on the collector server. MiB per day, average of the days of each type.
@@ -178,6 +253,60 @@ Parquet with zstd, as stored on the collector server. MiB per day, average of th
 
 About 2.9 GiB (3.1 GB) a day over a week, or about 87 GiB (94 GB) a month; HSL positions are 83 % of it. `entur-sky-vm` was polled
 every 15 s until 24.10 20:49 UTC and every 30 s after, so its weekday figure mixes both rates.
+
+## HSL stop events feed
+
+HSL's own stop events (`arr`, `ars`, `pde`, `dep`, `pas`, `wait`), collected as feed `hsl-stop` since 2026-11-02
+09:10 UTC over a second MQTT connection: the reference for arrival detection (stage 2, task 2.1). The week above ended
+before the feed started, so its tables do not include it.
+
+### Volume
+
+**Data:** Tue 2026-11-03 00:00–24:00 UTC, the first full day. **How:** records from the collector's log of closed
+archive files, bytes from the file sizes.
+
+| Feed | Records | MiB | Bytes per record |
+|---|---:|---:|---:|
+| `hsl-stop` | 2 386 848 | 126.9 | 56 |
+| `hsl` | 81 246 690 | 2 757.5 | 36 |
+
+- `hsl-stop` adds 2.9 % of the records and 4.6 % of the bytes of `hsl`. All feeds together: 3 474 MiB that day.
+- 27.6 events/s on average, 45/s at the peak hour (06:00 UTC), 0.27/s at the lowest (01:00 UTC).
+- On 04.11, the hours from 03:00 to 16:00 UTC are within 3 % of the same hours on 03.11.
+
+### Collector memory
+
+**How:** `sar -r` on the collector server, one sample every 10 minutes; the highest "memory used" of each day, without
+page cache. The feed has run since 02.11 09:10 UTC; 04.11 covers the day up to 17:30 UTC.
+
+| Days | Highest memory used | Lowest memory available |
+|---|---:|---:|
+| 27.10–01.11, without `hsl-stop` | 1 053–1 088 MiB | 628–675 MiB |
+| 02.11–04.11, with `hsl-stop` | 1 061–1 084 MiB | 646–665 MiB |
+
+- The second connection did not raise the daily peak, including the hours of Boston's evening peak (about 23:00 UTC).
+- The process's own memory is a sawtooth, so one reading says little: on 04.11 at about 17:20 UTC, `anon` read 609 and
+  653 MiB and `RSS` 666 and 745 MiB within minutes, at the same traffic.
+- In the 56 hours after the deploy: no restarts, no out-of-memory kills, 53 s of memory pressure in total.
+
+## Source delay
+
+How old a record is when the collector receives it: receive time minus the time the source gives. This is the floor of
+any "source to map" latency, before any of our processing.
+
+**Data:** the archive hour 2026-11-04 16:00 UTC. For the MQTT feeds, 20 000 consecutive messages from the middle of the
+hour. **How:** a one-off Python script with pyarrow over the archive files. The server's clock is NTP-synchronized.
+
+| Feed | Source time | Records | p50 | p95 | p99 | Max |
+|---|---|---:|---:|---:|---:|---:|
+| `hsl` (`vp`) | `tsi` | 20 000 | 0.55 s | 1.16 s | 2.15 s | 19.5 s |
+| `hsl-stop` | `tsi` | 20 000 | 0.47 s | 9.53 s | 31.0 s | 4 815 s |
+| `entur-sky-vm` | `RecordedAtTime` | 54 991 | 9.22 s | 27.3 s | 32.6 s | 42.3 s |
+
+- `tsi` is in whole seconds, so the HSL figures read up to 1 s high.
+- `hsl-stop` events can arrive late (here up to 80 minutes), so comparing with them has to use the event's time, not
+  the receive time.
+- The `entur-sky-vm` age includes the wait for our next poll, every 30 s. Boston is not measured here.
 
 ## GTFS snapshot check
 

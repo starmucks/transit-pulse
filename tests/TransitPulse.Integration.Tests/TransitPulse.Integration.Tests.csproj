@@ -28,6 +28,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\TransitPulse.Infrastructure\TransitPulse.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\TransitPulse.Ingestor\TransitPulse.Ingestor.csproj" />
+    <ProjectReference Include="..\..\src\TransitPulse.Processor\TransitPulse.Processor.csproj" />
     <ProjectReference Include="..\..\src\TransitPulse.Worker\TransitPulse.Worker.csproj" />
   </ItemGroup>
 

@@ -4,6 +4,7 @@
     <Project Path="src/TransitPulse.Domain/TransitPulse.Domain.csproj" />
     <Project Path="src/TransitPulse.Infrastructure/TransitPulse.Infrastructure.csproj" />
     <Project Path="src/TransitPulse.Ingestor/TransitPulse.Ingestor.csproj" />
+    <Project Path="src/TransitPulse.Processor/TransitPulse.Processor.csproj" />
     <Project Path="src/TransitPulse.ServiceDefaults/TransitPulse.ServiceDefaults.csproj" />
     <Project Path="src/TransitPulse.Worker/TransitPulse.Worker.csproj" />
   </Folder>
@@ -12,5 +13,6 @@
     <Project Path="tests/TransitPulse.Infrastructure.Tests/TransitPulse.Infrastructure.Tests.csproj" />
     <Project Path="tests/TransitPulse.Ingestor.Tests/TransitPulse.Ingestor.Tests.csproj" />
     <Project Path="tests/TransitPulse.Integration.Tests/TransitPulse.Integration.Tests.csproj" />
+    <Project Path="tests/TransitPulse.Processor.Tests/TransitPulse.Processor.Tests.csproj" />
   </Folder>
 </Solution>

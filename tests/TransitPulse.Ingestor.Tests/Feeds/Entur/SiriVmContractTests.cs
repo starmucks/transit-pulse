@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text;
+using TransitPulse.Domain;
 using TransitPulse.Ingestor.Feeds.Entur;
-using TransitPulse.Ingestor.Kafka;
 using TransitPulse.Ingestor.Pipeline;
 using TransitPulse.Ingestor.Tests.Normalization;
 

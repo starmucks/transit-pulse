@@ -1,3 +1,5 @@
+using TransitPulse.Domain;
+
 namespace TransitPulse.Ingestor.Kafka;
 
 /// <summary>Broker and topic settings, configuration section <c>Kafka</c>; used only in <c>full</c> mode.</summary>
@@ -10,11 +12,11 @@ internal sealed class KafkaOptions
     public string BootstrapServers { get; set; } = "";
 
     /// <summary>Topic for normalized positions.</summary>
-    public string PositionsTopic { get; set; } = "positions.raw";
+    public string PositionsTopic { get; set; } = Topics.PositionsRaw.Name;
 
     /// <summary>Partitions of the positions topic when it is created; the ceiling for parallel consumers.</summary>
-    public int PositionsPartitions { get; set; } = 12;
+    public int PositionsPartitions { get; set; } = Topics.PositionsRaw.Partitions;
 
     /// <summary>How long the broker keeps positions; the raw archive keeps them for longer.</summary>
-    public TimeSpan PositionsRetention { get; set; } = TimeSpan.FromHours(24);
+    public TimeSpan PositionsRetention { get; set; } = Topics.PositionsRaw.Retention;
 }

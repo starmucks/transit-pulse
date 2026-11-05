@@ -1,8 +1,6 @@
 using System.Text;
-using TransitPulse.Domain;
-using TransitPulse.Ingestor.Kafka;
 
-namespace TransitPulse.Ingestor.Tests.Kafka;
+namespace TransitPulse.Domain.Tests;
 
 public sealed class PositionMessageTests
 {
