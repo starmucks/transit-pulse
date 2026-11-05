@@ -5,6 +5,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="TransitPulse.Integration.Tests" />
     <InternalsVisibleTo Include="TransitPulse.Processor.Tests" />
   </ItemGroup>
 
