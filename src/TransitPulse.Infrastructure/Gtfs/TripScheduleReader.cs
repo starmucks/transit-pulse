@@ -12,8 +12,16 @@ public sealed record LoadedTripSchedule(int SnapshotId, TripSchedule Schedule);
 /// <param name="dataSource">Database with the <c>gtfs</c> schema.</param>
 public sealed class TripScheduleReader(NpgsqlDataSource dataSource)
 {
+    // A background read of a few seconds, up to 25 s measured on a busy database: the default 30 s leaves too little margin,
+    // and a read that times out would only start over a minute later.
+    private const int ReadTimeoutSeconds = 120;
+
     // A day's services are the calendar's, minus the days calendar_dates removes, plus the days it adds. A run without
     // a direction or a first departure cannot be found by a descriptor anyway; neither occurs in HSL snapshots.
+    //
+    // MATERIALIZED fixes the order: runs first, their first stops after. Otherwise statistics decide, and after an
+    // ANALYZE the planner may look up the first stop of all 375 000 trips of an HSL snapshot instead of the 71 000 runs
+    // wanted (measured, docs/benchmarks.md "Trip lookup"), before returning a single row.
     private const string RunsOfDays =
         """
         WITH days AS (
@@ -31,18 +39,22 @@ public sealed class TripScheduleReader(NpgsqlDataSource dataSource)
             SELECT d.date, x.service_id
             FROM days d
             JOIN gtfs.calendar_dates x ON x.snapshot_id = $1 AND x.date = d.date AND x.added
+        ), runs AS MATERIALIZED (
+            SELECT s.date, t.trip_id, t.route_id, t.direction_id
+            FROM services s
+            JOIN gtfs.trips t ON t.snapshot_id = $1 AND t.service_id = s.service_id
+            WHERE t.direction_id IS NOT NULL
         )
-        SELECT s.date, t.trip_id, t.route_id, t.direction_id, first_call.departure_sec
-        FROM services s
-        JOIN gtfs.trips t ON t.snapshot_id = $1 AND t.service_id = s.service_id
+        SELECT r.date, r.trip_id, r.route_id, r.direction_id, first_call.departure_sec
+        FROM runs r
         JOIN LATERAL (
             SELECT st.departure_sec
             FROM gtfs.stop_times st
-            WHERE st.snapshot_id = $1 AND st.trip_id = t.trip_id
+            WHERE st.snapshot_id = $1 AND st.trip_id = r.trip_id
             ORDER BY st.stop_sequence
             LIMIT 1
         ) first_call ON true
-        WHERE t.direction_id IS NOT NULL AND first_call.departure_sec IS NOT NULL
+        WHERE first_call.departure_sec IS NOT NULL
         """;
 
     /// <summary>Finds the feed's active snapshot: a cheap way to learn whether a loaded schedule is out of date.</summary>
@@ -83,7 +95,7 @@ public sealed class TripScheduleReader(NpgsqlDataSource dataSource)
         }
 
         var trips = new List<ScheduledTrip>();
-        await using (var select = new NpgsqlCommand(RunsOfDays, connection, transaction))
+        await using (var select = new NpgsqlCommand(RunsOfDays, connection, transaction) { CommandTimeout = ReadTimeoutSeconds })
         {
             select.Parameters.Add(new NpgsqlParameter { Value = snapshotId });
             select.Parameters.Add(new NpgsqlParameter { Value = serviceDates.ToArray() });

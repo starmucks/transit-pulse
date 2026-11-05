@@ -401,3 +401,47 @@ per code, except the last row:
 - The four tram codes are 93 % of the unknown positions. Without them 99.93 % of positions find their trip.
 - These positions correctly stay without a trip, so they produce no stop events or training labels. Their `RouteId` is
   still not a line: anything grouping by line has to use the route of the found trip.
+
+**The real pipeline.** Two hours replayed through a Release build of the Ingestor and the Processor, on separate topics and
+a new group, each with its own snapshot in Postgres. Counts come from the metric `transitpulse.processor.trips`.
+
+| Result | Wed 2026-11-04 06:00 UTC | Thu 2026-11-05 00:00 UTC |
+|---|---:|---:|
+| Accepted positions | 4 309 033 | 181 585 |
+| Found | 4 295 429 | 129 727 |
+| Route unknown | 6 807 | 0 |
+| No departure | 1 038 | 0 |
+| Ambiguous | 1 751 | 0 |
+| No trip descriptor (parked vehicles) | 4 008 | 51 858 |
+| **Found, of positions with a descriptor** | **99.78 %** | **100 %** |
+
+- A whole-hour simulation with the Ingestor's filters gives the same count on every row, except that it also counts the
+  positions the Processor drops as impossible jumps (99 and 2).
+- These shares are higher than the 99.55 % above because deduplication removes the repeats that trams send.
+
+**Memory and lookup, the same runs:**
+
+| | Result |
+|---|---:|
+| Runs held, three service days | 71 125 and 71 616 |
+| Managed memory of the schedule | at most 14.8 MiB (one reading, includes warming up the database client) |
+| One lookup of an ambiguous route, Release | 242 ns |
+| Processor idle with the schedule, working set | 76 MiB |
+| Processor peak during the replay, working set | 102 and 114 MiB |
+
+Only the first departure of each run is loaded so far. Stops and shapes (tasks 2.6, 2.7) will add much more.
+
+**Reading the schedule.** The same query first took 1.3–24.5 s, and one read failed at the default 30 s timeout without a
+single row. `EXPLAIN (ANALYZE, BUFFERS)` showed why the time moved: once statistics exist, the planner may look up the first
+stop of all 375 292 trips of the snapshot and only then pick the 71 616 wanted. The 30 s itself was not reproduced with the
+plan in hand (9.9 s at most in that run), so the plan is the measured cause of the spread, not proof of that one failure.
+
+The query now fixes the order with `MATERIALIZED` and has a 120 s timeout. A new snapshot imported over an old one, then read
+through autovacuum and after a manual `ANALYZE`:
+
+| Reads | Failed | Fastest | Median | Slowest |
+|---:|---:|---:|---:|---:|
+| 16 | 0 | 1.33 s | 2.80 s | 9.78 s |
+
+All on a development PC, Postgres in Docker. A read touches about 40 000 blocks, so a slow disk with a cold cache will take
+much longer; this has not been measured on the target server.
