@@ -25,6 +25,7 @@ internal sealed partial class PositionConsumer(IOptions<ProcessorKafkaOptions> o
     private readonly Dictionary<int, PartitionState> _partitions = [];
     private long _unreadable;
     private TopicPartitionOffset? _firstUnreadable;
+    private bool _abandoned;
 
     // Set on the clients' threads.
     private long _failedDeliveries;
@@ -38,7 +39,7 @@ internal sealed partial class PositionConsumer(IOptions<ProcessorKafkaOptions> o
     private void Run(CancellationToken stopping)
     {
         using var producer = BuildProducer();
-        using var consumer = BuildConsumer();
+        using var consumer = BuildConsumer(producer);
         consumer.Subscribe(_options.InputTopic);
 
         try
@@ -54,17 +55,18 @@ internal sealed partial class PositionConsumer(IOptions<ProcessorKafkaOptions> o
 
                 if (timeProvider.GetUtcNow() >= nextCommit)
                 {
-                    CommitProcessed(consumer, producer);
+                    CommitProcessed(consumer, producer, _partitions.Keys);
                     nextCommit = timeProvider.GetUtcNow() + _options.CommitInterval;
                 }
             }
 
-            CommitProcessed(consumer, producer);
+            CommitProcessed(consumer, producer, _partitions.Keys);
         }
         catch (OperationCanceledException) when (stopping.IsCancellationRequested)
         {
-            // Stopped while the message in hand waited for room in the producer's buffer. Its offset has moved, so this
-            // must not commit: the next start repeats everything since the last commit.
+            // Stopped while the message in hand waited for room in the producer's buffer. Its offset has moved, so nothing
+            // may be committed, including by Close below: the next start repeats everything since the last commit.
+            _abandoned = true;
         }
 
         // Leaves the group at once, so the partitions move now rather than after the session times out.
@@ -125,7 +127,7 @@ internal sealed partial class PositionConsumer(IOptions<ProcessorKafkaOptions> o
         }
     }
 
-    private void CommitProcessed(IConsumer<string, byte[]> consumer, IProducer<string, byte[]> producer)
+    private void CommitProcessed(IConsumer<string, byte[]> consumer, IProducer<string, byte[]> producer, IEnumerable<int> partitions)
     {
         LogUnreadableSinceLastCommit();
 
@@ -140,9 +142,9 @@ internal sealed partial class PositionConsumer(IOptions<ProcessorKafkaOptions> o
 
         List<TopicPartitionOffset> offsets =
         [
-            .. _partitions
-                .Where(partition => partition.Value.HasUncommitted)
-                .Select(partition => new TopicPartitionOffset(_options.InputTopic, partition.Key, partition.Value.NextOffset!.Value)),
+            .. partitions
+                .Where(partition => _partitions.TryGetValue(partition, out var state) && state.HasUncommitted)
+                .Select(partition => new TopicPartitionOffset(_options.InputTopic, partition, _partitions[partition].NextOffset!.Value)),
         ];
         if (offsets.Count == 0)
         {
@@ -163,6 +165,43 @@ internal sealed partial class PositionConsumer(IOptions<ProcessorKafkaOptions> o
         foreach (var offset in offsets)
         {
             _partitions[offset.Partition.Value].MarkCommitted(offset.Offset.Value);
+        }
+    }
+
+    // A partition's state is created by its first message.
+    private void OnAssigned(List<TopicPartition> assigned)
+    {
+        var partitions = assigned.Select(partition => partition.Partition.Value).ToList();
+        LogAssigned(partitions);
+    }
+
+    // Runs on the loop's thread, inside Consume or Close. The new owner resumes from the commit made here, and without it
+    // would repeat everything since the last timed commit.
+    private void OnRevoked(IConsumer<string, byte[]> consumer, IProducer<string, byte[]> producer, List<TopicPartitionOffset> revoked)
+    {
+        var partitions = revoked.Select(partition => partition.Partition.Value).ToList();
+        LogRevoked(partitions);
+        if (!_abandoned)
+        {
+            CommitProcessed(consumer, producer, partitions);
+        }
+
+        Forget(partitions);
+    }
+
+    // The partitions already belong to another consumer: a commit would be refused, and the new owner repeats them.
+    private void OnLost(List<TopicPartitionOffset> lost)
+    {
+        var partitions = lost.Select(partition => partition.Partition.Value).ToList();
+        LogLost(partitions);
+        Forget(partitions);
+    }
+
+    private void Forget(List<int> partitions)
+    {
+        foreach (var partition in partitions)
+        {
+            _partitions.Remove(partition);
         }
     }
 
@@ -204,7 +243,7 @@ internal sealed partial class PositionConsumer(IOptions<ProcessorKafkaOptions> o
         Partitioner = Partitioner.Murmur2Random,
     }).SetErrorHandler((_, error) => OnError(error)).Build();
 
-    private IConsumer<string, byte[]> BuildConsumer() => new ConsumerBuilder<string, byte[]>(new ConsumerConfig
+    private IConsumer<string, byte[]> BuildConsumer(IProducer<string, byte[]> producer) => new ConsumerBuilder<string, byte[]>(new ConsumerConfig
     {
         BootstrapServers = _options.BootstrapServers,
         ClientId = "transitpulse-processor",
@@ -213,7 +252,14 @@ internal sealed partial class PositionConsumer(IOptions<ProcessorKafkaOptions> o
         EnableAutoCommit = false,
         // A partition with no commit is read from its start: positions published before the first start are not lost.
         AutoOffsetReset = AutoOffsetReset.Earliest,
-    }).SetErrorHandler((_, error) => OnError(error)).Build();
+        // Only the partitions changing owner stop: the others keep their state through a rebalance.
+        PartitionAssignmentStrategy = PartitionAssignmentStrategy.CooperativeSticky,
+    })
+        .SetErrorHandler((_, error) => OnError(error))
+        .SetPartitionsAssignedHandler((_, assigned) => OnAssigned(assigned))
+        .SetPartitionsRevokedHandler((consumer, revoked) => OnRevoked(consumer, producer, revoked))
+        .SetPartitionsLostHandler((_, lost) => OnLost(lost))
+        .Build();
 
     private void OnDelivered(DeliveryReport<string, byte[]> report)
     {
@@ -237,6 +283,15 @@ internal sealed partial class PositionConsumer(IOptions<ProcessorKafkaOptions> o
         // Transient errors (broker down, connection reset) are retried by the client itself.
         LogBrokerError(error.Code, error.Reason);
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Partitions assigned: {Partitions}")]
+    private partial void LogAssigned(List<int> partitions);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Partitions revoked: {Partitions}")]
+    private partial void LogRevoked(List<int> partitions);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Partitions lost: {Partitions}")]
+    private partial void LogLost(List<int> partitions);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Could not read from the broker: {Code}: {Reason}")]
     private partial void LogConsumeError(ErrorCode code, string reason);

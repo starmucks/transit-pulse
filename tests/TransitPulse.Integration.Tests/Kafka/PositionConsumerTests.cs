@@ -1,6 +1,8 @@
 using System.Text;
 using Confluent.Kafka;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging.Testing;
 using Microsoft.Extensions.Options;
 using TransitPulse.Domain;
 using TransitPulse.Infrastructure.Kafka;
@@ -27,7 +29,7 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
         return (input, output);
     }
 
-    private PositionConsumer NewConsumer(string input, string output, TimeSpan? commitInterval = null) => new(
+    private PositionConsumer NewConsumer(string input, string output, TimeSpan? commitInterval = null, ILogger<PositionConsumer>? logger = null) => new(
         Options.Create(new ProcessorKafkaOptions
         {
             BootstrapServers = redpanda.BootstrapServers,
@@ -38,7 +40,7 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
             CommitInterval = commitInterval ?? TimeSpan.FromHours(1),
         }),
         TimeProvider.System,
-        NullLogger<PositionConsumer>.Instance);
+        logger ?? NullLogger<PositionConsumer>.Instance);
 
     private void Publish(string topic, params VehiclePosition[] positions)
     {
@@ -162,6 +164,69 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
 
         Assert.Equal(8, received.Count);
         Assert.Equal(8, CommittedTotal(input));
+    }
+
+    [Fact]
+    public async Task Partitions_move_between_instances_without_losses_or_repeats()
+    {
+        var (input, output) = await CreateTopicsAsync("rebalance");
+        var firstLog = new FakeLogger<PositionConsumer>();
+        var published = 0;
+
+        // Every vehicle's positions are one apart in time, so each batch is new for all of them.
+        void PublishRound(int round) => Publish(input, [.. Enumerable.Range(0, 12).Select(vehicle => At($"40/{vehicle}", round))]);
+
+        var first = NewConsumer(input, output, logger: firstLog);
+        await first.StartAsync(Ct);
+        PublishRound(0);
+        published += 12;
+        Assert.Equal(published, ReadOutput(output, published).Count);
+
+        var second = NewConsumer(input, output);
+        await second.StartAsync(Ct);
+        await WaitForMembersAsync($"{input}-group", 2);
+
+        PublishRound(1);
+        published += 12;
+        Assert.Equal(published, ReadOutput(output, published).Count);
+
+        // Cooperative: the first instance gave up only what moved, not all three partitions.
+        var revoked = Assert.Single(firstLog.Collector.GetSnapshot(), record => record.Message.StartsWith("Partitions revoked", StringComparison.Ordinal));
+        Assert.InRange(revoked.Message.Split(',').Length, 1, 2);
+
+        await second.StopAsync(Ct);
+        await WaitForMembersAsync($"{input}-group", 1);
+
+        PublishRound(2);
+        published += 12;
+        var received = ReadOutput(output, published);
+        await first.StopAsync(Ct);
+
+        Assert.False(first.ExecuteTask!.IsFaulted);
+        Assert.False(second.ExecuteTask!.IsFaulted);
+        // No loss and no repeat: the commit interval is an hour, so only the commits at the handovers avoid repeats.
+        Assert.Equal(published, received.Count);
+        Assert.Equal(published, received.Select(message => (message.Message.Key, PositionMessage.Parse(message.Message.Value).ObservedAt)).Distinct().Count());
+    }
+
+    /// <summary>Waits until the group has that many members and each of them holds at least one partition.</summary>
+    private async Task WaitForMembersAsync(string group, int members)
+    {
+        using var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = redpanda.BootstrapServers }).Build();
+        var deadline = DateTime.UtcNow.AddSeconds(60);
+        while (DateTime.UtcNow < deadline)
+        {
+            var description = await admin.DescribeConsumerGroupsAsync([group]);
+            var current = description.ConsumerGroupDescriptions[0].Members;
+            if (current.Count == members && current.All(member => member.Assignment.TopicPartitions.Count > 0))
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(250), Ct);
+        }
+
+        Assert.Fail($"The group {group} did not reach {members} members with partitions in time.");
     }
 
     [Fact]
