@@ -5,6 +5,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="TransitPulse.Processor.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\TransitPulse.Infrastructure\TransitPulse.Infrastructure.csproj" />
     <ProjectReference Include="..\TransitPulse.ServiceDefaults\TransitPulse.ServiceDefaults.csproj" />
   </ItemGroup>

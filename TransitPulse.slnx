@@ -13,5 +13,6 @@
     <Project Path="tests/TransitPulse.Infrastructure.Tests/TransitPulse.Infrastructure.Tests.csproj" />
     <Project Path="tests/TransitPulse.Ingestor.Tests/TransitPulse.Ingestor.Tests.csproj" />
     <Project Path="tests/TransitPulse.Integration.Tests/TransitPulse.Integration.Tests.csproj" />
+    <Project Path="tests/TransitPulse.Processor.Tests/TransitPulse.Processor.Tests.csproj" />
   </Folder>
 </Solution>
