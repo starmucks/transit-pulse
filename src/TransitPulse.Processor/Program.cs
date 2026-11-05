@@ -1,3 +1,4 @@
+using TransitPulse.Processor;
 using TransitPulse.Processor.Kafka;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -11,6 +12,7 @@ builder.Services.AddOptions<ProcessorKafkaOptions>()
     .Validate(o => o.CommitInterval > TimeSpan.Zero, "Kafka:CommitInterval must be positive.")
     .ValidateOnStart();
 // In this order: hosted services start one after another, so the loop finds its topics in place.
+builder.Services.AddSingleton<ProcessorMetrics>();
 builder.Services.AddHostedService<ProcessorTopicInitializer>();
 builder.Services.AddHostedService<PositionConsumer>();
 

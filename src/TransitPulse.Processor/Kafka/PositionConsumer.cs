@@ -9,11 +9,18 @@ namespace TransitPulse.Processor.Kafka;
 /// recent messages and loses none. One loop serves all partitions of the process (see the stage 2 specification).
 /// </summary>
 /// <param name="options">Broker and consumer settings.</param>
-/// <param name="timeProvider">Clock for the commit interval.</param>
-/// <param name="logger">Log for broker errors and dropped messages.</param>
-internal sealed partial class PositionConsumer(IOptions<ProcessorKafkaOptions> options, TimeProvider timeProvider, ILogger<PositionConsumer> logger)
-    : BackgroundService
+/// <param name="metrics">Counters and lag.</param>
+/// <param name="timeProvider">Clock for the commit interval and the lag.</param>
+/// <param name="logger">Log for broker errors, dropped messages and progress.</param>
+internal sealed partial class PositionConsumer(
+    IOptions<ProcessorKafkaOptions> options,
+    ProcessorMetrics metrics,
+    TimeProvider timeProvider,
+    ILogger<PositionConsumer> logger) : BackgroundService
 {
+    private static readonly TimeSpan _lagInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan _progressInterval = TimeSpan.FromMinutes(1);
+
     // Bounds how late the commit timer and a stop request are noticed on an idle topic.
     private static readonly TimeSpan _pollTimeout = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan _flushTimeout = TimeSpan.FromSeconds(10);
@@ -44,7 +51,10 @@ internal sealed partial class PositionConsumer(IOptions<ProcessorKafkaOptions> o
 
         try
         {
-            var nextCommit = timeProvider.GetUtcNow() + _options.CommitInterval;
+            var start = timeProvider.GetUtcNow();
+            var nextCommit = start + _options.CommitInterval;
+            var nextLag = start + _lagInterval;
+            var nextProgress = start + _progressInterval;
             while (!stopping.IsCancellationRequested)
             {
                 ThrowIfFailed();
@@ -53,14 +63,28 @@ internal sealed partial class PositionConsumer(IOptions<ProcessorKafkaOptions> o
                     Handle(result, producer, stopping);
                 }
 
-                if (timeProvider.GetUtcNow() >= nextCommit)
+                var now = timeProvider.GetUtcNow();
+                if (now >= nextCommit)
                 {
                     CommitProcessed(consumer, producer, _partitions.Keys);
                     nextCommit = timeProvider.GetUtcNow() + _options.CommitInterval;
                 }
+
+                if (now >= nextLag)
+                {
+                    ReportLag(consumer);
+                    nextLag = now + _lagInterval;
+                }
+
+                if (now >= nextProgress)
+                {
+                    LogTotals();
+                    nextProgress = now + _progressInterval;
+                }
             }
 
             CommitProcessed(consumer, producer, _partitions.Keys);
+            LogTotals();
         }
         catch (OperationCanceledException) when (stopping.IsCancellationRequested)
         {
@@ -96,6 +120,7 @@ internal sealed partial class PositionConsumer(IOptions<ProcessorKafkaOptions> o
         }
 
         var verdict = state.Process(result.Offset.Value, result.Message.Key, result.Message.Value);
+        metrics.Message(verdict, LagSeconds(result.Message.Timestamp));
         if (verdict == MessageVerdict.Accepted)
         {
             Publish(result.Message, producer, stopping);
@@ -105,6 +130,34 @@ internal sealed partial class PositionConsumer(IOptions<ProcessorKafkaOptions> o
             _unreadable++;
             _firstUnreadable ??= result.TopicPartitionOffset;
         }
+    }
+
+    private double? LagSeconds(Timestamp written) => written.Type == TimestampType.NotAvailable
+        ? null
+        : (timeProvider.GetUtcNow().ToUnixTimeMilliseconds() - written.UnixTimestampMs) / 1000.0;
+
+    // The high watermark comes from the client's last fetch, so this asks the broker nothing and cannot hold up the loop.
+    // A partition with no message read yet has no position to measure from and is left out.
+    private void ReportLag(IConsumer<string, byte[]> consumer)
+    {
+        var lag = new List<(int Partition, long Lag)>(_partitions.Count);
+        foreach (var (partition, state) in _partitions)
+        {
+            var high = consumer.GetWatermarkOffsets(new TopicPartition(_options.InputTopic, partition)).High;
+            if (!high.IsSpecial && state.NextOffset is { } next)
+            {
+                lag.Add((partition, Math.Max(high.Value - next, 0)));
+            }
+        }
+
+        metrics.SetLag(lag);
+    }
+
+    private void LogTotals()
+    {
+        var (accepted, outOfOrder) = (metrics.Total(MessageVerdict.Accepted), metrics.Total(MessageVerdict.OutOfOrder));
+        var (jumps, unreadable) = (metrics.Total(MessageVerdict.ImpossibleJump), metrics.Total(MessageVerdict.Unreadable));
+        LogProgress(accepted, outOfOrder, jumps, unreadable);
     }
 
     // Blocks while the producer's buffer is full, which stops the reading too: the broker being down holds the input back
@@ -283,6 +336,9 @@ internal sealed partial class PositionConsumer(IOptions<ProcessorKafkaOptions> o
         // Transient errors (broker down, connection reset) are retried by the client itself.
         LogBrokerError(error.Code, error.Reason);
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Since the start: {Accepted} accepted, {OutOfOrder} out of order, {Jumps} impossible jumps, {Unreadable} unreadable")]
+    private partial void LogProgress(long accepted, long outOfOrder, long jumps, long unreadable);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Partitions assigned: {Partitions}")]
     private partial void LogAssigned(List<int> partitions);

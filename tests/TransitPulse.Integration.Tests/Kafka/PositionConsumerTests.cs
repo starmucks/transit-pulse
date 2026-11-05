@@ -1,18 +1,26 @@
+using System.Diagnostics.Metrics;
 using System.Text;
 using Confluent.Kafka;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging.Testing;
 using Microsoft.Extensions.Options;
 using TransitPulse.Domain;
 using TransitPulse.Infrastructure.Kafka;
+using TransitPulse.Processor;
 using TransitPulse.Processor.Kafka;
 
 namespace TransitPulse.Integration.Tests.Kafka;
 
-public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixture<RedpandaFixture>
+public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixture<RedpandaFixture>, IDisposable
 {
     private static readonly DateTimeOffset _t0 = new(2026, 11, 5, 12, 0, 0, TimeSpan.Zero);
+
+    private readonly ServiceProvider _services = new ServiceCollection().AddMetrics().BuildServiceProvider();
+
+    public void Dispose() => _services.Dispose();
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -39,6 +47,7 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
             // Long by default: a test sees the commit it provokes, not one the timer happened to make.
             CommitInterval = commitInterval ?? TimeSpan.FromHours(1),
         }),
+        new ProcessorMetrics(_services.GetRequiredService<IMeterFactory>()),
         TimeProvider.System,
         logger ?? NullLogger<PositionConsumer>.Instance);
 
@@ -123,6 +132,39 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
         var vehicle = received.Where(message => message.Message.Key == "hsl/40/415").Select(message => PositionMessage.Parse(message.Message.Value)).ToList();
         Assert.Equal([At("40/415", 0), At("40/415", 1), keptAfterJump], vehicle);
         Assert.Equal(4, received.Count);
+    }
+
+    [Fact]
+    public async Task Metrics_count_every_verdict_and_lag_falls_to_zero()
+    {
+        var factory = _services.GetRequiredService<IMeterFactory>();
+        using var messages = new MetricCollector<long>(factory, ProcessorMetrics.MeterName, "transitpulse.processor.messages");
+        using var lagTime = new MetricCollector<double>(factory, ProcessorMetrics.MeterName, "transitpulse.processor.lag_time");
+        using var lag = new MetricCollector<long>(factory, ProcessorMetrics.MeterName, "transitpulse.processor.lag");
+        var (input, output) = await CreateTopicsAsync("metrics");
+        Publish(input, At("40/415", 5), At("40/415", 1), At("40/415", 6, lat: 61.5), At("40/415", 7));
+
+        var consumer = NewConsumer(input, output);
+        await consumer.StartAsync(Ct);
+        ReadOutput(output, 2);
+
+        // The lag is updated once a second, and the client learns the high watermark from its fetches.
+        lag.RecordObservableInstruments();
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        while (lag.LastMeasurement is not { Value: 0 } && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(200, Ct);
+            lag.RecordObservableInstruments();
+        }
+
+        await consumer.StopAsync(Ct);
+
+        int Count(string verdict) => messages.GetMeasurementSnapshot().Count(m => (string?)m.Tags["verdict"] == verdict);
+        Assert.Equal(2, Count("accepted"));
+        Assert.Equal(1, Count("out_of_order"));
+        Assert.Equal(1, Count("impossible_jump"));
+        Assert.Equal(4, lagTime.GetMeasurementSnapshot().Count);
+        Assert.Equal(0, lag.LastMeasurement?.Value);
     }
 
     [Fact]
