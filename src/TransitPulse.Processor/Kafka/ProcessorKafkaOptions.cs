@@ -21,8 +21,8 @@ internal sealed class ProcessorKafkaOptions
     public string OutputTopic { get; set; } = Topics.PositionsEnriched.Name;
 
     /// <summary>
-    /// How often progress is saved: the most that is processed again after a crash. Each commit waits for every published
-    /// message to be delivered, so a shorter interval costs throughput.
+    /// How often progress is saved: about what is processed again after a crash, or more if the last commits failed. Each
+    /// commit waits for every published message to be delivered, so a shorter interval costs throughput.
     /// </summary>
     public TimeSpan CommitInterval { get; set; } = TimeSpan.FromSeconds(5);
 }

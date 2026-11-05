@@ -35,7 +35,7 @@ internal sealed class ProcessorMetrics
         _lagTime = meter.CreateHistogram(
             "transitpulse.processor.lag_time",
             "s",
-            "Time from a message being written to the input topic to it being read.",
+            "Time from a message being handed to the writer's client to it being read: includes the writer's batching.",
             null,
             // The default boundaries start at 5: "under 1 s", the stage's target, would fall into a single bucket.
             new InstrumentAdvice<double> { HistogramBucketBoundaries = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 300, 1800] });
@@ -44,7 +44,7 @@ internal sealed class ProcessorMetrics
 
     /// <summary>Counts one message. Called by the loop only.</summary>
     /// <param name="verdict">What was decided about it.</param>
-    /// <param name="lagSeconds">How long ago it was written to the input topic; <c>null</c> if the message has no time.</param>
+    /// <param name="lagSeconds">How long ago the writer's client got it; <c>null</c> if the message has no time.</param>
     public void Message(MessageVerdict verdict, double? lagSeconds)
     {
         _totals[(int)verdict]++;
@@ -60,7 +60,10 @@ internal sealed class ProcessorMetrics
     /// <param name="verdict">The verdict.</param>
     public long Total(MessageVerdict verdict) => _totals[(int)verdict];
 
-    /// <summary>Publishes the current lag of the partitions this process reads.</summary>
+    /// <summary>
+    /// Publishes the current lag of the partitions this process has read from. Stays as it was while the loop is held up, and
+    /// leaves out a partition with nothing read yet, so a backlog right after a restart does not show here at first.
+    /// </summary>
     /// <param name="partitions">Partition number and unread messages.</param>
     public void SetLag(IEnumerable<(int Partition, long Lag)> partitions)
     {

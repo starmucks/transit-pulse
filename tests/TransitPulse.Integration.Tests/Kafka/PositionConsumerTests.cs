@@ -1,6 +1,7 @@
 using System.Diagnostics.Metrics;
 using System.Text;
 using Confluent.Kafka;
+using Confluent.Kafka.Admin;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Microsoft.Extensions.Logging;
@@ -132,6 +133,64 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
         var vehicle = received.Where(message => message.Message.Key == "hsl/40/415").Select(message => PositionMessage.Parse(message.Message.Value)).ToList();
         Assert.Equal([At("40/415", 0), At("40/415", 1), keptAfterJump], vehicle);
         Assert.Equal(4, received.Count);
+    }
+
+    private async Task CreateTopicAsync(string name, string config, string value)
+    {
+        using var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = redpanda.BootstrapServers }).Build();
+        await admin.CreateTopicsAsync([new TopicSpecification { Name = name, NumPartitions = 3, ReplicationFactor = -1, Configs = new() { [config] = value } }]);
+    }
+
+    [Fact]
+    public async Task A_message_the_broker_refuses_stops_the_loop_and_nothing_is_committed()
+    {
+        const string Input = "refused-in", Output = "refused-out";
+        await KafkaTopicCreator.EnsureAsync(redpanda.BootstrapServers, [new TopicDefinition(Input, 3, TimeSpan.FromHours(1))], Ct);
+        // Smaller than any position: the broker refuses every message for good.
+        await CreateTopicAsync(Output, "max.message.bytes", "10");
+        Publish(Input, At("40/415", 0), At("40/415", 1), At("40/415", 2));
+        var log = new FakeLogger<PositionConsumer>();
+
+        // A short interval, so a commit that does not wait for the delivery would happen before the refusal arrives.
+        var consumer = NewConsumer(Input, Output, commitInterval: TimeSpan.FromMilliseconds(50), logger: log);
+        await consumer.StartAsync(Ct);
+        await Task.WhenAny(consumer.ExecuteTask!, Task.Delay(TimeSpan.FromSeconds(60), Ct));
+        await consumer.StopAsync(Ct);
+
+        Assert.True(consumer.ExecuteTask!.IsFaulted);
+        Assert.Equal(0, CommittedTotal(Input));
+        Assert.Contains(log.Collector.GetSnapshot(), record => record.Message.StartsWith("Since the start:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_time_stamped_by_the_broker_does_not_stop_the_output()
+    {
+        const string Input = "broker-time-in", Output = "broker-time-out";
+        await CreateTopicAsync(Input, "message.timestamp.type", "LogAppendTime");
+        await KafkaTopicCreator.EnsureAsync(redpanda.BootstrapServers, [new TopicDefinition(Output, 3, TimeSpan.FromHours(1))], Ct);
+        Publish(Input, At("40/415", 0));
+
+        var consumer = NewConsumer(Input, Output);
+        await consumer.StartAsync(Ct);
+        var received = ReadOutput(Output, 1);
+        await consumer.StopAsync(Ct);
+
+        Assert.False(consumer.ExecuteTask!.IsFaulted);
+        Assert.Single(received);
+    }
+
+    [Fact]
+    public async Task The_initializer_declares_the_configured_topics_with_the_partitions_of_the_real_ones()
+    {
+        var initializer = new ProcessorTopicInitializer(
+            Options.Create(new ProcessorKafkaOptions { BootstrapServers = redpanda.BootstrapServers, InputTopic = "init-in", OutputTopic = "init-out" }),
+            NullLogger<ProcessorTopicInitializer>.Instance);
+
+        await initializer.StartAsync(Ct);
+
+        using var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = redpanda.BootstrapServers }).Build();
+        Assert.Equal(Topics.PositionsRaw.Partitions, Assert.Single(admin.GetMetadata("init-in", TimeSpan.FromSeconds(10)).Topics).Partitions.Count);
+        Assert.Equal(Topics.PositionsEnriched.Partitions, Assert.Single(admin.GetMetadata("init-out", TimeSpan.FromSeconds(10)).Topics).Partitions.Count);
     }
 
     [Fact]

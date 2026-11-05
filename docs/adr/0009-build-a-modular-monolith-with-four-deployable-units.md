@@ -14,8 +14,9 @@ database) can wait. Stage 2 is the moment this becomes real, with the Worker add
 ## Decision
 
 Four deployable units: **Ingestor**, **Processor**, **API**, **Worker**. Each is one process built from shared libraries
-(`Domain` with no dependencies, `Infrastructure` for storage and the broker). They talk only through Kafka topics and the
-database. A new service needs its own ADR, showing that a module has its own reason to scale or to fail separately.
+(`Domain` with no dependencies, `Infrastructure` for storage and the broker). They talk only through Kafka topics, the
+database and Redis, not by calling each other, apart from the internal gRPC call of the prediction module that the brief
+plans for the API. A new service needs its own ADR, showing that a module has its own reason to scale or to fail separately.
 
 ## Alternatives considered
 

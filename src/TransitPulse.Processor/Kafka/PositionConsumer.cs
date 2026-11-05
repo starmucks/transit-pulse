@@ -6,7 +6,7 @@ namespace TransitPulse.Processor.Kafka;
 /// <summary>
 /// The Processor's main loop: reads positions, drops the implausible ones and publishes the rest. Delivery is
 /// at-least-once: a partition's offset is committed only after everything read before it was delivered, so a crash repeats
-/// recent messages and loses none. One loop serves all partitions of the process (see the stage 2 specification).
+/// recent messages and loses none. One loop serves all partitions of the process (ADR-0010).
 /// </summary>
 /// <param name="options">Broker and consumer settings.</param>
 /// <param name="metrics">Counters and lag.</param>
@@ -84,13 +84,17 @@ internal sealed partial class PositionConsumer(
             }
 
             CommitProcessed(consumer, producer, _partitions.Keys);
-            LogTotals();
         }
         catch (OperationCanceledException) when (stopping.IsCancellationRequested)
         {
             // Stopped while the message in hand waited for room in the producer's buffer. Its offset has moved, so nothing
             // may be committed, including by Close below: the next start repeats everything since the last commit.
             _abandoned = true;
+        }
+        finally
+        {
+            // Also after a failure: the totals of a failed run are what explains it.
+            LogTotals();
         }
 
         // Leaves the group at once, so the partitions move now rather than after the session times out.
@@ -123,7 +127,7 @@ internal sealed partial class PositionConsumer(
         metrics.Message(verdict, LagSeconds(result.Message.Timestamp));
         if (verdict == MessageVerdict.Accepted)
         {
-            Publish(result.Message, producer, stopping);
+            Publish(ForOutput(result.Message), producer, stopping);
         }
         else if (verdict == MessageVerdict.Unreadable)
         {
@@ -131,6 +135,11 @@ internal sealed partial class PositionConsumer(
             _firstUnreadable ??= result.TopicPartitionOffset;
         }
     }
+
+    // The client accepts only a writer's time or none: passing on a time the broker stamped makes every Produce throw.
+    private static Message<string, byte[]> ForOutput(Message<string, byte[]> input) => input.Timestamp.Type == TimestampType.CreateTime
+        ? input
+        : new Message<string, byte[]> { Key = input.Key, Value = input.Value, Timestamp = Timestamp.Default };
 
     private double? LagSeconds(Timestamp written) => written.Type == TimestampType.NotAvailable
         ? null

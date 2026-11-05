@@ -13,14 +13,22 @@ namespace TransitPulse.Processor.Kafka;
 /// <param name="logger">Startup log.</param>
 internal sealed partial class ProcessorTopicInitializer(IOptions<ProcessorKafkaOptions> options, ILogger<ProcessorTopicInitializer> logger) : IHostedService
 {
-    private static readonly TopicDefinition[] _topics =
-        [Topics.PositionsRaw, Topics.PositionsEnriched, Topics.EventsStop, Topics.EventsAnomaly, Topics.PositionsRawDlq];
-
     /// <inheritdoc />
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var created = await KafkaTopicCreator.EnsureAsync(options.Value.BootstrapServers, _topics, cancellationToken);
-        LogTopics(_topics.Length, created.Count == 0 ? "none" : string.Join(", ", created));
+        var settings = options.Value;
+        // Input and output by their configured names, so a run on other topics gets the same partitions: with fewer, a
+        // vehicle would not keep its partition number from input to output.
+        TopicDefinition[] topics =
+        [
+            Topics.PositionsRaw with { Name = settings.InputTopic },
+            Topics.PositionsEnriched with { Name = settings.OutputTopic },
+            Topics.EventsStop,
+            Topics.EventsAnomaly,
+            Topics.PositionsRawDlq,
+        ];
+        var created = await KafkaTopicCreator.EnsureAsync(settings.BootstrapServers, topics, cancellationToken);
+        LogTopics(topics.Length, created.Count == 0 ? "none" : string.Join(", ", created));
     }
 
     /// <inheritdoc />

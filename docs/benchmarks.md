@@ -209,8 +209,8 @@ the first and last samples. One process on a development PC, with Redpanda in Do
 | CPU, working set | 10.7 % of one core, 85 MiB |
 | Dropped as impossible jumps | 6 of 260 465 |
 
-The time counts from the moment the Ingestor's message was written, so it leaves out the source and the Ingestor. A run over a
-weekday peak is task 2.11.
+The time counts from the moment the Ingestor handed the message to its Kafka client, so it includes that client's batching
+(20 ms) and leaves out the source and the Ingestor's own work before that. A run over a weekday peak is task 2.11.
 
 ### Archive copy during the morning peak, 2026-11-05
 
@@ -231,7 +231,7 @@ morning peak and cost part of the HSL stream. Compared with the same hours a wee
 - A separate connection from another machine was also closed by the broker once in 4.5 minutes at about 07:22, so the source
   may have contributed. This cannot be separated.
 - Since then: proactive compaction is off; the copy pauses when idle CPU falls below 40 %. The same copy tool then moved
-  3.22 GB in 19:39 during the day (2.8 MB/s), with 3 pauses and no disconnects.
+  3.22 GiB in 19:39 during the day (2.8 MiB/s), with 3 pauses and no disconnects.
 
 The window 2026-11-05 06:05–07:30 UTC is left out of model training and evaluation.
 
