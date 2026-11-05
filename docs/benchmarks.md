@@ -180,6 +180,61 @@ vehicles identified by topic. Not yet measured for Bergen and Boston.
   200 m. In those 88, the vehicle stayed at the new place 65 times, so a filter that only compared with the last accepted
   point would keep rejecting it.
 
+The real pipeline gives the same result. Replaying 2026-10-27 14:00 UTC through the Ingestor and the Processor on
+2026-11-05: 4 272 425 positions, 82 impossible jumps, 0 out of order, 0 unreadable, 4 272 343 published.
+
+### Processor throughput
+
+**How:** one archive hour (2026-10-27 14:00 UTC, HSL) was replayed into separate topics, then a Release build of the
+Processor read all of it with a new consumer group. The speed is the growth of its output topic, sampled every 5 s, without
+the first and last samples. One process on a development PC, with Redpanda in Docker limited to one core and 1 GB.
+
+| | Result |
+|---|---:|
+| Speed | **about 115 000 messages/s** (3 619 311 in 31.5 s) |
+| CPU | 102 % of one core |
+| Peak working set | 215 MiB |
+
+- The C2 target for this topic is 12 000 positions/s, so one loop has about ten times that on this machine. It has not been
+  measured on the target server.
+- This stage of the Processor only filters and republishes. Matching, stop detection and bunching will take a share of this.
+
+**Live, 2026-11-05 08:53–08:58 UTC, all three cities, Debug build, not the peak:**
+
+| | Result |
+|---|---:|
+| Input | 869 positions/s |
+| Time from `positions.raw` to being read | p50 23 ms, p95 36 ms, p99 44 ms (medians of 30 samples; the highest p95 was 46 ms) |
+| Unread messages at the last sample | 0 |
+| CPU, working set | 10.7 % of one core, 85 MiB |
+| Dropped as impossible jumps | 6 of 260 465 |
+
+The time counts from the moment the Ingestor's message was written, so it leaves out the source and the Ingestor. A run over a
+weekday peak is task 2.11.
+
+### Archive copy during the morning peak, 2026-11-05
+
+Copying the archive from the collector server with three parallel transfers, started at 05:41 UTC, ran into the Helsinki
+morning peak and cost part of the HSL stream. Compared with the same hours a week earlier, read from the archive:
+
+| Hour (UTC) | Records | Points at 1 per 10 s per vehicle |
+|---|---:|---:|
+| 06:00 | 3 355 855 of 5 591 876 (60 %) | 293 404 of 437 275 (67 %) |
+| 07:00 | 3 748 455 of 4 891 318 (77 %) | 296 100 of 370 283 (80 %) |
+
+- Records began arriving late at 06:05 (p95 18 s against 0.5 s), before the first disconnect at 06:16. The rate then fell to
+  3 % of normal in the worst 5 minutes (06:50), with 256 s of silence, the longest of the incident.
+- Idle CPU on the server fell from about 85 % to 0–5 %, with system time at 72 %. `kcompactd` took a whole core with free
+  memory and no reclaim. After the copy stopped at 06:54 the server recovered within minutes, and the rate reached 99 % at
+  07:25. A restart of the collector at 07:08 cost another dip (24 % at 07:10).
+- Every vehicle stayed visible in every 5-minute window. The stop events feed `hsl-stop` kept 94–97 % of the previous day.
+- A separate connection from another machine was also closed by the broker once in 4.5 minutes at about 07:22, so the source
+  may have contributed. This cannot be separated.
+- Since then: proactive compaction is off; the copy pauses when idle CPU falls below 40 %. The same copy tool then moved
+  3.22 GB in 19:39 during the day (2.8 MB/s), with 3 pauses and no disconnects.
+
+The window 2026-11-05 06:05–07:30 UTC is left out of model training and evaluation.
+
 ### Archive volume per day
 
 Parquet with zstd, as stored on the collector server. MiB per day, average of the days of each type.
