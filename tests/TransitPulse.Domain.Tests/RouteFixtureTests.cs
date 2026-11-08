@@ -17,6 +17,7 @@ public sealed class RouteFixtureTests
     [InlineData("loop")]
     [InlineData("detour")]
     [InlineData("terminal")]
+    [InlineData("train")]
     public void The_distance_never_goes_back_unless_the_vehicle_is_placed_anew(string name)
     {
         var run = Run(name);
@@ -65,17 +66,31 @@ public sealed class RouteFixtureTests
     }
 
     [Fact]
-    public void A_wrong_first_placement_at_the_terminal_is_corrected_within_a_minute()
+    public void A_bus_arriving_at_its_terminal_along_the_loop_is_placed_anew_when_it_moves_off()
     {
         var run = Run("terminal");
         var reanchored = Assert.Single(run.Matches, m => m.Match.Reanchored);
         var after = run.Matches.SkipWhile(m => !m.Match.Reanchored);
 
-        // Measured: first fix at 231 m, placed anew at 23 s back to 0 m; before re-anchoring the bus was off route for 192 s.
-        Assert.InRange(reanchored.Seconds, 0, 60);
-        Assert.InRange(reanchored.Match.AlongMetres, 0, 20);
+        // Measured: first fixes 30 m from the loop at 231 m and farther than 50 m from the line's start, so the first pass
+        // cannot help; the bus then waits at the first stop (20 m) until 177 s and is placed anew at 178 s, at 33 m.
+        Assert.InRange(reanchored.Seconds, 150, 200);
+        Assert.InRange(reanchored.Match.AlongMetres, 0, 60);
         Assert.All(after, m => Assert.Equal(RouteMatchStatus.OnRoute, m.Match.Status));
         Assert.InRange(run.Last.AlongMetres, run.LengthMetres - 20, run.LengthMetres);
+    }
+
+    [Fact]
+    public void A_train_driving_back_along_its_line_keeps_the_distance_it_reached()
+    {
+        var run = Run("train");
+        var reached = run.Matches.Max(m => m.Match.AlongMetres);
+
+        // Measured: 70 933 m by 794 s, then back along the line for 7 min with its old journey, then off it; the window
+        // misses 427 fixes on the line. With re-anchoring by any three misses the distance went back 32 times, ~100 m each.
+        Assert.DoesNotContain(run.Matches, m => m.Match.Reanchored);
+        Assert.InRange(run.Matches.Count(m => m.Match.Status == RouteMatchStatus.OutsideWindow), 350, 500);
+        Assert.Equal(reached, run.Last.AlongMetres);
     }
 
     // Each row goes through VehicleTrack first, as in the Processor: RouteProgress never sees a repeat or an impossible jump.

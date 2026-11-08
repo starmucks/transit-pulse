@@ -69,53 +69,88 @@ public sealed class RouteShape
 
         var from = Math.Clamp(fromMetres, 0, LengthMetres);
         var to = Math.Clamp(toMetres, from, LengthMetres);
-        var xScale = GeoDistance.MetresPerDegree * Math.Cos(double.DegreesToRadians(lat));
+        var xScale = XScale(lat);
 
         var bestSquared = double.PositiveInfinity;
         var bestAlong = 0.0;
         var bestSegment = 0;
         for (var i = 0; i < _along.Length - 1; i++)
         {
-            var start = _along[i];
-            var end = _along[i + 1];
-            if (end < from)
+            if (_along[i + 1] < from)
             {
                 continue;
             }
 
-            if (start > to)
+            if (_along[i] > to)
             {
                 break;
             }
 
-            // The position is the origin; the segment runs from (ax, ay) by (dx, dy).
-            var ax = (_lons[i] - lon) * xScale;
-            var ay = (_lats[i] - lat) * GeoDistance.MetresPerDegree;
-            var dx = (_lons[i + 1] - _lons[i]) * xScale;
-            var dy = (_lats[i + 1] - _lats[i]) * GeoDistance.MetresPerDegree;
-
-            // A repeated point makes a segment of zero length: its only point is its start.
-            var t = 0.0;
-            var length = end - start;
-            if (length > 0)
-            {
-                var nearest = -((ax * dx) + (ay * dy)) / ((dx * dx) + (dy * dy));
-                var low = Math.Max(0, (from - start) / length);
-                var high = Math.Min(1, (to - start) / length);
-                t = Math.Max(low, Math.Min(high, nearest));
-            }
-
-            var px = ax + (t * dx);
-            var py = ay + (t * dy);
-            var squared = (px * px) + (py * py);
+            var squared = Nearest(i, lat, lon, xScale, from, to, out var along);
             if (squared < bestSquared)
             {
                 bestSquared = squared;
-                bestAlong = start + (t * length);
+                bestAlong = along;
                 bestSegment = i;
             }
         }
 
         return new ShapeProjection(bestAlong, Math.Sqrt(bestSquared), bestSegment);
+    }
+
+    /// <summary>
+    /// Finds the nearest point of the first pass of the line that comes within a distance of a position: where a line
+    /// passing the same place more than once (a terminal loop, a street driven both ways) is met first.
+    /// </summary>
+    /// <remarks>
+    /// The pass is searched from the first segment that comes that near to twice the distance past its end: a straight
+    /// line stays within the distance for at most that long.
+    /// </remarks>
+    /// <param name="lat">Latitude of the position, degrees.</param>
+    /// <param name="lon">Longitude of the position, degrees.</param>
+    /// <param name="withinMetres">How near the line must come.</param>
+    /// <returns>The nearest point of that pass, or of the whole line if it never comes that near.</returns>
+    public ShapeProjection ProjectFirstPass(double lat, double lon, double withinMetres)
+    {
+        var xScale = XScale(lat);
+        for (var i = 0; i < _along.Length - 1; i++)
+        {
+            if (Nearest(i, lat, lon, xScale, 0, LengthMetres, out _) <= withinMetres * withinMetres)
+            {
+                return Project(lat, lon, _along[i], _along[i + 1] + (2 * withinMetres));
+            }
+        }
+
+        return Project(lat, lon);
+    }
+
+    private static double XScale(double lat) => GeoDistance.MetresPerDegree * Math.Cos(double.DegreesToRadians(lat));
+
+    // Squared distance from the position to the nearest point of segment i that lies between from and to along the line.
+    private double Nearest(int i, double lat, double lon, double xScale, double from, double to, out double along)
+    {
+        var start = _along[i];
+        var length = _along[i + 1] - start;
+
+        // The position is the origin; the segment runs from (ax, ay) by (dx, dy).
+        var ax = (_lons[i] - lon) * xScale;
+        var ay = (_lats[i] - lat) * GeoDistance.MetresPerDegree;
+        var dx = (_lons[i + 1] - _lons[i]) * xScale;
+        var dy = (_lats[i + 1] - _lats[i]) * GeoDistance.MetresPerDegree;
+
+        // A repeated point makes a segment of zero length: its only point is its start.
+        var t = 0.0;
+        if (length > 0)
+        {
+            var nearest = -((ax * dx) + (ay * dy)) / ((dx * dx) + (dy * dy));
+            var low = Math.Max(0, (from - start) / length);
+            var high = Math.Min(1, (to - start) / length);
+            t = Math.Max(low, Math.Min(high, nearest));
+        }
+
+        var px = ax + (t * dx);
+        var py = ay + (t * dy);
+        along = start + (t * length);
+        return (px * px) + (py * py);
     }
 }

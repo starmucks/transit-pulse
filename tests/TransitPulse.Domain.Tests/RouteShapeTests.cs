@@ -73,6 +73,30 @@ public sealed class RouteShapeTests
     }
 
     [Fact]
+    public void The_first_pass_wins_over_a_nearer_later_pass()
+    {
+        // 18 m from the way out, 2 m from the way back.
+        var shape = Shape((0, 0), (1000, 0), (1000, 20), (0, 20));
+
+        var first = shape.ProjectFirstPass(Lat(18), Lon(300), 50);
+        var tooFar = shape.ProjectFirstPass(Lat(18), Lon(300), 10);
+
+        Assert.Equal(300, first.AlongMetres, tolerance: 0.5);
+        Assert.Equal(18, first.OffsetMetres, tolerance: 0.5);
+        Assert.Equal(1720, tooFar.AlongMetres, tolerance: 0.5);
+    }
+
+    [Fact]
+    public void Without_a_pass_that_near_the_first_pass_is_the_nearest_point()
+    {
+        var shape = Shape((0, 0), (1000, 0));
+
+        var projection = shape.ProjectFirstPass(Lat(300), Lon(400), 50);
+
+        Assert.Equal(new ShapeProjection(400, 300, 0), projection with { AlongMetres = Math.Round(projection.AlongMetres), OffsetMetres = Math.Round(projection.OffsetMetres) });
+    }
+
+    [Fact]
     public void A_window_past_the_end_gives_the_last_point()
     {
         var projection = Project(Shape((0, 0), (1000, 0)), 200, 0, fromMetres: 5000);

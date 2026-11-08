@@ -6,7 +6,7 @@ namespace TransitPulse.Domain;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The first position of a trip is searched along the whole line. Each next one is searched in a window from a little behind
+/// The first position of a trip is placed on the first pass of the line near it. Each next one is searched in a window from a little behind
 /// the last distance to as far as the vehicle could have driven since its last position on the line. Measuring from that
 /// position, not the last one received, lets the window grow during a detour, so the vehicle is picked up where it rejoins.
 /// </para>
@@ -15,10 +15,15 @@ namespace TransitPulse.Domain;
 /// Thresholds are first guesses, to be set by the measured offsets of an archive hour (task 2.6).
 /// </para>
 /// <para>
-/// A trip's first position may land on the wrong pass: at a terminal where the line ends where it starts, or on a street
-/// driven both ways. Every next position then misses the window while lying on the line. After
+/// A trip's first position may still land on the wrong pass: a vehicle first seen mid-trip (after a restart) on a street
+/// the line drives both ways. Every next position then misses the window while lying on the line. After
 /// <see cref="ReanchorAfter"/> such positions in a row the vehicle is placed anew along the whole line. One miss is not
 /// enough: a single bad fix near another pass of the line must not move the vehicle there.
+/// </para>
+/// <para>
+/// The row must also have moved forward along the line by more than GPS noise. A vehicle driving back along it is not on
+/// its trip (a descriptor left over from the previous run, measured on HSL trains for up to an hour): following it would
+/// take the distance back past stops already served, so it stays outside the window instead.
 /// </para>
 /// <para>Not thread-safe: all positions of a vehicle arrive in one partition, read by one loop.</para>
 /// </remarks>
@@ -43,6 +48,7 @@ public sealed class RouteProgress
     private double _along;
     private DateTimeOffset _at;
     private int _misses;
+    private double _rearmost;
 
     /// <summary>Places the vehicle's next position on its trip's line and updates the progress.</summary>
     /// <param name="trip">The trip the position belongs to.</param>
@@ -81,7 +87,9 @@ public sealed class RouteProgress
         }
         else
         {
-            projection = shape.Project(lat, lon);
+            // A trip almost always starts where its line starts: at a terminal the line passes twice, the nearest pass
+            // is often the wrong one. A vehicle first seen further on misses the window and is moved forward.
+            projection = shape.ProjectFirstPass(lat, lon, OffRouteMetres);
         }
 
         if (projection.OffsetMetres > OffRouteMetres)
@@ -107,7 +115,10 @@ public sealed class RouteProgress
             return new RouteMatch(RouteMatchStatus.OffRoute, _along, windowOffset);
         }
 
-        if (++_misses < ReanchorAfter)
+        // Direction is judged over the row, from its rearmost point: at one position a second, a train backing away moves
+        // less per step than GPS noise. A vehicle standing still waits here until it moves off.
+        _rearmost = _misses++ == 0 ? whole.AlongMetres : Math.Min(_rearmost, whole.AlongMetres);
+        if (_misses < ReanchorAfter || whole.AlongMetres - _rearmost <= NoiseMetres)
         {
             return new RouteMatch(RouteMatchStatus.OutsideWindow, _along, whole.OffsetMetres);
         }

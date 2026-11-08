@@ -120,21 +120,30 @@ public sealed class RouteProgressTests
     }
 
     [Fact]
-    public void A_wrong_first_placement_at_a_terminal_is_corrected_by_three_points_on_the_line()
+    public void A_trip_first_seen_at_its_terminal_starts_on_the_first_pass_not_the_nearest()
     {
         // A loop that ends 10 m from where it starts: a vehicle waiting at the terminal is nearer the end.
         var loop = Shape((0, 0), (1000, 0), (1000, 500), (0, 500), (0, 10));
+
+        var atTerminal = Advance(new RouteProgress(), Trip(loop), 0, 8, 0);
+
+        Assert.Equal(new RouteMatch(RouteMatchStatus.OnRoute, 0, 8), Rounded(atTerminal));
+    }
+
+    [Fact]
+    public void A_vehicle_first_seen_on_a_later_pass_is_moved_forward_to_it_by_three_points_on_the_line()
+    {
+        // On the way back, 2 m from it and 18 m from the way out: first placed on the way out, the earlier pass.
         var progress = new RouteProgress();
-        var atTerminal = Advance(progress, Trip(loop), 0, 8, 0);
+        var first = Advance(progress, Trip(_outAndBack), 700, 18, 0);
+        Advance(progress, Trip(_outAndBack), 650, 18, 5);
 
-        var misses = new[] { Advance(progress, Trip(loop), 100, 0, 10), Advance(progress, Trip(loop), 200, 0, 20) };
-        var reanchored = Advance(progress, Trip(loop), 300, 0, 30);
-        var next = Advance(progress, Trip(loop), 400, 0, 40);
+        var misses = new[] { Advance(progress, Trip(_outAndBack), 600, 18, 10), Advance(progress, Trip(_outAndBack), 580, 18, 12) };
+        var reanchored = Advance(progress, Trip(_outAndBack), 560, 18, 14);
 
-        Assert.Equal(2990, atTerminal.AlongMetres, tolerance: 0.5);
-        Assert.All(misses, m => Assert.Equal(new RouteMatch(RouteMatchStatus.OutsideWindow, 2990, 0), Rounded(m)));
-        Assert.Equal(new RouteMatch(RouteMatchStatus.OnRoute, 300, 0, Reanchored: true), Rounded(reanchored));
-        Assert.Equal(new RouteMatch(RouteMatchStatus.OnRoute, 400, 0), Rounded(next));
+        Assert.Equal(700, first.AlongMetres, tolerance: 0.5);
+        Assert.All(misses, m => Assert.Equal(new RouteMatch(RouteMatchStatus.OutsideWindow, 700, 2), Rounded(m)));
+        Assert.Equal(new RouteMatch(RouteMatchStatus.OnRoute, 1460, 2, Reanchored: true), Rounded(reanchored));
     }
 
     [Fact]
@@ -149,6 +158,18 @@ public sealed class RouteProgressTests
         var secondInARow = Advance(progress, Trip(_straight), 500, 0, 4);
 
         Assert.Equal(new RouteMatch(RouteMatchStatus.OutsideWindow, 1010, 0), Rounded(secondInARow));
+    }
+
+    [Fact]
+    public void A_vehicle_driving_back_along_its_line_is_not_followed()
+    {
+        var progress = new RouteProgress();
+        Advance(progress, Trip(_straight), 1000, 0, 0);
+
+        // 100 m back every 10 s: each point is behind the previous one, so no row of misses forms.
+        var back = Enumerable.Range(1, 5).Select(i => Advance(progress, Trip(_straight), 1000 - (100 * i), 0, 10 * i)).ToList();
+
+        Assert.All(back, m => Assert.Equal(new RouteMatch(RouteMatchStatus.OutsideWindow, 1000, 0), Rounded(m)));
     }
 
     [Fact]

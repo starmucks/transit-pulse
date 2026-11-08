@@ -16,6 +16,7 @@ GTFS shape of that trip from the HSL snapshot loaded that day. Used by `RouteFix
 | `metro` | 50/141 | `31M2/1/20261104/08:12:00` | `31M2_20261030_Ke_2_0812` | 25 784 m | Metro: whole-second fixes, one fix at a station outside the window |
 | `loop` | 54/10 | `1817/0/20261104/08:00:00` | `1817_20261030_Ke_1_0800` | 3 918 m | The line crosses itself between ~560 and ~1 680 m |
 | `detour` | 18/479 | `2214/1/20261104/08:09:00` | `2214_20261030_Ke_2_0809` | 8 831 m | About 4 min off the line near its end, then back on it |
-| `terminal` | 12/2626 | `2159/0/20261104/08:23:00` | `2159_20261030_Ke_1_0823` | 8 569 m | First fix lands ~230 m along the line; without re-anchoring the next 192 s were off route |
+| `terminal` | 12/2626 | `2159/0/20261104/08:23:00` | `2159_20261030_Ke_1_0823` | 8 569 m | Arrives at its terminal along the line's loop: first fixes near 231 m, then ~2.5 min at the first stop |
+| `train` | 90/6090 | `3001R/1/20261104/07:05:00` | `3001R_20261030_Ke_2_0705` | 71 017 m | Keeps its journey after the run: drives back along the line for 7 min, then leaves it |
 
 Data © HSL 2026, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) ([hsl.fi/en/opendata](https://hsl.fi/en/opendata)).
