@@ -39,6 +39,7 @@ internal sealed class ProcessorMetrics
         new("status", "on_route"),
         new("status", "off_route"),
         new("status", "no_shape"),
+        new("status", "outside_window"),
     ];
 
     private readonly Counter<long> _messages;

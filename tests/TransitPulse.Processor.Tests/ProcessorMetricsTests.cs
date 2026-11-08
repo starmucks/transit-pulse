@@ -70,7 +70,7 @@ public sealed class ProcessorMetricsTests : IDisposable
         }
 
         Assert.Equal(statuses.Length, routes.GetMeasurementSnapshot().Select(m => m.Tags["status"]).Distinct().Count());
-        Assert.Equal([12.0, 12.0], offsets.GetMeasurementSnapshot().Select(m => m.Value));
+        Assert.Equal([12.0, 12.0, 12.0], offsets.GetMeasurementSnapshot().Select(m => m.Value));
         Assert.Equal(1, metrics.Total(RouteMatchStatus.OffRoute));
         Assert.Equal(statuses.Length, metrics.RouteMatches);
     }

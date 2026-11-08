@@ -11,4 +11,10 @@ public enum RouteMatchStatus
 
     /// <summary>The trip has no shape to place the position on.</summary>
     NoShape,
+
+    /// <summary>
+    /// On the line, but too far from where the vehicle was before: the distance along it stays as it was. Several such
+    /// positions in a row mean the earlier placement was wrong, and the vehicle is placed anew.
+    /// </summary>
+    OutsideWindow,
 }

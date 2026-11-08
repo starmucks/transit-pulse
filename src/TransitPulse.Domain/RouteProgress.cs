@@ -15,8 +15,10 @@ namespace TransitPulse.Domain;
 /// Thresholds are first guesses, to be set by the measured offsets of an archive hour (task 2.6).
 /// </para>
 /// <para>
-/// Known limit: a trip's first position on a street driven both ways may land on the wrong pass. A vehicle is first seen
-/// mid-trip only after a restart of the Processor, until state snapshots (task 2.10).
+/// A trip's first position may land on the wrong pass: at a terminal where the line ends where it starts, or on a street
+/// driven both ways. Every next position then misses the window while lying on the line. After
+/// <see cref="ReanchorAfter"/> such positions in a row the vehicle is placed anew along the whole line. One miss is not
+/// enough: a single bad fix near another pass of the line must not move the vehicle there.
 /// </para>
 /// <para>Not thread-safe: all positions of a vehicle arrive in one partition, read by one loop.</para>
 /// </remarks>
@@ -31,12 +33,16 @@ public sealed class RouteProgress
     /// <summary>Added to the farthest drivable distance, so that a vehicle standing still still has a window ahead.</summary>
     public const double MarginMetres = 100;
 
+    /// <summary>How many positions in a row on the line but outside the window place the vehicle anew.</summary>
+    public const int ReanchorAfter = 3;
+
     private string? _tripId;
     private DateOnly _serviceDate;
     private RouteShape? _shape;
     private bool _onLine;
     private double _along;
     private DateTimeOffset _at;
+    private int _misses;
 
     /// <summary>Places the vehicle's next position on its trip's line and updates the progress.</summary>
     /// <param name="trip">The trip the position belongs to.</param>
@@ -63,6 +69,7 @@ public sealed class RouteProgress
             _shape = shape;
             _onLine = false;
             _along = 0;
+            _misses = 0;
         }
 
         ShapeProjection projection;
@@ -79,12 +86,35 @@ public sealed class RouteProgress
 
         if (projection.OffsetMetres > OffRouteMetres)
         {
-            return new RouteMatch(RouteMatchStatus.OffRoute, _along, projection.OffsetMetres);
+            return _onLine ? Missed(shape, lat, lon, at, projection.OffsetMetres) : new RouteMatch(RouteMatchStatus.OffRoute, _along, projection.OffsetMetres);
         }
 
+        _misses = 0;
         _along = _onLine ? Math.Max(_along, projection.AlongMetres) : projection.AlongMetres;
         _at = at;
         _onLine = true;
         return new RouteMatch(RouteMatchStatus.OnRoute, _along, projection.OffsetMetres);
+    }
+
+    // A position off the line in the window: a detour or a bad fix if it is off the whole line too, otherwise a sign that the
+    // vehicle was placed on the wrong pass.
+    private RouteMatch Missed(RouteShape shape, double lat, double lon, DateTimeOffset at, double windowOffset)
+    {
+        var whole = shape.Project(lat, lon);
+        if (whole.OffsetMetres > OffRouteMetres)
+        {
+            _misses = 0;
+            return new RouteMatch(RouteMatchStatus.OffRoute, _along, windowOffset);
+        }
+
+        if (++_misses < ReanchorAfter)
+        {
+            return new RouteMatch(RouteMatchStatus.OutsideWindow, _along, whole.OffsetMetres);
+        }
+
+        _misses = 0;
+        _along = whole.AlongMetres;
+        _at = at;
+        return new RouteMatch(RouteMatchStatus.OnRoute, _along, whole.OffsetMetres, Reanchored: true);
     }
 }
