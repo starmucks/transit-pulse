@@ -505,19 +505,23 @@ vehicle and time removed), HSL snapshot 4, service days of the hour ± 1. 14 hou
 31.10 10Z and 23Z, Sunday 01.11 12Z and 08.11 12Z, Monday 02.11 00Z, 04Z, 06Z, 10Z, 14Z, 18Z, 21Z, Tuesday 03.11 15Z,
 Wednesday 04.11 06Z, Thursday 05.11 14Z. 38 933 758 positions with a found trip and a shape, 25 922 trips.
 
-Two re-anchoring rules compared (thresholds unchanged: off route beyond 50 m, 30 m of noise behind the window):
-*any three* — three positions in a row on the line but outside the window place the vehicle anew; *forward* — the
-three must also have moved forward along the line by more than 30 m from their rearmost point, and a trip's first
-position goes on the first pass of the line within 50 m instead of the nearest one.
+**Why re-anchoring:** with the window only (off route beyond 50 m, 30 m of noise behind, 60 m/s + 100 m ahead), 18 251
+positions of 04.11 06Z (0.42 %, a quarter of all off route) lay on the line but outside the window, in 222 trips: the
+first position of the trip had landed on the wrong pass (a terminal loop, metro jumps).
 
-| Mode | Positions | On route, any three → forward | Off route | Outside window, forward | Re-anchors back, any three → forward |
-|---|---:|---:|---:|---:|---:|
-| Bus | 30 379 865 | 99.60 → 99.51 % | 0.40 % | 0.095 % | 1 059 → 333 |
-| Tram | 4 132 850 | 99.32 → 98.70 % | 0.66 % | 0.644 % | 286 → 112 |
-| Train | 2 767 164 | 89.69 → 89.18 % | 10.25 % | 0.566 % | 660 → 25 |
-| Metro | 1 646 203 | 98.92 → 98.69 % | 0.87 % | 0.447 % | 548 → 12 |
-| Ferry | 7 676 | 88.87 % | 11.13 % | 0 | 0 |
-| **All** | 38 933 758 | **98.83 → 98.65 %** | 1.15 % | 0.201 % | **2 553 → 482** |
+Two re-anchoring rules compared: *any three* — three positions in a row on the line but outside the window place the
+vehicle anew; *forward* (ADR-0011) — the three must also have moved forward along the line by more than 30 m from their
+rearmost point, a trip's first position goes on the first pass of the line within 50 m, and the window does not grow while
+the vehicle is seen on the line outside it.
+
+| Mode | Positions | On route, any three → forward | Off route | Outside window, forward | Re-anchors back, any three → forward | Re-anchors forward, forward |
+|---|---:|---:|---:|---:|---:|---:|
+| Bus | 30 379 865 | 99.60 → 99.51 % | 0.40 % | 0.094 % | 1 059 → 333 | 99 |
+| Tram | 4 132 850 | 99.32 → 98.69 % | 0.66 % | 0.647 % | 286 → 112 | 37 |
+| Train | 2 767 164 | 89.69 → 89.18 % | 10.25 % | 0.570 % | 660 → 25 | 126 |
+| Metro | 1 646 203 | 98.92 → 98.58 % | 0.87 % | 0.556 % | 548 → 12 | 553 |
+| Ferry | 7 676 | 88.87 % | 11.13 % | 0 | 0 | 0 |
+| **All** | 38 933 758 | **98.83 → 98.65 %** | 1.15 % | 0.206 % | **2 553 → 482** | 815 |
 
 Per trip, comparing the two rules:
 
@@ -525,35 +529,38 @@ Per trip, comparing the two rules:
   back again and again, ~100 m each time (30 m of noise + 50 m off route + the fixes of the row). Traced: train `90/6090`
   on `3001R` kept its journey after the run and drove back along the line for 7 min; the distance went back 32 times.
   With *forward* it keeps the distance it reached; the 209 trips have 94 steps back left.
-- **A single step back mid-trip** (715 trips: 465 buses, 179 metro): *any three* moved the distance back 45–110 m once;
+- **A single step back mid-trip** (678 trips: 480 buses, 135 metro): *any three* moved the distance back 45–110 m once;
   *forward* does not. Not traced one by one; the metro is known to repeat old fixes ("HSL repeats").
-- **Arriving at the terminal along the line's loop** (350 trips, mostly buses and trams): the first fixes are near the
+- **Arriving at the terminal along the line's loop** (368 trips, mostly buses and trams): the first fixes are near the
   loop, 110–280 m along and farther than 50 m from the line's start, so the first pass cannot help. *Forward* places the
-  vehicle anew only when it moves off: 127 of them wait over a minute at the first stop. Stop events (task 2.7) will show
+  vehicle anew only when it moves off: 120 of them wait over a minute at the first stop. Stop events (task 2.7) will show
   whether first departures are lost.
-- **A street the line drives both ways, passes flipping** (20 trips, 0.08 %): the nearest pass changes from fix to fix
+- **A street the line drives both ways, passes flipping** (39 trips, 0.15 %): the nearest pass changes from fix to fix
   and either rule re-anchors back and forth. Not solved; needs the direction of travel.
-- **Forward jumps** (148 trips, mostly metro, +300 to +850 m): positions that jump ahead of the window. Safe for stop
-  events (the distance grows), but stops in between may be missed.
+- **Jumps ahead** (mostly metro, +200 to +850 m): positions that jump past the window after standing still. Re-anchored
+  forward, and counted, since the window no longer grows while the vehicle is seen on the line; before that the growing
+  window took many of them silently.
+- **A single fix up to 100 m past the drivable distance** is taken, and a step back follows within a minute: 33 times in
+  14 hours. A 30 m margin instead of 100 m prevents that (2 left), but metro positions outside the window rose from 0.56 %
+  to 2.11 % and metro re-anchors from 565 to 4 661, so the margin stays at 100 m.
 - The fall in "on route" is positions that the false steps back used to count as on the line; they are outside the
   window now.
 - Trains are 10 % off route under both rules: wide station tracks (offsets of 50–58 m at stations) and journeys kept
-  after the run. Left to the off-route threshold per mode (task 2.6, run through the pipeline).
+  after the run. Left to the off-route threshold per mode.
 
 **The real pipeline.** Wednesday 2026-11-04 06:00 UTC replayed through Release builds of the Ingestor and the Processor
-(re-anchoring *forward*), on separate topics and a new group; counts from the metric `transitpulse.processor.route`,
-collected with `dotnet-counters`.
+(rule *forward*), on separate topics and a new group; counts from the metrics `transitpulse.processor.route` and
+`transitpulse.processor.reanchors`, collected with `dotnet-counters`.
 
-| | Result |
-|---|---:|
-| Positions published / with a found trip | 4 293 983 / 4 280 320 |
-| On route | 4 214 796 (**98.47 %**) |
-| Off route | 55 884 (1.31 %) |
-| Outside window | 9 640 (0.23 %) |
-| Without a shape | 0 |
-| Processor speed with trip lookup and route matching | about 102 000 messages/s (5-second samples, first and last left out) |
+| | Pipeline | Simulation of the same hour |
+|---|---:|---:|
+| Positions published / with a found trip | 4 293 983 / 4 280 320 | — / 4 312 099 |
+| On route | 4 214 318 (**98.46 %**) | 98.44 % |
+| Off route | 55 884 (1.31 %) | 1.30 % |
+| Outside window | 10 118 (0.24 %) | 0.26 % |
+| Re-anchors back / forward | 44 / 131 | 46 / 124 |
+| Processor speed, trip lookup and route matching | about 100 000 messages/s (5-second samples, first and last left out) | |
 
-- The simulation of the same hour gave 98.45 / 1.30 / 0.25 %; it reads 0.7 % more positions, since its deduplication is
-  simpler than the Ingestor's.
-- The filter alone ran at about 115 000 messages/s on another hour ("Processor throughput"), so matching costs little
-  here; the C2 target is 12 000 positions/s.
+- The simulation reads 0.7 % more positions, since its deduplication is simpler than the Ingestor's.
+- The filter alone ran at about 115 000 messages/s on another hour ("Processor throughput"); the two hours differ, so this
+  is no measure of what matching costs, only that the loop stays far above the C2 target of 12 000 positions/s.
