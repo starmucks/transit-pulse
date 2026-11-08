@@ -76,6 +76,22 @@ public sealed class ProcessorMetricsTests : IDisposable
         Assert.Equal(1, metrics.RouteMatches);
     }
 
+    // Like the verdicts and trip results: a status added without its tag would throw inside the loop and stop it.
+    [Fact]
+    public void Every_route_status_has_a_tag_of_its_own()
+    {
+        using var routes = new MetricCollector<long>(Factory, ProcessorMetrics.MeterName, "transitpulse.processor.route");
+        var metrics = new ProcessorMetrics(Factory);
+        var statuses = Enum.GetValues<RouteMatchStatus>();
+
+        foreach (var status in statuses)
+        {
+            metrics.Route(new RouteMatch(status, 0, 12));
+        }
+
+        Assert.Equal(statuses.Length, routes.GetMeasurementSnapshot().Select(m => m.Tags["status"]).Distinct().Count());
+    }
+
     [Theory]
     [InlineData(-120.0, "back")]
     [InlineData(450.0, "forward")]

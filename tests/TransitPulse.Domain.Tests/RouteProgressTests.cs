@@ -151,12 +151,23 @@ public sealed class RouteProgressTests
     }
 
     [Fact]
+    public void A_shape_read_again_shorter_than_the_distance_reached_ends_the_distance_at_its_end()
+    {
+        var progress = new RouteProgress();
+        Advance(progress, Trip(_straight), 2000, 0, 0);
+
+        var shorter = Advance(progress, Trip(Shape((0, 0), (1500, 0))), 1520, 0, 1);
+
+        Assert.Equal(new RouteMatch(RouteMatchStatus.OnRoute, 1500, 20), Rounded(shorter));
+    }
+
+    [Fact]
     public void A_vehicle_standing_near_a_later_pass_is_not_moved_there()
     {
         var progress = new RouteProgress();
         Advance(progress, Trip(_outAndBack), 700, 0, 0);
 
-        // 2 m from the way back at 1 720 m, outside the window: a window growing with time would reach it after ~17 s.
+        // 2 m from the way back at 1 720 m, outside the window: a window growing with time would reach it after ~15 s.
         var standing = Enumerable.Range(1, 30).Select(i => Advance(progress, Trip(_outAndBack), 300, 18, i)).ToList();
 
         Assert.All(standing, m => Assert.Equal(new RouteMatch(RouteMatchStatus.OutsideWindow, 700, 2), Rounded(m)));

@@ -37,7 +37,8 @@ public sealed class RouteProgress
 
     /// <summary>
     /// Added to the farthest drivable distance. Covers HSL metro, whose position stays put for seconds and then jumps ahead
-    /// (with 30 m, 2 % of metro positions fell outside the window); lets a single fix up to this far ahead through.
+    /// (with 30 m, 2 % of metro positions fell outside the window); lets a single fix up to this far past the drivable
+    /// distance through.
     /// </summary>
     public const double MarginMetres = 100;
 
@@ -70,7 +71,8 @@ public sealed class RouteProgress
 
         // Compared by id, not by instance: the schedule is read again every day and on every new snapshot, bringing new
         // instances of the same runs. The progress is kept and searched for on the new shape: starting over would put a
-        // vehicle mid-trip back on the line's first pass. If the new shape differs, the window misses and re-anchoring follows.
+        // vehicle mid-trip back on the line's first pass. A new shape that differs much usually makes the window miss, and
+        // re-anchoring follows; one shorter than the distance reached clamps it to its end.
         if (!string.Equals(_tripId, trip.TripId, StringComparison.Ordinal) || _serviceDate != trip.ServiceDate)
         {
             _tripId = trip.TripId;
@@ -79,6 +81,8 @@ public sealed class RouteProgress
             _along = 0;
             _misses = 0;
         }
+
+        _along = Math.Min(_along, shape.LengthMetres);
 
         ShapeProjection projection;
         if (_onLine)

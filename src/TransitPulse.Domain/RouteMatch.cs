@@ -12,14 +12,13 @@ namespace TransitPulse.Domain;
 /// <see cref="RouteMatchStatus.OutsideWindow"/> and a new placement; 0 when there is no shape.
 /// </param>
 /// <param name="ReanchoredByMetres">
-/// How far the vehicle was moved along the line when it was placed anew, negative when back; 0 when it was not. A placement
-/// anew always moves it, since the new pass lies outside the window around the old distance.
+/// How far the vehicle was moved along the line when it was placed anew; 0 when it was not. A placement anew always moves
+/// it, since the new pass lies outside the window around the old distance. Negative (back): the earlier placement was
+/// wrong, and anything that follows the distance (stop events) starts over for this trip. Positive (forward): the stops
+/// between the two distances were passed unseen.
 /// </param>
 public readonly record struct RouteMatch(RouteMatchStatus Status, double AlongMetres, double OffsetMetres, double ReanchoredByMetres = 0)
 {
-    /// <summary>
-    /// The earlier placement was wrong and the vehicle was placed anew, so the distance may have gone back: anything that
-    /// follows the distance (stop events) has to start over for this trip.
-    /// </summary>
+    /// <summary>The vehicle was placed anew on another pass of the line; <see cref="ReanchoredByMetres"/> says which way.</summary>
     public bool Reanchored => ReanchoredByMetres != 0;
 }
