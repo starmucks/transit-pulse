@@ -20,6 +20,7 @@ builder.Services.AddOptions<ProcessorKafkaOptions>()
 builder.Services.AddOptions<TripScheduleOptions>()
     .BindConfiguration(TripScheduleOptions.SectionName)
     .Validate(o => !string.IsNullOrWhiteSpace(o.FeedId), "Schedule:FeedId is required.")
+    .Validate(o => o.TimeZone is not null && TimeZoneInfo.TryFindSystemTimeZoneById(o.TimeZone, out _), "Schedule:TimeZone is not a known time zone id.")
     .Validate(o => o.RefreshInterval > TimeSpan.Zero, "Schedule:RefreshInterval must be positive.")
     .Validate(o => o.StartupWait >= TimeSpan.Zero, "Schedule:StartupWait must not be negative.")
     .ValidateOnStart();

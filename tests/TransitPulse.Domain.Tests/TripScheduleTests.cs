@@ -135,6 +135,9 @@ public sealed class TripScheduleTests
     [InlineData("1001/0/20261104/5:37:00")]
     [InlineData("1001/0/20261104/05-37-00")]
     [InlineData("1001/0/20261104/-5:37:00")]
+    [InlineData("/0/20261104/05:37:00")]
+    [InlineData("1001/0/20261104/05:60:00")]
+    [InlineData("1001/0/20261104/05:37:60")]
     public void Anything_else_is_malformed(string descriptor)
     {
         Assert.Equal(TripResolution.Malformed, Schedule().Find(descriptor, out _));

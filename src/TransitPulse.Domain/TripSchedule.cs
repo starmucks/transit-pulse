@@ -142,7 +142,8 @@ public sealed class TripSchedule
         }
 
         var direction = text[parts[1]];
-        if (direction is not "0" and not "1"
+        if (text[parts[0]].IsEmpty
+            || direction is not "0" and not "1"
             || !DateOnly.TryParseExact(text[parts[2]], "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date)
             || !TryParseTime(text[parts[3]], out startSeconds))
         {
@@ -161,7 +162,8 @@ public sealed class TripSchedule
         if (text.Length != 8 || text[2] != ':' || text[5] != ':'
             || !int.TryParse(text[..2], NumberStyles.None, CultureInfo.InvariantCulture, out var hours)
             || !int.TryParse(text[3..5], NumberStyles.None, CultureInfo.InvariantCulture, out var minutes)
-            || !int.TryParse(text[6..], NumberStyles.None, CultureInfo.InvariantCulture, out var secondsPart))
+            || !int.TryParse(text[6..], NumberStyles.None, CultureInfo.InvariantCulture, out var secondsPart)
+            || minutes > 59 || secondsPart > 59)
         {
             return false;
         }

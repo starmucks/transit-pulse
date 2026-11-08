@@ -32,6 +32,30 @@ public sealed class ProcessorMetricsTests : IDisposable
         Assert.Equal(1, metrics.Total(verdict));
     }
 
+    // The tags are arrays indexed by the enum: a value added without its tag would throw inside the loop and stop it.
+    [Fact]
+    public void Every_verdict_and_trip_result_has_a_tag_of_its_own()
+    {
+        using var messages = new MetricCollector<long>(Factory, ProcessorMetrics.MeterName, "transitpulse.processor.messages");
+        using var trips = new MetricCollector<long>(Factory, ProcessorMetrics.MeterName, "transitpulse.processor.trips");
+        var metrics = new ProcessorMetrics(Factory);
+        var verdicts = Enum.GetValues<MessageVerdict>();
+        var results = Enum.GetValues<TripResolution>();
+
+        foreach (var verdict in verdicts)
+        {
+            metrics.Message(verdict, null);
+        }
+
+        foreach (var result in results)
+        {
+            metrics.Trip(result);
+        }
+
+        Assert.Equal(verdicts.Length, messages.GetMeasurementSnapshot().Select(m => m.Tags["verdict"]).Distinct().Count());
+        Assert.Equal(results.Length, trips.GetMeasurementSnapshot().Select(m => m.Tags["result"]).Distinct().Count());
+    }
+
     [Theory]
     [InlineData(nameof(TripResolution.Found), "found")]
     [InlineData(nameof(TripResolution.NoDescriptor), "no_descriptor")]
