@@ -540,7 +540,7 @@ Per trip, comparing the two rules:
 - **Jumps ahead** (mostly metro, +200 to +850 m): positions that jump past the window after standing still. Re-anchored
   forward, and counted, since the window no longer grows while the vehicle is seen on the line; before that the growing
   window took many of them silently.
-- **A single fix up to 100 m past the drivable distance** is taken, and a step back follows within a minute: 33 times in
+- **A single fix 30–100 m past the drivable distance** is taken, and a step back follows within a minute: 33 times in
   14 hours. A 30 m margin instead of 100 m prevents that (2 left), but metro positions outside the window rose from 0.56 %
   to 2.11 % and metro re-anchors from 565 to 4 661, so the margin stays at 100 m.
 - The fall in "on route" is positions that the false steps back used to count as on the line; they are outside the
