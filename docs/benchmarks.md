@@ -357,6 +357,30 @@ row, measured 2026-11-02.
 - A snapshot whose file is already active is skipped by its SHA-256 without reading the zip; the broken HSL export of
   2026-10-27 02:30 is rejected with the same single problem as the check alone and is not read again by the Worker.
 
+## HSL location source
+
+Where the coordinates of an HFP `VP` message come from (field `loc`), stage 2, task 2.6. Archive hour 2026-11-04 06:00 UTC
+(08:00 in Helsinki, weekday peak), 5 579 194 `VP` messages, 5 536 948 of them with coordinates; repeats not removed;
+ferries (888 `GPS` positions) left out of the table.
+
+| Mode | `GPS` | `DR` (dead reckoning) | `MAN` | `ODO` |
+|---|---:|---:|---:|---:|
+| Bus | 3 352 660 | 39 846 | 1 603 | 7 298 |
+| Tram | 1 585 869 | 5 188 | 0 | 0 |
+| Metro | 0 | 0 | 239 639 | 0 |
+| Train | 292 971 | 496 | 0 | 10 490 |
+| **Share of positions** | 94.50 % | 0.82 % | 4.36 % | **0.32 %** |
+
+- **`ODO` is the next stop, not the vehicle.** While GPS is lost, the message carries the coordinates of the stop the
+  odometer counts towards (`stop` field), unchanged for 10–20 s, then the next stop's. Bus `12/1325` on trip 4736: its `ODO`
+  positions ran up to 1.3 km ahead, along the route, of its next GPS fix, under 30 s later; the archive got them about 2 min after
+  their `tst`. Kept, they would place a vehicle at a stop it has not reached, push its distance along the route forward,
+  and fake an arrival. The Ingestor drops them as `not_measured`.
+- Another 39 000 `ODO` messages an hour have no coordinates at all; they count as `not_measured` too, no longer as
+  `bad_location`.
+- **`MAN` is how the metro reports**, all of it: dropping every location that is not `GPS` would remove the metro. `DR` and
+  `MAN` stay; their offsets from the trip's line are measured with route matching (task 2.6).
+
 ## Trip lookup
 
 How many HSL positions find their GTFS trip by route, direction, service day and first departure (stage 2, task 2.5).
@@ -429,7 +453,8 @@ a new group, each with its own snapshot in Postgres. Counts come from the metric
 | Processor idle with the schedule, working set | 76 MiB |
 | Processor peak during the replay, working set | 102 and 114 MiB |
 
-Only the first departure of each run is loaded so far. Stops and shapes (tasks 2.6, 2.7) will add much more.
+Only the first departure of each run was loaded then. Shapes are measured below ("Shapes in the schedule"); stops come
+with task 2.7.
 
 **Reading the schedule.** The same query first took 1.3–24.5 s, and one read failed at the default 30 s timeout without a
 single row. `EXPLAIN (ANALYZE, BUFFERS)` showed why the time moved: once statistics exist, the planner may look up the first
@@ -445,3 +470,97 @@ through autovacuum and after a manual `ANALYZE`:
 
 All on a development PC, Postgres in Docker. A read touches about 40 000 blocks, so a slow disk with a cold cache will take
 much longer; this has not been measured on the target server.
+
+### Shapes in the schedule
+
+Task 2.6 loads each run's shape with the schedule: the runs query also returns `shape_id`, and a second query in the same
+transaction reads the points of those shapes. HSL snapshot 4, service days 2026-11-07 to 2026-11-09 (Saturday to Monday),
+development PC, Postgres in Docker, warm cache.
+
+| | Before (`main`) | With shapes |
+|---|---:|---:|
+| Runs | 57 010 | 57 010 |
+| Runs query, `EXPLAIN ANALYZE`, alternating, 3 runs each | 4.95 s (first, colder), 1.82, 1.50 s | 2.63, 1.50, 1.47 s |
+| Runs query plan | | identical, node by node (`EXPLAIN (COSTS OFF)` diff) |
+| Shapes / points read | | 982 of 1 233 / 370 162 of 468 449 |
+| Points query | | 163–182 ms, primary key index scan, no sort, ~7 000 buffers |
+| Whole read through `TripScheduleReader`, Release, after a warm-up | 1.38–1.60 s | 2.06–2.29 s |
+| Managed memory held by one schedule | 10.7 MiB | 19.7 MiB |
+
+- **Memory matches the arithmetic:** 370 162 points × 24 bytes (latitude, longitude, distance along, all `double`) is
+  8.5 MiB, plus one reference in each run; 9.0 MiB measured. Points take up to 1 355 per shape, 377 on average.
+- **`double` stays:** `float` coordinates would save under 3 MiB, at ~0.4 m precision. Not worth a second look while the
+  whole schedule is under 20 MiB.
+- **The extra 0.6 s is on the client,** not in Postgres (the points query takes 0.17 s): one `shape_id` string per point
+  and a copy of each run. A background read once a day; left as is.
+- Measured with a throwaway console program holding each loaded schedule, heap measured after a full collection.
+
+## Route matching
+
+How HSL positions are placed on their trip's line by `RouteProgress` (stage 2, task 2.6; ADR-0011).
+
+**How:** a throwaway console program running archive hours through the real `VehicleTrack`, `TripSchedule` and
+`RouteProgress`, not yet the whole pipeline. Positions as the Ingestor builds them (`loc` `ODO` dropped, duplicates by
+vehicle and time removed), HSL snapshot 4, service days of the hour ± 1. 14 hours chosen to cover the week: Saturday
+31.10 10Z and 23Z, Sunday 01.11 12Z and 08.11 12Z, Monday 02.11 00Z, 04Z, 06Z, 10Z, 14Z, 18Z, 21Z, Tuesday 03.11 15Z,
+Wednesday 04.11 06Z, Thursday 05.11 14Z. 38 933 758 positions with a found trip and a shape, 25 922 trips.
+
+**Why re-anchoring:** with the window only (off route beyond 50 m, 30 m of noise behind, 60 m/s + 100 m ahead), 18 251
+positions of 04.11 06Z (0.42 %, a quarter of all off route) lay on the line but outside the window, in 222 trips: the
+first position of the trip had landed on the wrong pass (a terminal loop, metro jumps).
+
+Two re-anchoring rules compared: *any three* — three positions in a row on the line but outside the window place the
+vehicle anew; *forward* (ADR-0011) — the three must also have moved forward along the line by more than 30 m from their
+rearmost point, a trip's first position goes on the first pass of the line within 50 m, and the window does not grow while
+the vehicle is seen on the line outside it.
+
+| Mode | Positions | On route, any three → forward | Off route | Outside window, forward | Re-anchors back, any three → forward | Re-anchors forward, forward |
+|---|---:|---:|---:|---:|---:|---:|
+| Bus | 30 379 865 | 99.60 → 99.51 % | 0.40 % | 0.094 % | 1 059 → 333 | 99 |
+| Tram | 4 132 850 | 99.32 → 98.69 % | 0.66 % | 0.647 % | 286 → 112 | 37 |
+| Train | 2 767 164 | 89.69 → 89.18 % | 10.25 % | 0.570 % | 660 → 25 | 126 |
+| Metro | 1 646 203 | 98.92 → 98.58 % | 0.87 % | 0.556 % | 548 → 12 | 553 |
+| Ferry | 7 676 | 88.87 % | 11.13 % | 0 | 0 | 0 |
+| **All** | 38 933 758 | **98.83 → 98.65 %** | 1.15 % | 0.206 % | **2 553 → 482** | 815 |
+
+Per trip, comparing the two rules:
+
+- **Repeated steps back** (209 trips: 84 buses, 52 metro, 38 trains, 35 trams): with *any three* the distance went
+  back again and again, ~100 m each time (30 m of noise + 50 m off route + the fixes of the row). Traced: train `90/6090`
+  on `3001R` kept its journey after the run and drove back along the line for 7 min; the distance went back 32 times.
+  With *forward* it keeps the distance it reached; the 209 trips have 94 steps back left.
+- **A single step back mid-trip** (678 trips: 480 buses, 135 metro): *any three* moved the distance back 45–110 m once;
+  *forward* does not. Not traced one by one; the metro is known to repeat old fixes ("HSL repeats").
+- **Arriving at the terminal along the line's loop** (368 trips, mostly buses and trams): the first fixes are near the
+  loop, 110–280 m along and farther than 50 m from the line's start, so the first pass cannot help. *Forward* places the
+  vehicle anew only when it moves off: 120 of them wait over a minute at the first stop. Stop events (task 2.7) will show
+  whether first departures are lost.
+- **A street the line drives both ways, passes flipping** (39 trips, 0.15 %): the nearest pass changes from fix to fix
+  and either rule re-anchors back and forth. Not solved; needs the direction of travel.
+- **Jumps ahead** (mostly metro, +200 to +850 m): positions that jump past the window after standing still. Re-anchored
+  forward, and counted, since the window no longer grows while the vehicle is seen on the line; before that the growing
+  window took many of them silently.
+- **A single fix 30–100 m past the drivable distance** is taken, and a step back follows within a minute: 33 times in
+  14 hours. A 30 m margin instead of 100 m prevents that (2 left), but metro positions outside the window rose from 0.56 %
+  to 2.11 % and metro re-anchors from 565 to 4 661, so the margin stays at 100 m.
+- The fall in "on route" is positions that the false steps back used to count as on the line; they are outside the
+  window now.
+- Trains are 10 % off route under both rules: wide station tracks (offsets of 50–58 m at stations) and journeys kept
+  after the run. Left to the off-route threshold per mode.
+
+**The real pipeline.** Wednesday 2026-11-04 06:00 UTC replayed through Release builds of the Ingestor and the Processor
+(rule *forward*), on separate topics and a new group; counts from the metrics `transitpulse.processor.route` and
+`transitpulse.processor.reanchors`, collected with `dotnet-counters`.
+
+| | Pipeline | Simulation of the same hour |
+|---|---:|---:|
+| Positions published / with a found trip | 4 293 983 / 4 280 320 | — / 4 312 099 |
+| On route | 4 214 318 (**98.46 %**) | 98.44 % |
+| Off route | 55 884 (1.31 %) | 1.30 % |
+| Outside window | 10 118 (0.24 %) | 0.26 % |
+| Re-anchors back / forward | 44 / 131 | 46 / 124 |
+| Processor speed, trip lookup and route matching | about 100 000 messages/s (5-second samples, first and last left out) | |
+
+- The simulation reads 0.7 % more positions, since its deduplication is simpler than the Ingestor's.
+- The filter alone ran at about 115 000 messages/s on another hour ("Processor throughput"); the two hours differ, so this
+  is no measure of what matching costs, only that the loop stays far above the C2 target of 12 000 positions/s.

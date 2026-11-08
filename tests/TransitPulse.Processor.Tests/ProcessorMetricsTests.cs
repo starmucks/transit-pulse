@@ -57,6 +57,56 @@ public sealed class ProcessorMetricsTests : IDisposable
     }
 
     [Theory]
+    [InlineData(nameof(RouteMatchStatus.OnRoute), "on_route", true)]
+    [InlineData(nameof(RouteMatchStatus.OffRoute), "off_route", true)]
+    [InlineData(nameof(RouteMatchStatus.NoShape), "no_shape", false)]
+    [InlineData(nameof(RouteMatchStatus.OutsideWindow), "outside_window", true)]
+    public void Each_route_status_is_counted_under_its_own_name_and_offsets_need_a_shape(string statusName, string name, bool hasOffset)
+    {
+        var status = Enum.Parse<RouteMatchStatus>(statusName);
+        using var routes = new MetricCollector<long>(Factory, ProcessorMetrics.MeterName, "transitpulse.processor.route");
+        using var offsets = new MetricCollector<double>(Factory, ProcessorMetrics.MeterName, "transitpulse.processor.route_offset");
+        var metrics = new ProcessorMetrics(Factory);
+
+        metrics.Route(new RouteMatch(status, 0, 12));
+
+        Assert.Equal(name, Assert.Single(routes.GetMeasurementSnapshot()).Tags["status"]);
+        Assert.Equal(hasOffset ? 1 : 0, offsets.GetMeasurementSnapshot().Count);
+        Assert.Equal(1, metrics.Total(status));
+        Assert.Equal(1, metrics.RouteMatches);
+    }
+
+    // Like the verdicts and trip results: a status added without its tag would throw inside the loop and stop it.
+    [Fact]
+    public void Every_route_status_has_a_tag_of_its_own()
+    {
+        using var routes = new MetricCollector<long>(Factory, ProcessorMetrics.MeterName, "transitpulse.processor.route");
+        var metrics = new ProcessorMetrics(Factory);
+        var statuses = Enum.GetValues<RouteMatchStatus>();
+
+        foreach (var status in statuses)
+        {
+            metrics.Route(new RouteMatch(status, 0, 12));
+        }
+
+        Assert.Equal(statuses.Length, routes.GetMeasurementSnapshot().Select(m => m.Tags["status"]).Distinct().Count());
+    }
+
+    [Theory]
+    [InlineData(-120.0, "back")]
+    [InlineData(450.0, "forward")]
+    public void A_placement_anew_is_counted_by_direction(double byMetres, string direction)
+    {
+        using var reanchors = new MetricCollector<long>(Factory, ProcessorMetrics.MeterName, "transitpulse.processor.reanchors");
+        var metrics = new ProcessorMetrics(Factory);
+
+        metrics.Route(new RouteMatch(RouteMatchStatus.OnRoute, 500, 3));
+        metrics.Route(new RouteMatch(RouteMatchStatus.OnRoute, 500, 3, ReanchoredByMetres: byMetres));
+
+        Assert.Equal(direction, Assert.Single(reanchors.GetMeasurementSnapshot()).Tags["direction"]);
+    }
+
+    [Theory]
     [InlineData(nameof(TripResolution.Found), "found")]
     [InlineData(nameof(TripResolution.NoDescriptor), "no_descriptor")]
     [InlineData(nameof(TripResolution.Malformed), "malformed")]

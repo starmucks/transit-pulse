@@ -26,6 +26,10 @@ internal sealed record HfpMessage(HfpVehiclePosition? VP);
 /// <param name="Dir">Direction, <c>1</c> or <c>2</c> (GTFS <c>direction_id</c> + 1).</param>
 /// <param name="Jrn">Journey number; <c>9999</c> marks a placeholder journey (e.g. a parked train).</param>
 /// <param name="Occu">Occupancy, 0–100: buses send only 0 or 100 (full), ferries a measured percentage.</param>
+/// <param name="Loc">
+/// Where the location comes from: <c>GPS</c>; <c>DR</c> (dead reckoning); <c>MAN</c> (metro, which has no GPS); or
+/// <c>ODO</c>, the coordinates of the next stop while the odometer counts towards it.
+/// </param>
 internal sealed record HfpVehiclePosition(
     DateTimeOffset? Tst,
     float? Spd,
@@ -38,7 +42,8 @@ internal sealed record HfpVehiclePosition(
     string? Route,
     string? Dir,
     int? Jrn,
-    int? Occu);
+    int? Occu,
+    string? Loc);
 
 /// <summary>Source-generated deserializer: no runtime reflection, so it works in the Native AOT build.</summary>
 [JsonSourceGenerationOptions(PropertyNameCaseInsensitive = true)]

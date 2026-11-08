@@ -130,6 +130,25 @@ public sealed class HslPositionNormalizerTests
     }
 
     [Fact]
+    public void Location_of_the_next_stop_from_the_odometer_is_skipped()
+    {
+        var drops = new DropLog();
+
+        Assert.Empty(Normalize(drops, ("loc", "\"ODO\"")));
+        Assert.Equal([PositionMetrics.NotMeasured], drops.Reasons);
+    }
+
+    // Metro has only MAN, and dead reckoning stays near the vehicle; their quality is measured by route matching.
+    [Theory]
+    [InlineData("\"DR\"")]
+    [InlineData("\"MAN\"")]
+    [InlineData("null")]
+    public void Other_location_sources_are_kept(string loc)
+    {
+        Assert.Single(Normalize(("loc", loc)));
+    }
+
+    [Fact]
     public void Vehicle_is_identified_by_the_topics_owner_not_by_the_payloads_operator()
     {
         var topic = "/hfp/v2/journey/ongoing/vp/bus/0020/00016/5583K/2/Aviapolis/15:26/4180212/5/60;24/28/96/06";

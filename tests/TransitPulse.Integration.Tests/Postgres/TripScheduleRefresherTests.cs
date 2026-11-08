@@ -26,7 +26,7 @@ public sealed class TripScheduleRefresherTests(PostgresFixture postgres) : IClas
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     private TripResolution? Lookup() =>
-        _schedule.Resolve(new VehiclePosition("hsl", "40/415", TramOnWednesday, "1009", 60.2, 24.9, null, null, null, null, _clock.GetUtcNow()));
+        _schedule.Resolve(new VehiclePosition("hsl", "40/415", TramOnWednesday, "1009", 60.2, 24.9, null, null, null, null, _clock.GetUtcNow()), out _);
 
     private int Loads => _log.Collector.GetSnapshot().Count(record => record.Message.StartsWith("Schedule of hsl:", StringComparison.Ordinal));
 

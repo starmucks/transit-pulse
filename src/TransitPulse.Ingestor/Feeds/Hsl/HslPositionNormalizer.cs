@@ -68,7 +68,16 @@ internal sealed class HslPositionNormalizer : IPositionNormalizer
             return [];
         }
 
-        // No coordinates (location from the odometer only): nothing to place on a map.
+        // ODO coordinates are those of the next stop, not of the vehicle: measured 2026-11-04 08:00 EET, 1.3 km ahead of
+        // the bus's next GPS fix. Kept, they would show the vehicle at a stop it has not reached and fake an arrival there.
+        // 0.32 % of positions in that hour, mostly buses and trains (docs/benchmarks.md, "HSL location source").
+        if (string.Equals(vp.Loc, "ODO", StringComparison.Ordinal))
+        {
+            drops.Drop(PositionMetrics.NotMeasured);
+            return [];
+        }
+
+        // No coordinates: nothing to place on a map.
         if (vp is not { Lat: { } lat, Lon: { } lon } || lat is < -90 or > 90 || lon is < -180 or > 180)
         {
             drops.Drop(PositionMetrics.BadLocation);

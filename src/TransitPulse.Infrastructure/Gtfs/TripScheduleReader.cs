@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Npgsql;
 using TransitPulse.Domain;
 
@@ -40,12 +41,12 @@ public sealed class TripScheduleReader(NpgsqlDataSource dataSource)
             FROM days d
             JOIN gtfs.calendar_dates x ON x.snapshot_id = $1 AND x.date = d.date AND x.added
         ), runs AS MATERIALIZED (
-            SELECT s.date, t.trip_id, t.route_id, t.direction_id
+            SELECT s.date, t.trip_id, t.route_id, t.direction_id, t.shape_id
             FROM services s
             JOIN gtfs.trips t ON t.snapshot_id = $1 AND t.service_id = s.service_id
             WHERE t.direction_id IS NOT NULL
         )
-        SELECT r.date, r.trip_id, r.route_id, r.direction_id, first_call.departure_sec
+        SELECT r.date, r.trip_id, r.route_id, r.direction_id, first_call.departure_sec, r.shape_id
         FROM runs r
         JOIN LATERAL (
             SELECT st.departure_sec
@@ -56,6 +57,11 @@ public sealed class TripScheduleReader(NpgsqlDataSource dataSource)
         ) first_call ON true
         WHERE first_call.departure_sec IS NOT NULL
         """;
+
+    // Separate from the runs: joined to them, each shape's points would come once per run, tens of thousands of times.
+    // The order is the primary key's, so the points of a shape arrive together and in sequence.
+    private const string PointsOfShapes =
+        "SELECT shape_id, lat, lon FROM gtfs.shapes WHERE snapshot_id = $1 AND shape_id = ANY($2) ORDER BY shape_id, sequence";
 
     /// <summary>Finds the feed's active snapshot: a cheap way to learn whether a loaded schedule is out of date.</summary>
     /// <param name="feedId">Feed, e.g. <c>hsl</c>.</param>
@@ -84,7 +90,9 @@ public sealed class TripScheduleReader(NpgsqlDataSource dataSource)
         // partitions between the two statements, and the read would quietly return nothing. The importer's drop uses
         // NOWAIT and tries again later, and ACCESS SHARE does not stop an import from attaching new partitions.
         await using (var keep = new NpgsqlCommand(
-            "LOCK TABLE gtfs.calendar, gtfs.calendar_dates, gtfs.trips, gtfs.stop_times IN ACCESS SHARE MODE", connection, transaction))
+            "LOCK TABLE gtfs.calendar, gtfs.calendar_dates, gtfs.trips, gtfs.stop_times, gtfs.shapes IN ACCESS SHARE MODE",
+            connection,
+            transaction))
         {
             await keep.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -95,6 +103,7 @@ public sealed class TripScheduleReader(NpgsqlDataSource dataSource)
         }
 
         var trips = new List<ScheduledTrip>();
+        var shapeIds = new List<string?>();
         await using (var select = new NpgsqlCommand(RunsOfDays, connection, transaction) { CommandTimeout = ReadTimeoutSeconds })
         {
             select.Parameters.Add(new NpgsqlParameter { Value = snapshotId });
@@ -108,11 +117,63 @@ public sealed class TripScheduleReader(NpgsqlDataSource dataSource)
                     reader.GetInt16(3),
                     reader.GetInt32(4),
                     reader.GetFieldValue<DateOnly>(0)));
+                shapeIds.Add(reader.IsDBNull(5) ? null : reader.GetString(5));
+            }
+        }
+
+        var shapes = await ReadShapesAsync(
+            connection, transaction, snapshotId, [.. shapeIds.OfType<string>().Distinct()], cancellationToken);
+        for (var i = 0; i < trips.Count; i++)
+        {
+            if (shapeIds[i] is { } shapeId && shapes.TryGetValue(shapeId, out var shape))
+            {
+                trips[i] = trips[i] with { Shape = shape };
             }
         }
 
         await transaction.CommitAsync(cancellationToken);
         return new LoadedTripSchedule(snapshotId, new TripSchedule(serviceDates, trips));
+    }
+
+    private static async Task<Dictionary<string, RouteShape>> ReadShapesAsync(
+        NpgsqlConnection connection, NpgsqlTransaction transaction, int snapshotId, string[] shapeIds, CancellationToken cancellationToken)
+    {
+        var shapes = new Dictionary<string, RouteShape>(shapeIds.Length, StringComparer.Ordinal);
+        var lats = new List<double>();
+        var lons = new List<double>();
+        string? current = null;
+
+        await using var select = new NpgsqlCommand(PointsOfShapes, connection, transaction) { CommandTimeout = ReadTimeoutSeconds };
+        select.Parameters.Add(new NpgsqlParameter { Value = snapshotId });
+        select.Parameters.Add(new NpgsqlParameter { Value = shapeIds });
+        await using var reader = await select.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var shapeId = reader.GetString(0);
+            if (shapeId != current)
+            {
+                AddShape(shapes, current, lats, lons);
+                current = shapeId;
+            }
+
+            lats.Add(reader.GetDouble(1));
+            lons.Add(reader.GetDouble(2));
+        }
+
+        AddShape(shapes, current, lats, lons);
+        return shapes;
+    }
+
+    private static void AddShape(Dictionary<string, RouteShape> shapes, string? shapeId, List<double> lats, List<double> lons)
+    {
+        // A single point is no line to project onto: its trips go without a shape rather than failing the whole read.
+        if (shapeId is not null && lats.Count >= 2)
+        {
+            shapes.Add(shapeId, new RouteShape(CollectionsMarshal.AsSpan(lats), CollectionsMarshal.AsSpan(lons)));
+        }
+
+        lats.Clear();
+        lons.Clear();
     }
 
     private static async Task<int?> ActiveSnapshotAsync(NpgsqlConnection connection, string feedId, CancellationToken cancellationToken)

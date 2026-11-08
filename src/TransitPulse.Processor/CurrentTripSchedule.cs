@@ -18,14 +18,16 @@ internal sealed class CurrentTripSchedule(string feedId)
 
     /// <summary>Looks up a position's trip.</summary>
     /// <param name="position">The position.</param>
+    /// <param name="trip">The scheduled run when the result is <see cref="TripResolution.Found"/>, otherwise <see langword="null"/>.</param>
     /// <returns>The result, or <see langword="null"/> for a feed without a schedule: its trip ids mean something else.</returns>
-    public TripResolution? Resolve(VehiclePosition position)
+    public TripResolution? Resolve(VehiclePosition position, out ScheduledTrip? trip)
     {
+        trip = null;
         if (!string.Equals(position.FeedId, feedId, StringComparison.Ordinal))
         {
             return null;
         }
 
-        return Volatile.Read(ref _schedule) is { } schedule ? schedule.Find(position.TripId, out _) : TripResolution.NoSchedule;
+        return Volatile.Read(ref _schedule) is { } schedule ? schedule.Find(position.TripId, out trip) : TripResolution.NoSchedule;
     }
 }
