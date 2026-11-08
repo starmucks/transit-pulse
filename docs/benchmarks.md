@@ -494,3 +494,48 @@ development PC, Postgres in Docker, warm cache.
 - **The extra 0.6 s is on the client,** not in Postgres (the points query takes 0.17 s): one `shape_id` string per point
   and a copy of each run. A background read once a day; left as is.
 - Measured with a throwaway console program holding each loaded schedule, heap measured after a full collection.
+
+## Route matching
+
+How HSL positions are placed on their trip's line by `RouteProgress` (stage 2, task 2.6; ADR-0011).
+
+**How:** a throwaway console program running archive hours through the real `VehicleTrack`, `TripSchedule` and
+`RouteProgress`, not yet the whole pipeline. Positions as the Ingestor builds them (`loc` `ODO` dropped, duplicates by
+vehicle and time removed), HSL snapshot 4, service days of the hour ± 1. 14 hours chosen to cover the week: Saturday
+31.10 10Z and 23Z, Sunday 01.11 12Z and 08.11 12Z, Monday 02.11 00Z, 04Z, 06Z, 10Z, 14Z, 18Z, 21Z, Tuesday 03.11 15Z,
+Wednesday 04.11 06Z, Thursday 05.11 14Z. 38 933 758 positions with a found trip and a shape, 25 922 trips.
+
+Two re-anchoring rules compared (thresholds unchanged: off route beyond 50 m, 30 m of noise behind the window):
+*any three* — three positions in a row on the line but outside the window place the vehicle anew; *forward* — the
+three must also have moved forward along the line by more than 30 m from their rearmost point, and a trip's first
+position goes on the first pass of the line within 50 m instead of the nearest one.
+
+| Mode | Positions | On route, any three → forward | Off route | Outside window, forward | Re-anchors back, any three → forward |
+|---|---:|---:|---:|---:|---:|
+| Bus | 30 379 865 | 99.60 → 99.51 % | 0.40 % | 0.095 % | 1 059 → 333 |
+| Tram | 4 132 850 | 99.32 → 98.70 % | 0.66 % | 0.644 % | 286 → 112 |
+| Train | 2 767 164 | 89.69 → 89.18 % | 10.25 % | 0.566 % | 660 → 25 |
+| Metro | 1 646 203 | 98.92 → 98.69 % | 0.87 % | 0.447 % | 548 → 12 |
+| Ferry | 7 676 | 88.87 % | 11.13 % | 0 | 0 |
+| **All** | 38 933 758 | **98.83 → 98.65 %** | 1.15 % | 0.201 % | **2 553 → 482** |
+
+Per trip, comparing the two rules:
+
+- **Repeated steps back** (209 trips: 84 buses, 52 metro, 38 trains, 35 trams): with *any three* the distance went
+  back again and again, ~100 m each time (30 m of noise + 50 m off route + the fixes of the row). Traced: train `90/6090`
+  on `3001R` kept its journey after the run and drove back along the line for 7 min; the distance went back 32 times.
+  With *forward* it keeps the distance it reached; the 209 trips have 94 steps back left.
+- **A single step back mid-trip** (715 trips: 465 buses, 179 metro): *any three* moved the distance back 45–110 m once;
+  *forward* does not. Not traced one by one; the metro is known to repeat old fixes ("HSL repeats").
+- **Arriving at the terminal along the line's loop** (350 trips, mostly buses and trams): the first fixes are near the
+  loop, 110–280 m along and farther than 50 m from the line's start, so the first pass cannot help. *Forward* places the
+  vehicle anew only when it moves off: 127 of them wait over a minute at the first stop. Stop events (task 2.7) will show
+  whether first departures are lost.
+- **A street the line drives both ways, passes flipping** (20 trips, 0.08 %): the nearest pass changes from fix to fix
+  and either rule re-anchors back and forth. Not solved; needs the direction of travel.
+- **Forward jumps** (148 trips, mostly metro, +300 to +850 m): positions that jump ahead of the window. Safe for stop
+  events (the distance grows), but stops in between may be missed.
+- The fall in "on route" is positions that the false steps back used to count as on the line; they are outside the
+  window now.
+- Trains are 10 % off route under both rules: wide station tracks (offsets of 50–58 m at stations) and journeys kept
+  after the run. Left to the off-route threshold per mode (task 2.6, run through the pipeline).
