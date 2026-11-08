@@ -539,3 +539,21 @@ Per trip, comparing the two rules:
   window now.
 - Trains are 10 % off route under both rules: wide station tracks (offsets of 50–58 m at stations) and journeys kept
   after the run. Left to the off-route threshold per mode (task 2.6, run through the pipeline).
+
+**The real pipeline.** Wednesday 2026-11-04 06:00 UTC replayed through Release builds of the Ingestor and the Processor
+(re-anchoring *forward*), on separate topics and a new group; counts from the metric `transitpulse.processor.route`,
+collected with `dotnet-counters`.
+
+| | Result |
+|---|---:|
+| Positions published / with a found trip | 4 293 983 / 4 280 320 |
+| On route | 4 214 796 (**98.47 %**) |
+| Off route | 55 884 (1.31 %) |
+| Outside window | 9 640 (0.23 %) |
+| Without a shape | 0 |
+| Processor speed with trip lookup and route matching | about 102 000 messages/s (5-second samples, first and last left out) |
+
+- The simulation of the same hour gave 98.45 / 1.30 / 0.25 %; it reads 0.7 % more positions, since its deduplication is
+  simpler than the Ingestor's.
+- The filter alone ran at about 115 000 messages/s on another hour ("Processor throughput"), so matching costs little
+  here; the C2 target is 12 000 positions/s.
