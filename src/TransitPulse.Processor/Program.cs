@@ -21,6 +21,7 @@ builder.Services.AddOptions<TripScheduleOptions>()
     .BindConfiguration(TripScheduleOptions.SectionName)
     .Validate(o => !string.IsNullOrWhiteSpace(o.FeedId), "Schedule:FeedId is required.")
     .Validate(o => o.RefreshInterval > TimeSpan.Zero, "Schedule:RefreshInterval must be positive.")
+    .Validate(o => o.StartupWait >= TimeSpan.Zero, "Schedule:StartupWait must not be negative.")
     .ValidateOnStart();
 builder.Services.AddSingleton(provider => new TripScheduleReader(provider.GetRequiredService<NpgsqlDataSource>()));
 builder.Services.AddSingleton(provider => new CurrentTripSchedule(provider.GetRequiredService<IOptions<TripScheduleOptions>>().Value.FeedId));

@@ -16,6 +16,11 @@ internal sealed class TripScheduleOptions
     public TimeSpan RefreshInterval { get; set; } = TimeSpan.FromMinutes(1);
 
     /// <summary>
+    /// How long the start waits for the first read before the stream begins without a schedule; the read goes on.
+    /// </summary>
+    public TimeSpan StartupWait { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// A fixed "today" for replaying an old archive hour, whose positions would otherwise fall outside the service days of
     /// the real today. Unset in normal work.
     /// </summary>

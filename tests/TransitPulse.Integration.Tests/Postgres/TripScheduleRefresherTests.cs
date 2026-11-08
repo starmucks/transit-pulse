@@ -41,6 +41,34 @@ public sealed class TripScheduleRefresherTests(PostgresFixture postgres) : IClas
         await refresher.StopAsync(Ct);
     }
 
+    [Fact]
+    public async Task Slow_first_read_releases_the_start_after_the_wait_and_lands_later()
+    {
+        var database = await ImportedDatabaseAsync();
+        using var refresher = Refresher(database, new TripScheduleOptions { StartupWait = TimeSpan.FromSeconds(30) });
+
+        // An open transaction holding trips exclusively: the reader's LOCK TABLE queues behind it.
+        await using var blocker = await database.OpenConnectionAsync(Ct);
+        await using var transaction = await blocker.BeginTransactionAsync(Ct);
+        await using (var hold = new NpgsqlCommand("LOCK TABLE gtfs.trips IN ACCESS EXCLUSIVE MODE", blocker, transaction))
+        {
+            await hold.ExecuteNonQueryAsync(Ct);
+        }
+
+        var start = refresher.StartAsync(Ct);
+        Assert.False(start.IsCompleted);
+        _clock.Advance(TimeSpan.FromSeconds(30));
+        await start.WaitAsync(TimeSpan.FromSeconds(10), Ct); // a start that waits for the read would hang here
+
+        Assert.Equal(TripResolution.NoSchedule, Lookup());
+        Assert.Contains(_log.Collector.GetSnapshot(), record => record.Message.StartsWith("Schedule of hsl still being read", StringComparison.Ordinal));
+
+        await transaction.RollbackAsync(Ct);
+        await WaitUntilAsync(() => Lookup() == TripResolution.Found);
+        Assert.Equal(1, Loads);
+        await refresher.StopAsync(Ct);
+    }
+
     [Theory]
     [InlineData("2026-11-03T12:00:00Z", TripResolution.Found)] // tomorrow
     [InlineData("2026-11-05T12:00:00Z", TripResolution.Found)] // yesterday
@@ -167,6 +195,17 @@ public sealed class TripScheduleRefresherTests(PostgresFixture postgres) : IClas
     }
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);
+
+    // The read runs in the background on real database time, not on the fake clock.
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!condition())
+        {
+            Assert.True(DateTime.UtcNow < deadline, "The condition did not come true within 10 s.");
+            await Task.Delay(50, Ct);
+        }
+    }
 
     private TripScheduleRefresher Refresher(NpgsqlDataSource database, TripScheduleOptions? options = null) =>
         new(new TripScheduleReader(database), _schedule, Options.Create(options ?? new TripScheduleOptions()), _clock, _log);

@@ -13,7 +13,7 @@
   wait for the broker.
 - **The stream never waits for the schedule.** `TripScheduleRefresher` builds a new `TripSchedule` off the loop and swaps it in
   whole; a failed read leaves the old one, or `no_schedule`. Never query Postgres from the loop, and never fail the loop over
-  a schedule.
+  a schedule. The one wait is at start, bounded by `Schedule:StartupWait`; a longer first read finishes in the background.
 - **Group by line through the found trip,** not by `VehiclePosition.RouteId`: HFP sends route variants and codes of trams not
   in service there (`docs/benchmarks.md`, "Trip lookup").
 - **State belongs to a partition:** it is dropped when the partition is revoked or lost. A lost partition is never committed:

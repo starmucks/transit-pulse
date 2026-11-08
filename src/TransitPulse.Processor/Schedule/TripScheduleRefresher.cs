@@ -26,24 +26,44 @@ internal sealed partial class TripScheduleRefresher(
     private readonly TripScheduleOptions _options = options.Value;
     private readonly TimeZoneInfo _timeZone = TimeZoneInfo.FindSystemTimeZoneById(options.Value.TimeZone);
 
+    // Completed when the first read ends, whatever its outcome.
+    private readonly TaskCompletionSource _firstRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     // What the current schedule was read for. Touched by one refresh at a time.
     private int? _loadedSnapshot;
     private DateOnly? _loadedToday;
 
     /// <inheritdoc />
     /// <remarks>
-    /// The first load happens here, not in <see cref="ExecuteAsync"/>: hosted services start one after another, so the loop
-    /// that starts next does not spend its first messages without a schedule.
+    /// Waits for the first read, at most <see cref="TripScheduleOptions.StartupWait"/>: hosted services start one after
+    /// another, so the loop that starts next does not spend its first messages without a schedule, yet a slow database
+    /// delays the stream by no more than that. A read still running goes on in the background.
     /// </remarks>
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
-        await RefreshAsync(cancellationToken);
         await base.StartAsync(cancellationToken);
+        try
+        {
+            await _firstRead.Task.WaitAsync(_options.StartupWait, timeProvider, cancellationToken);
+        }
+        catch (TimeoutException)
+        {
+            LogStillReading(_options.FeedId, _options.StartupWait);
+        }
     }
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        try
+        {
+            await RefreshAsync(stoppingToken);
+        }
+        finally
+        {
+            _firstRead.TrySetResult();
+        }
+
         using var timer = new PeriodicTimer(_options.RefreshInterval, timeProvider);
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
@@ -100,6 +120,9 @@ internal sealed partial class TripScheduleRefresher(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "No active snapshot of {Feed} yet: positions go on without a trip")]
     private partial void LogNoSnapshot(string feed);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Schedule of {Feed} still being read after {Wait}: positions start without a trip")]
+    private partial void LogStillReading(string feed, TimeSpan wait);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Could not read the schedule of {Feed}; will try again")]
     private partial void LogFailed(Exception exception, string feed);
