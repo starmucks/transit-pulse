@@ -126,11 +126,16 @@ internal sealed partial class PositionConsumer(
             _partitions.Add(partition, state);
         }
 
-        var (verdict, trip) = state.Process(result.Offset.Value, result.Message.Key, result.Message.Value);
+        var (verdict, trip, route) = state.Process(result.Offset.Value, result.Message.Key, result.Message.Value);
         metrics.Message(verdict, LagSeconds(result.Message.Timestamp));
         if (trip is { } found)
         {
             metrics.Trip(found);
+        }
+
+        if (route is { } placed)
+        {
+            metrics.Route(placed);
         }
 
         if (verdict == MessageVerdict.Accepted)
@@ -175,7 +180,8 @@ internal sealed partial class PositionConsumer(
         var (accepted, outOfOrder) = (metrics.Total(MessageVerdict.Accepted), metrics.Total(MessageVerdict.OutOfOrder));
         var (jumps, unreadable) = (metrics.Total(MessageVerdict.ImpossibleJump), metrics.Total(MessageVerdict.Unreadable));
         var (tripsFound, tripLookups) = (metrics.Total(TripResolution.Found), metrics.TripLookups);
-        LogProgress(accepted, outOfOrder, jumps, unreadable, tripsFound, tripLookups);
+        var (onRoute, routeMatches) = (metrics.Total(RouteMatchStatus.OnRoute), metrics.RouteMatches);
+        LogProgress(accepted, outOfOrder, jumps, unreadable, tripsFound, tripLookups, onRoute, routeMatches);
     }
 
     // Blocks while the producer's buffer is full, which stops the reading too: the broker being down holds the input back
@@ -355,8 +361,9 @@ internal sealed partial class PositionConsumer(
         LogBrokerError(error.Code, error.Reason);
     }
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Since the start: {Accepted} accepted, {OutOfOrder} out of order, {Jumps} impossible jumps, {Unreadable} unreadable; trips found for {TripsFound} of {TripLookups}")]
-    private partial void LogProgress(long accepted, long outOfOrder, long jumps, long unreadable, long tripsFound, long tripLookups);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Since the start: {Accepted} accepted, {OutOfOrder} out of order, {Jumps} impossible jumps, {Unreadable} unreadable; trips found for {TripsFound} of {TripLookups}; on the trip's line {OnRoute} of {RouteMatches}")]
+    private partial void LogProgress(
+        long accepted, long outOfOrder, long jumps, long unreadable, long tripsFound, long tripLookups, long onRoute, long routeMatches);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Partitions assigned: {Partitions}")]
     private partial void LogAssigned(List<int> partitions);

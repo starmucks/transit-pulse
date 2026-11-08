@@ -10,7 +10,7 @@ namespace TransitPulse.Processor;
 /// <param name="schedule">Where accepted positions look up their trips.</param>
 internal sealed class PartitionState(CurrentTripSchedule schedule)
 {
-    private readonly Dictionary<string, VehicleTrack> _tracks = [];
+    private readonly Dictionary<string, VehicleState> _vehicles = [];
     private long? _committedOffset;
 
     /// <summary>The offset to resume from: one past the last message processed, as Kafka expects a commit to be.</summary>
@@ -23,7 +23,7 @@ internal sealed class PartitionState(CurrentTripSchedule schedule)
     /// <param name="offset">The message's offset.</param>
     /// <param name="key">The message's key: identifies the vehicle within the system.</param>
     /// <param name="value">The message's value, written by <see cref="PositionMessage.Value"/>.</param>
-    /// <returns>The verdict and, for an accepted position, what the trip lookup found.</returns>
+    /// <returns>The verdict and, for an accepted position, what the trip lookup found and where on the trip's line it lies.</returns>
     public ProcessedMessage Process(long offset, string? key, ReadOnlySpan<byte> value)
     {
         // An unreadable message moves the offset too: it would fail the same way on every retry and block the partition.
@@ -34,15 +34,15 @@ internal sealed class PartitionState(CurrentTripSchedule schedule)
             return new ProcessedMessage(MessageVerdict.Unreadable, null);
         }
 
-        if (!_tracks.TryGetValue(key, out var track))
+        if (!_vehicles.TryGetValue(key, out var vehicle))
         {
-            track = new VehicleTrack();
-            _tracks.Add(key, track);
+            vehicle = new VehicleState();
+            _vehicles.Add(key, vehicle);
         }
 
-        return track.Check(position) switch
+        return vehicle.Track.Check(position) switch
         {
-            PositionCheck.Accepted => new ProcessedMessage(MessageVerdict.Accepted, schedule.Resolve(position)),
+            PositionCheck.Accepted => Accept(vehicle, position),
             PositionCheck.OutOfOrder => new ProcessedMessage(MessageVerdict.OutOfOrder, null),
             PositionCheck.ImpossibleJump => new ProcessedMessage(MessageVerdict.ImpossibleJump, null),
             var check => throw new InvalidOperationException($"Unknown position check {check}."),
@@ -52,6 +52,14 @@ internal sealed class PartitionState(CurrentTripSchedule schedule)
     /// <summary>Records a successful commit.</summary>
     /// <param name="offset">The committed offset: the value <see cref="NextOffset"/> had when the commit was made.</param>
     public void MarkCommitted(long offset) => _committedOffset = offset;
+
+    // A position without a found trip leaves the progress as it was: the vehicle may be back on the same trip next time.
+    private ProcessedMessage Accept(VehicleState vehicle, VehiclePosition position)
+    {
+        var resolution = schedule.Resolve(position, out var trip);
+        RouteMatch? route = trip is null ? null : vehicle.Route.Advance(trip, position.Lat, position.Lon, position.ObservedAt);
+        return new ProcessedMessage(MessageVerdict.Accepted, resolution, route);
+    }
 
     private static bool TryParse(ReadOnlySpan<byte> value, out VehiclePosition position)
     {
@@ -65,5 +73,13 @@ internal sealed class PartitionState(CurrentTripSchedule schedule)
             position = null!;
             return false;
         }
+    }
+
+    // Everything kept about one vehicle, in one place: one lookup per message.
+    private sealed class VehicleState
+    {
+        public VehicleTrack Track { get; } = new();
+
+        public RouteProgress Route { get; } = new();
     }
 }

@@ -33,11 +33,22 @@ internal sealed class ProcessorMetrics
         new("result", "no_schedule"),
     ];
 
+    // In the order of RouteMatchStatus.
+    private static readonly KeyValuePair<string, object?>[] _routeTags =
+    [
+        new("status", "on_route"),
+        new("status", "off_route"),
+        new("status", "no_shape"),
+    ];
+
     private readonly Counter<long> _messages;
     private readonly Counter<long> _trips;
+    private readonly Counter<long> _routes;
     private readonly Histogram<double> _lagTime;
+    private readonly Histogram<double> _routeOffset;
     private readonly long[] _totals = new long[_verdictTags.Length];
     private readonly long[] _tripTotals = new long[_tripTags.Length];
+    private readonly long[] _routeTotals = new long[_routeTags.Length];
 
     // Replaced as a whole by the loop, read by the exporter's thread.
     private Measurement<long>[] _lag = [];
@@ -56,6 +67,14 @@ internal sealed class ProcessorMetrics
             null,
             // The default boundaries start at 5: "under 1 s", the stage's target, would fall into a single bucket.
             new InstrumentAdvice<double> { HistogramBucketBoundaries = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 300, 1800] });
+        _routes = meter.CreateCounter<long>("transitpulse.processor.route", "{position}", "Positions with a found trip, by whether they lie on the trip's line.");
+        _routeOffset = meter.CreateHistogram(
+            "transitpulse.processor.route_offset",
+            "m",
+            "Distance from a position to its trip's line, where it was searched.",
+            null,
+            // Dense around the off-route threshold, which is to be chosen from this distribution.
+            new InstrumentAdvice<double> { HistogramBucketBoundaries = [5, 10, 20, 30, 50, 75, 100, 200, 500, 1000] });
         meter.CreateObservableGauge("transitpulse.processor.lag", () => Volatile.Read(ref _lag), "{message}", "Messages in a partition not read yet.");
     }
 
@@ -80,6 +99,25 @@ internal sealed class ProcessorMetrics
         _tripTotals[(int)result]++;
         _trips.Add(1, _tripTags[(int)result]);
     }
+
+    /// <summary>Counts where a position was placed on its trip's line. Called by the loop only.</summary>
+    /// <param name="match">The placement.</param>
+    public void Route(RouteMatch match)
+    {
+        _routeTotals[(int)match.Status]++;
+        _routes.Add(1, _routeTags[(int)match.Status]);
+        if (match.Status != RouteMatchStatus.NoShape)
+        {
+            _routeOffset.Record(match.OffsetMetres);
+        }
+    }
+
+    /// <summary>Placements with this status since the start. Called by the loop only.</summary>
+    /// <param name="status">The status.</param>
+    public long Total(RouteMatchStatus status) => _routeTotals[(int)status];
+
+    /// <summary>All placements since the start. Called by the loop only.</summary>
+    public long RouteMatches => _routeTotals.Sum();
 
     /// <summary>Messages with this verdict since the start. Called by the loop only.</summary>
     /// <param name="verdict">The verdict.</param>

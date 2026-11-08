@@ -56,6 +56,25 @@ public sealed class ProcessorMetricsTests : IDisposable
         Assert.Equal(results.Length, trips.GetMeasurementSnapshot().Select(m => m.Tags["result"]).Distinct().Count());
     }
 
+    [Fact]
+    public void Every_route_status_has_a_tag_and_only_placed_positions_record_an_offset()
+    {
+        using var routes = new MetricCollector<long>(Factory, ProcessorMetrics.MeterName, "transitpulse.processor.route");
+        using var offsets = new MetricCollector<double>(Factory, ProcessorMetrics.MeterName, "transitpulse.processor.route_offset");
+        var metrics = new ProcessorMetrics(Factory);
+        var statuses = Enum.GetValues<RouteMatchStatus>();
+
+        foreach (var status in statuses)
+        {
+            metrics.Route(new RouteMatch(status, 0, 12));
+        }
+
+        Assert.Equal(statuses.Length, routes.GetMeasurementSnapshot().Select(m => m.Tags["status"]).Distinct().Count());
+        Assert.Equal([12.0, 12.0], offsets.GetMeasurementSnapshot().Select(m => m.Value));
+        Assert.Equal(1, metrics.Total(RouteMatchStatus.OffRoute));
+        Assert.Equal(statuses.Length, metrics.RouteMatches);
+    }
+
     [Theory]
     [InlineData(nameof(TripResolution.Found), "found")]
     [InlineData(nameof(TripResolution.NoDescriptor), "no_descriptor")]

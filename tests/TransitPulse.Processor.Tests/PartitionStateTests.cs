@@ -16,11 +16,14 @@ public sealed class PartitionStateTests
 
     private static PartitionState NewState() => new(new CurrentTripSchedule("hsl"));
 
-    private static TripSchedule ScheduleOf(int startHour)
+    private static TripSchedule ScheduleOf(int startHour, RouteShape? shape = null)
     {
         DateOnly day = new(2026, 11, 5);
-        return new([day], [new ScheduledTrip($"1009_{startHour}", "1009", 0, startHour * 3600, day)]);
+        return new([day], [new ScheduledTrip($"1009_{startHour}", "1009", 0, startHour * 3600, day, shape)]);
     }
+
+    // A line running east along a parallel; the messages lie at 60.2° N, 24.9° E.
+    private static RouteShape LineAt(double lat) => new([lat, lat], [24.8, 25.0]);
 
     [Fact]
     public void Accepted_position_looks_up_its_trip()
@@ -32,8 +35,34 @@ public sealed class PartitionStateTests
         var found = state.Process(0, Vehicle, OnTrip("hsl", "1009/0/20261105/14:00:00"));
         var missed = state.Process(1, Vehicle, OnTrip("hsl", "9999/0/20261105/14:00:00", seconds: 1));
 
-        Assert.Equal(new ProcessedMessage(MessageVerdict.Accepted, TripResolution.Found), found);
+        Assert.Equal(new ProcessedMessage(MessageVerdict.Accepted, TripResolution.Found, new RouteMatch(RouteMatchStatus.NoShape, 0, 0)), found);
         Assert.Equal(new ProcessedMessage(MessageVerdict.Accepted, TripResolution.RouteUnknown), missed);
+    }
+
+    [Fact]
+    public void Position_of_a_found_trip_is_placed_on_its_line()
+    {
+        var schedule = new CurrentTripSchedule("hsl");
+        schedule.Replace(ScheduleOf(14, LineAt(60.2)));
+
+        var route = new PartitionState(schedule).Process(0, Vehicle, OnTrip("hsl", "1009/0/20261105/14:00:00")).Route!.Value;
+
+        // 0.1° of longitude at 60.2° N.
+        Assert.Equal(RouteMatchStatus.OnRoute, route.Status);
+        Assert.Equal(5_526, route.AlongMetres, tolerance: 10);
+        Assert.Equal(0, route.OffsetMetres, tolerance: 0.5);
+    }
+
+    [Fact]
+    public void Position_far_from_its_trip_line_is_off_route()
+    {
+        var schedule = new CurrentTripSchedule("hsl");
+        schedule.Replace(ScheduleOf(14, LineAt(60.25)));
+
+        var route = new PartitionState(schedule).Process(0, Vehicle, OnTrip("hsl", "1009/0/20261105/14:00:00")).Route!.Value;
+
+        Assert.Equal(RouteMatchStatus.OffRoute, route.Status);
+        Assert.Equal(5_560, route.OffsetMetres, tolerance: 10);
     }
 
     [Fact]
