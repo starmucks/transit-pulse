@@ -54,6 +54,25 @@ public sealed class PartitionStateTests
     }
 
     [Fact]
+    public void Progress_on_the_line_is_kept_across_messages_and_a_position_without_a_trip_leaves_it()
+    {
+        // A line running north along the messages' meridian.
+        var schedule = new CurrentTripSchedule("hsl");
+        schedule.Replace(ScheduleOf(14, new RouteShape([60.1, 60.3], [24.9, 24.9])));
+        var state = new PartitionState(schedule);
+
+        var first = state.Process(0, Vehicle, OnTrip("hsl", "1009/0/20261105/14:00:00", seconds: 0, lat: 60.201)).Route!.Value;
+        var parked = state.Process(1, Vehicle, Message(1, lat: 60.2009));
+
+        // 22 m back is GPS noise for a vehicle with progress; a vehicle starting over would be placed there.
+        var next = state.Process(2, Vehicle, OnTrip("hsl", "1009/0/20261105/14:00:00", seconds: 2, lat: 60.2008)).Route!.Value;
+
+        Assert.Null(parked.Route);
+        Assert.Equal(RouteMatchStatus.OnRoute, next.Status);
+        Assert.Equal(first.AlongMetres, next.AlongMetres);
+    }
+
+    [Fact]
     public void Position_far_from_its_trip_line_is_off_route()
     {
         var schedule = new CurrentTripSchedule("hsl");
