@@ -12,8 +12,10 @@ namespace TransitPulse.Infrastructure.Gtfs;
 /// once no reader holds the tables.
 /// </summary>
 /// <remarks>
-/// "Never a mix" holds for a reader that picks the feed's active <c>snapshot_id</c> once and filters by it, or reads in
-/// one REPEATABLE READ transaction.
+/// "Never a mix" needs the reader to keep the version it chose: in one transaction it locks the parent tables it reads
+/// IN ACCESS SHARE MODE before choosing the active <c>snapshot_id</c>, or it chooses and reads in one statement. Otherwise
+/// a newer import can drop the chosen version's partitions in between and the read quietly returns nothing; REPEATABLE READ
+/// alone does not prevent that, and a <c>snapshot_id</c> kept between reads goes stale the same way.
 /// </remarks>
 /// <param name="dataSource">Database with the <c>gtfs</c> schema.</param>
 /// <param name="cleanupRetryDelay">
