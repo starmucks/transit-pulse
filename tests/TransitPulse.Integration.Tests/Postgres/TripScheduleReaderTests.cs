@@ -32,7 +32,25 @@ public sealed class TripScheduleReaderTests(PostgresFixture postgres) : IClassFi
 
         Assert.Equal(RunsPerDay, loaded!.Schedule.RunCount);
         Assert.Equal(TripResolution.Found, loaded.Schedule.Find("1009/1/20261104/25:35:00", out var trip));
-        Assert.Equal(new ScheduledTrip("1009_20261030_Ke_2_2535", "1009", 1, (25 * 3600) + (35 * 60), _wednesday), trip);
+        Assert.Equal(new ScheduledTrip("1009_20261030_Ke_2_2535", "1009", 1, (25 * 3600) + (35 * 60), _wednesday), trip! with { Shape = null });
+    }
+
+    [Fact]
+    public async Task Runs_carry_their_shape_one_instance_per_shape()
+    {
+        var reader = new TripScheduleReader(await ImportAsync(Wednesdays));
+
+        var loaded = await reader.ReadAsync("hsl", [_wednesday], Ct);
+        loaded!.Schedule.Find("1009/0/20261104/14:28:00", out var outward);
+        loaded.Schedule.Find("1009/1/20261104/14:52:00", out var back);
+        loaded.Schedule.Find("1009/1/20261104/25:35:00", out var lateBack);
+
+        Assert.NotNull(outward!.Shape);
+        Assert.NotSame(outward.Shape, back!.Shape);
+        Assert.Same(back.Shape, lateBack!.Shape);
+
+        // HSL's own shape_dist_traveled, in kilometres: 9.900 at the last point of direction 1.
+        Assert.Equal(9_900, back.Shape!.LengthMetres, tolerance: 99);
     }
 
     [Fact]
