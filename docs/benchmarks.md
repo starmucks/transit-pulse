@@ -356,3 +356,92 @@ row, measured 2026-11-02.
   index. While a feed switches versions both are on disk (HSL ~3 GB today).
 - A snapshot whose file is already active is skipped by its SHA-256 without reading the zip; the broken HSL export of
   2026-10-27 02:30 is rejected with the same single problem as the check alone and is not read again by the Worker.
+
+## Trip lookup
+
+How many HSL positions find their GTFS trip by route, direction, service day and first departure (stage 2, task 2.5).
+
+**How:** a one-off Python simulation of `TripSchedule`, not yet the real pipeline. Every archive hour from 2026-10-21 20:00
+to 2026-11-05 07:59 UTC: 354 files, 1 070 420 116 records, every 10th read, duplicates not removed. Each hour uses the
+latest snapshot that existed when it started (the broken export of 2026-10-27 skipped; snapshots up to 3 days old), and
+the service days are today ± 1 in Helsinki. The base is 106 542 682 sampled positions with a trip descriptor; 505 951
+placeholder journeys are outside it.
+
+| Result | Share of positions |
+|---|---:|
+| Found by `route_id` | 97.556 % |
+| Found by route variant (start of `trip_id`) | 1.991 % |
+| **Found** | **99.547 %** |
+| Route unknown | 0.411 % |
+| Ambiguous | 0.036 % |
+| Trip exists, its service does not run that day | 0.005 % |
+| No such departure | 0.000 % (355) |
+| Service day not held | 0.000 % (97) |
+
+- **Worst hour:** 95.50 % (2026-10-31 09:00); none of the 353 files with at least 1 000 sampled positions is below 95 %.
+- **Variants are a night effect:** 0.00 % of positions in the 13:00 UTC hour, 24.94 % at 02:00, 11.08 % at 23:00.
+- **Snapshot age did not show:** over snapshots up to 3 days old, one journey (`31M1`, 355 positions) had no such
+  departure. The change to winter time on 2026-10-25 did not show either (99.79 % that day).
+- **Ambiguous** is six routes (`1006`, `1003`, `1010`, `1004`, `1002`, `1008`); most of it is one journey each weekday
+  on `1006` and `1003`.
+
+Unknown route codes, none of them in any of the 11 snapshots. The description comes from MQTT topics in one archive hour
+per code, except the last row:
+
+| Code | Sampled positions | Seen on | What runs |
+|---|---:|---:|---|
+| `1009TX` | 162 148 | 15 days | Trams, headsign "Ei linjalla" (not in service), `desi` 000 |
+| `1012 8` | 122 420 | 1 day (10-31) | Trams, headsign "KOEAJO" (test run) |
+| `1013E` | 72 874 | 7 days | Trams, "Ei linjalla", `desi` 000 |
+| `1011 8` | 49 687 | 1 day (10-31) | Trams, "KOEAJO" |
+| `6918` | 15 521 | 6 days | One bus, headsign "Hirsala" |
+| `6919` | 14 841 | 5 days | Not seen in the hour checked |
+| `1012 4`, `7455A` | 615 | 1 day each | Not checked |
+
+- The four tram codes are 93 % of the unknown positions. Without them 99.93 % of positions find their trip.
+- These positions correctly stay without a trip, so they produce no stop events or training labels. Their `RouteId` is
+  still not a line: anything grouping by line has to use the route of the found trip.
+
+**The real pipeline.** Two hours replayed through a Release build of the Ingestor and the Processor, on separate topics and
+a new group, each with its own snapshot in Postgres. Counts come from the metric `transitpulse.processor.trips`.
+
+| Result | Wed 2026-11-04 06:00 UTC | Thu 2026-11-05 00:00 UTC |
+|---|---:|---:|
+| Accepted positions | 4 309 033 | 181 585 |
+| Found | 4 295 429 | 129 727 |
+| Route unknown | 6 807 | 0 |
+| No departure | 1 038 | 0 |
+| Ambiguous | 1 751 | 0 |
+| No trip descriptor (parked vehicles) | 4 008 | 51 858 |
+| **Found, of positions with a descriptor** | **99.78 %** | **100 %** |
+
+- A whole-hour simulation with the Ingestor's filters gives the same count on every row, except that it also counts the
+  positions the Processor drops as impossible jumps (99 and 2).
+- These shares are higher than the 99.55 % above because deduplication removes the repeats that trams send.
+
+**Memory and lookup, the same runs:**
+
+| | Result |
+|---|---:|
+| Runs held, three service days | 71 125 and 71 616 |
+| Managed memory of the schedule | at most 14.8 MiB (one reading, includes warming up the database client) |
+| One lookup of an ambiguous route, Release | 242 ns |
+| Processor idle with the schedule, working set | 76 MiB |
+| Processor peak during the replay, working set | 102 and 114 MiB |
+
+Only the first departure of each run is loaded so far. Stops and shapes (tasks 2.6, 2.7) will add much more.
+
+**Reading the schedule.** The same query first took 1.3–24.5 s, and one read failed at the default 30 s timeout without a
+single row. `EXPLAIN (ANALYZE, BUFFERS)` showed why the time moved: once statistics exist, the planner may look up the first
+stop of all 375 292 trips of the snapshot and only then pick the 71 616 wanted. The 30 s itself was not reproduced with the
+plan in hand (9.9 s at most in that run), so the plan is the measured cause of the spread, not proof of that one failure.
+
+The query now fixes the order with `MATERIALIZED` and has a 120 s timeout. A new snapshot imported over an old one, then read
+through autovacuum and after a manual `ANALYZE`:
+
+| Reads | Failed | Fastest | Median | Slowest |
+|---:|---:|---:|---:|---:|
+| 16 | 0 | 1.33 s | 2.80 s | 9.78 s |
+
+All on a development PC, Postgres in Docker. A read touches about 40 000 blocks, so a slow disk with a cold cache will take
+much longer; this has not been measured on the target server.

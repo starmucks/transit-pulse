@@ -49,6 +49,10 @@ partition (by `snapshot_id`) of each GTFS table. The schema is plain numbered SQ
 - Readers see the old or the new schedule, never a mix, if they pick the active `snapshot_id` once and filter by it
   (or read in one REPEATABLE READ transaction). An import never blocks them; dropping an old version does, for the
   milliseconds the `DROP`s take. A broken export keeps the previous schedule active.
+  - *Corrected 2026-11-08 (task 2.5):* choosing the `snapshot_id` once is not enough, and REPEATABLE READ does not
+    help: the import's drop locks only the partitioned parents, so it can remove the chosen version between choosing and
+    reading, and the read quietly returns nothing. A reader locks the parents it reads `IN ACCESS SHARE MODE` before
+    choosing (as `TripScheduleReader` does), or chooses and reads in one statement. The decision itself is unchanged.
 - A fresh database whose newest export is broken has no schedule for that feed until the next export: the Worker does
   not fall back to an older file.
 - Disk holds two versions of a feed while it switches (~3 GB peak for HSL today). Text keys (`trip_id`, `stop_id`)

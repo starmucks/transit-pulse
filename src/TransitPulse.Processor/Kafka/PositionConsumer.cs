@@ -1,5 +1,6 @@
 using Confluent.Kafka;
 using Microsoft.Extensions.Options;
+using TransitPulse.Domain;
 
 namespace TransitPulse.Processor.Kafka;
 
@@ -9,11 +10,13 @@ namespace TransitPulse.Processor.Kafka;
 /// recent messages and loses none. One loop serves all partitions of the process (ADR-0010).
 /// </summary>
 /// <param name="options">Broker and consumer settings.</param>
+/// <param name="schedule">Where accepted positions look up their trips.</param>
 /// <param name="metrics">Counters and lag.</param>
 /// <param name="timeProvider">Clock for the commit interval and the lag.</param>
 /// <param name="logger">Log for broker errors, dropped messages and progress.</param>
 internal sealed partial class PositionConsumer(
     IOptions<ProcessorKafkaOptions> options,
+    CurrentTripSchedule schedule,
     ProcessorMetrics metrics,
     TimeProvider timeProvider,
     ILogger<PositionConsumer> logger) : BackgroundService
@@ -119,12 +122,17 @@ internal sealed partial class PositionConsumer(
         var partition = result.Partition.Value;
         if (!_partitions.TryGetValue(partition, out var state))
         {
-            state = new PartitionState();
+            state = new PartitionState(schedule);
             _partitions.Add(partition, state);
         }
 
-        var verdict = state.Process(result.Offset.Value, result.Message.Key, result.Message.Value);
+        var (verdict, trip) = state.Process(result.Offset.Value, result.Message.Key, result.Message.Value);
         metrics.Message(verdict, LagSeconds(result.Message.Timestamp));
+        if (trip is { } found)
+        {
+            metrics.Trip(found);
+        }
+
         if (verdict == MessageVerdict.Accepted)
         {
             Publish(ForOutput(result.Message), producer, stopping);
@@ -166,7 +174,8 @@ internal sealed partial class PositionConsumer(
     {
         var (accepted, outOfOrder) = (metrics.Total(MessageVerdict.Accepted), metrics.Total(MessageVerdict.OutOfOrder));
         var (jumps, unreadable) = (metrics.Total(MessageVerdict.ImpossibleJump), metrics.Total(MessageVerdict.Unreadable));
-        LogProgress(accepted, outOfOrder, jumps, unreadable);
+        var (tripsFound, tripLookups) = (metrics.Total(TripResolution.Found), metrics.TripLookups);
+        LogProgress(accepted, outOfOrder, jumps, unreadable, tripsFound, tripLookups);
     }
 
     // Blocks while the producer's buffer is full, which stops the reading too: the broker being down holds the input back
@@ -346,8 +355,8 @@ internal sealed partial class PositionConsumer(
         LogBrokerError(error.Code, error.Reason);
     }
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Since the start: {Accepted} accepted, {OutOfOrder} out of order, {Jumps} impossible jumps, {Unreadable} unreadable")]
-    private partial void LogProgress(long accepted, long outOfOrder, long jumps, long unreadable);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Since the start: {Accepted} accepted, {OutOfOrder} out of order, {Jumps} impossible jumps, {Unreadable} unreadable; trips found for {TripsFound} of {TripLookups}")]
+    private partial void LogProgress(long accepted, long outOfOrder, long jumps, long unreadable, long tripsFound, long tripLookups);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Partitions assigned: {Partitions}")]
     private partial void LogAssigned(List<int> partitions);

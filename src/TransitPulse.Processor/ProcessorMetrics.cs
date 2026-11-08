@@ -1,4 +1,5 @@
 using System.Diagnostics.Metrics;
+using TransitPulse.Domain;
 
 namespace TransitPulse.Processor;
 
@@ -19,9 +20,24 @@ internal sealed class ProcessorMetrics
         new("verdict", "unreadable"),
     ];
 
+    // In the order of TripResolution.
+    private static readonly KeyValuePair<string, object?>[] _tripTags =
+    [
+        new("result", "found"),
+        new("result", "no_descriptor"),
+        new("result", "malformed"),
+        new("result", "day_not_loaded"),
+        new("result", "route_unknown"),
+        new("result", "no_departure"),
+        new("result", "ambiguous"),
+        new("result", "no_schedule"),
+    ];
+
     private readonly Counter<long> _messages;
+    private readonly Counter<long> _trips;
     private readonly Histogram<double> _lagTime;
     private readonly long[] _totals = new long[_verdictTags.Length];
+    private readonly long[] _tripTotals = new long[_tripTags.Length];
 
     // Replaced as a whole by the loop, read by the exporter's thread.
     private Measurement<long>[] _lag = [];
@@ -32,6 +48,7 @@ internal sealed class ProcessorMetrics
     {
         var meter = meterFactory.Create(MeterName);
         _messages = meter.CreateCounter<long>("transitpulse.processor.messages", "{message}", "Messages read, by verdict.");
+        _trips = meter.CreateCounter<long>("transitpulse.processor.trips", "{position}", "Accepted positions of a feed with a schedule, by what the trip lookup found.");
         _lagTime = meter.CreateHistogram(
             "transitpulse.processor.lag_time",
             "s",
@@ -56,9 +73,24 @@ internal sealed class ProcessorMetrics
         }
     }
 
+    /// <summary>Counts one trip lookup. Called by the loop only.</summary>
+    /// <param name="result">What it found.</param>
+    public void Trip(TripResolution result)
+    {
+        _tripTotals[(int)result]++;
+        _trips.Add(1, _tripTags[(int)result]);
+    }
+
     /// <summary>Messages with this verdict since the start. Called by the loop only.</summary>
     /// <param name="verdict">The verdict.</param>
     public long Total(MessageVerdict verdict) => _totals[(int)verdict];
+
+    /// <summary>Trip lookups with this result since the start. Called by the loop only.</summary>
+    /// <param name="result">The result.</param>
+    public long Total(TripResolution result) => _tripTotals[(int)result];
+
+    /// <summary>All trip lookups since the start. Called by the loop only.</summary>
+    public long TripLookups => _tripTotals.Sum();
 
     /// <summary>
     /// Publishes the current lag of the partitions this process has read from. Stays as it was while the loop is held up, and

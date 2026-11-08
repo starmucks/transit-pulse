@@ -1,6 +1,7 @@
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.Metrics.Testing;
+using TransitPulse.Domain;
 
 namespace TransitPulse.Processor.Tests;
 
@@ -29,6 +30,53 @@ public sealed class ProcessorMetricsTests : IDisposable
         Assert.Equal(1, measurement.Value);
         Assert.Equal(name, measurement.Tags["verdict"]);
         Assert.Equal(1, metrics.Total(verdict));
+    }
+
+    // The tags are arrays indexed by the enum: a value added without its tag would throw inside the loop and stop it.
+    [Fact]
+    public void Every_verdict_and_trip_result_has_a_tag_of_its_own()
+    {
+        using var messages = new MetricCollector<long>(Factory, ProcessorMetrics.MeterName, "transitpulse.processor.messages");
+        using var trips = new MetricCollector<long>(Factory, ProcessorMetrics.MeterName, "transitpulse.processor.trips");
+        var metrics = new ProcessorMetrics(Factory);
+        var verdicts = Enum.GetValues<MessageVerdict>();
+        var results = Enum.GetValues<TripResolution>();
+
+        foreach (var verdict in verdicts)
+        {
+            metrics.Message(verdict, null);
+        }
+
+        foreach (var result in results)
+        {
+            metrics.Trip(result);
+        }
+
+        Assert.Equal(verdicts.Length, messages.GetMeasurementSnapshot().Select(m => m.Tags["verdict"]).Distinct().Count());
+        Assert.Equal(results.Length, trips.GetMeasurementSnapshot().Select(m => m.Tags["result"]).Distinct().Count());
+    }
+
+    [Theory]
+    [InlineData(nameof(TripResolution.Found), "found")]
+    [InlineData(nameof(TripResolution.NoDescriptor), "no_descriptor")]
+    [InlineData(nameof(TripResolution.Malformed), "malformed")]
+    [InlineData(nameof(TripResolution.DayNotLoaded), "day_not_loaded")]
+    [InlineData(nameof(TripResolution.RouteUnknown), "route_unknown")]
+    [InlineData(nameof(TripResolution.NoDeparture), "no_departure")]
+    [InlineData(nameof(TripResolution.Ambiguous), "ambiguous")]
+    [InlineData(nameof(TripResolution.NoSchedule), "no_schedule")]
+    public void Each_trip_result_is_counted_under_its_own_name(string resultName, string name)
+    {
+        var result = Enum.Parse<TripResolution>(resultName);
+        using var trips = new MetricCollector<long>(Factory, ProcessorMetrics.MeterName, "transitpulse.processor.trips");
+        var metrics = new ProcessorMetrics(Factory);
+
+        metrics.Trip(result);
+        metrics.Trip(TripResolution.Found);
+
+        Assert.Equal(name, trips.GetMeasurementSnapshot()[0].Tags["result"]);
+        Assert.Equal(result == TripResolution.Found ? 2 : 1, metrics.Total(result));
+        Assert.Equal(2, metrics.TripLookups);
     }
 
     [Fact]

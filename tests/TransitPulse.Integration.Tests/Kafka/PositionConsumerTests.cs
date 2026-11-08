@@ -48,6 +48,7 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
             // Long by default: a test sees the commit it provokes, not one the timer happened to make.
             CommitInterval = commitInterval ?? TimeSpan.FromHours(1),
         }),
+        new CurrentTripSchedule("hsl"),
         new ProcessorMetrics(_services.GetRequiredService<IMeterFactory>()),
         TimeProvider.System,
         logger ?? NullLogger<PositionConsumer>.Instance);
