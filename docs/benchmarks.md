@@ -357,6 +357,30 @@ row, measured 2026-11-02.
 - A snapshot whose file is already active is skipped by its SHA-256 without reading the zip; the broken HSL export of
   2026-10-27 02:30 is rejected with the same single problem as the check alone and is not read again by the Worker.
 
+## HSL location source
+
+Where the coordinates of an HFP `VP` message come from (field `loc`), stage 2, task 2.6. Archive hour 2026-11-04 06:00 UTC
+(08:00 in Helsinki, weekday peak), 5 579 194 `VP` messages, 5 536 948 of them with coordinates; repeats not removed;
+ferries (888 `GPS` positions) left out of the table.
+
+| Mode | `GPS` | `DR` (dead reckoning) | `MAN` | `ODO` |
+|---|---:|---:|---:|---:|
+| Bus | 3 352 660 | 39 846 | 1 603 | 7 298 |
+| Tram | 1 585 869 | 5 188 | 0 | 0 |
+| Metro | 0 | 0 | 239 639 | 0 |
+| Train | 292 971 | 496 | 0 | 10 490 |
+| **Share of positions** | 94.50 % | 0.82 % | 4.36 % | **0.32 %** |
+
+- **`ODO` is the next stop, not the vehicle.** While GPS is lost, the message carries the coordinates of the stop the
+  odometer counts towards (`stop` field), unchanged for 10–20 s, then the next stop's. Bus `12/1325` on trip 4736: its `ODO`
+  positions ran up to 1.3 km ahead, along the route, of its next GPS fix, under 30 s later; the archive got them about 2 min after
+  their `tst`. Kept, they would place a vehicle at a stop it has not reached, push its distance along the route forward,
+  and fake an arrival. The Ingestor drops them as `not_measured`.
+- Another 39 000 `ODO` messages an hour have no coordinates at all; they count as `not_measured` too, no longer as
+  `bad_location`.
+- **`MAN` is how the metro reports**, all of it: dropping every location that is not `GPS` would remove the metro. `DR` and
+  `MAN` stay; their offsets from the trip's line are measured with route matching (task 2.6).
+
 ## Trip lookup
 
 How many HSL positions find their GTFS trip by route, direction, service day and first departure (stage 2, task 2.5).

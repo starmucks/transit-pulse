@@ -22,6 +22,9 @@ internal sealed class PositionMetrics
     /// <summary>A vehicle record without coordinates or with coordinates off the globe.</summary>
     public const string BadLocation = "bad_location";
 
+    /// <summary>A vehicle record whose coordinates were not measured where the vehicle is (HSL <c>loc</c> <c>ODO</c>).</summary>
+    public const string NotMeasured = "not_measured";
+
     /// <summary>A vehicle record without a vehicle id or a usable measurement time; a jump hints at a changed format.</summary>
     public const string Incomplete = "incomplete";
 

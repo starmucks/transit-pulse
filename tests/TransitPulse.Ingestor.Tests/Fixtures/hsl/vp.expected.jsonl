@@ -14,3 +14,4 @@ null
 {"feedId":"hsl","vehicleId":"22/1107","tripId":"1057/0/20261020/04:00:00","routeId":"1057","lat":60.236438,"lon":25.081972,"speedMps":0.0,"bearing":330,"delaySec":-34,"observedAt":"2026-10-20T01:00:00.251+00:00"}
 {"feedId":"hsl","vehicleId":"17/16","tripId":"1073/1/20261027/15:27:00","routeId":"1073","lat":60.229776,"lon":25.010284,"speedMps":9.51,"bearing":149,"delaySec":38,"observedAt":"2026-10-27T14:00:00.251+00:00"}
 {"feedId":"hsl","vehicleId":"20/16","tripId":"5583K/1/20261027/15:26:00","routeId":"5583K","lat":60.290588,"lon":24.866717,"speedMps":2.59,"bearing":10,"delaySec":120,"observedAt":"2026-10-27T14:00:00.751+00:00"}
+null
