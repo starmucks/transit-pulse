@@ -5,6 +5,9 @@ public static class GeoDistance
 {
     private const double EarthRadiusMetres = 6_371_000;
 
+    /// <summary>Length of one degree of latitude, and of longitude on the equator, in the same approximation.</summary>
+    internal const double MetresPerDegree = EarthRadiusMetres * Math.PI / 180;
+
     /// <summary>
     /// Distance in metres by the equirectangular approximation: longitude is scaled by the cosine of the middle
     /// latitude, and the two offsets are treated as a flat right triangle. Accurate enough at city scale and cheap at
