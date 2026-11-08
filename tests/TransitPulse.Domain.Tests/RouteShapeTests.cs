@@ -1,13 +1,9 @@
+using static TransitPulse.Domain.Tests.LocalMetres;
+
 namespace TransitPulse.Domain.Tests;
 
 public sealed class RouteShapeTests
 {
-    // Test geometry is written in metres east and north of a point in Helsinki's latitude.
-    private const double OriginLat = 60;
-    private const double OriginLon = 25;
-    private const double MetresPerDegreeLat = 111_195;
-    private const double MetresPerDegreeLon = MetresPerDegreeLat / 2; // cos 60° = 1/2
-
     [Fact]
     public void A_point_beside_a_straight_line_lies_across_from_its_foot()
     {
@@ -99,20 +95,11 @@ public sealed class RouteShapeTests
         Assert.Throws<ArgumentException>(() => new RouteShape([60.0, 60.1], [25.0]));
     }
 
-    private static RouteShape Shape(params (double East, double North)[] points) =>
-        new(
-            points.Select(p => OriginLat + (p.North / MetresPerDegreeLat)).ToArray(),
-            points.Select(p => OriginLon + (p.East / MetresPerDegreeLon)).ToArray());
-
     private static ShapeProjection Project(
         RouteShape shape,
         double east,
         double north,
         double fromMetres = 0,
         double toMetres = double.PositiveInfinity) =>
-        shape.Project(
-            OriginLat + (north / MetresPerDegreeLat),
-            OriginLon + (east / MetresPerDegreeLon),
-            fromMetres,
-            toMetres);
+        shape.Project(Lat(north), Lon(east), fromMetres, toMetres);
 }
