@@ -42,9 +42,13 @@ internal sealed class ProcessorMetrics
         new("status", "outside_window"),
     ];
 
+    private static readonly KeyValuePair<string, object?> _back = new("direction", "back");
+    private static readonly KeyValuePair<string, object?> _forward = new("direction", "forward");
+
     private readonly Counter<long> _messages;
     private readonly Counter<long> _trips;
     private readonly Counter<long> _routes;
+    private readonly Counter<long> _reanchors;
     private readonly Histogram<double> _lagTime;
     private readonly Histogram<double> _routeOffset;
     private readonly long[] _totals = new long[_verdictTags.Length];
@@ -69,6 +73,9 @@ internal sealed class ProcessorMetrics
             // The default boundaries start at 5: "under 1 s", the stage's target, would fall into a single bucket.
             new InstrumentAdvice<double> { HistogramBucketBoundaries = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 300, 1800] });
         _routes = meter.CreateCounter<long>("transitpulse.processor.route", "{position}", "Positions with a found trip, by whether they lie on the trip's line.");
+
+        // Steps back are what stop events must survive (ADR-0011); the simulation's count is to be checked on the live stream.
+        _reanchors = meter.CreateCounter<long>("transitpulse.processor.reanchors", "{position}", "Vehicles placed anew on another pass of their trip's line, by direction.");
         _routeOffset = meter.CreateHistogram(
             "transitpulse.processor.route_offset",
             "m",
@@ -110,6 +117,11 @@ internal sealed class ProcessorMetrics
         if (match.Status != RouteMatchStatus.NoShape)
         {
             _routeOffset.Record(match.OffsetMetres);
+        }
+
+        if (match.Reanchored)
+        {
+            _reanchors.Add(1, match.ReanchoredByMetres < 0 ? _back : _forward);
         }
     }
 

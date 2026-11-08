@@ -89,14 +89,17 @@ public sealed class RouteProgressTests
     }
 
     [Fact]
-    public void A_shape_from_a_new_snapshot_starts_the_search_over()
+    public void A_schedule_read_again_mid_trip_keeps_the_progress()
     {
         var progress = new RouteProgress();
-        Advance(progress, Trip(_straight), 1500, 0, 0);
+        Advance(progress, Trip(_outAndBack), 500, 0, 0);
+        Advance(progress, Trip(_outAndBack), 1000, 10, 10);
+        Advance(progress, Trip(_outAndBack), 700, 8, 20);
 
-        var sameRunNewShape = Advance(progress, Trip(Shape((0, 0), (3000, 0))), 100, 0, 1);
+        // A new instance of the same shape, as after the daily read: starting over would put the vehicle on the way out.
+        var sameRunNewInstance = Advance(progress, Trip(Shape((0, 0), (1000, 0), (1000, 20), (0, 20))), 690, 8, 21);
 
-        Assert.Equal(100, sameRunNewShape.AlongMetres, tolerance: 0.5);
+        Assert.Equal(new RouteMatch(RouteMatchStatus.OnRoute, 1330, 12), Rounded(sameRunNewInstance));
     }
 
     [Fact]
@@ -143,7 +146,20 @@ public sealed class RouteProgressTests
 
         Assert.Equal(700, first.AlongMetres, tolerance: 0.5);
         Assert.All(misses, m => Assert.Equal(new RouteMatch(RouteMatchStatus.OutsideWindow, 700, 2), Rounded(m)));
-        Assert.Equal(new RouteMatch(RouteMatchStatus.OnRoute, 1460, 2, Reanchored: true), Rounded(reanchored));
+        Assert.Equal(new RouteMatch(RouteMatchStatus.OnRoute, 1460, 2, ReanchoredByMetres: 760), Rounded(reanchored));
+        Assert.True(reanchored.Reanchored);
+    }
+
+    [Fact]
+    public void A_vehicle_standing_near_a_later_pass_is_not_moved_there()
+    {
+        var progress = new RouteProgress();
+        Advance(progress, Trip(_outAndBack), 700, 0, 0);
+
+        // 2 m from the way back at 1 720 m, outside the window: a window growing with time would reach it after ~17 s.
+        var standing = Enumerable.Range(1, 30).Select(i => Advance(progress, Trip(_outAndBack), 300, 18, i)).ToList();
+
+        Assert.All(standing, m => Assert.Equal(new RouteMatch(RouteMatchStatus.OutsideWindow, 700, 2), Rounded(m)));
     }
 
     [Fact]
@@ -151,10 +167,11 @@ public sealed class RouteProgressTests
     {
         var progress = new RouteProgress();
         Advance(progress, Trip(_straight), 1000, 0, 0);
-        Advance(progress, Trip(_straight), 500, 0, 1);
+        Advance(progress, Trip(_straight), 400, 0, 1);
         Advance(progress, Trip(_straight), 1010, 0, 2);
-        Advance(progress, Trip(_straight), 500, 0, 3);
+        Advance(progress, Trip(_straight), 450, 0, 3);
 
+        // Counted with the miss before the point in the window, this would be a third miss 100 m ahead of the rearmost.
         var secondInARow = Advance(progress, Trip(_straight), 500, 0, 4);
 
         Assert.Equal(new RouteMatch(RouteMatchStatus.OutsideWindow, 1010, 0), Rounded(secondInARow));
@@ -177,9 +194,10 @@ public sealed class RouteProgressTests
     {
         var progress = new RouteProgress();
         Advance(progress, Trip(_straight), 1000, 0, 0);
-        Advance(progress, Trip(_straight), 500, 0, 1);
-        Advance(progress, Trip(_straight), 500, 0, 2);
+        Advance(progress, Trip(_straight), 400, 0, 1);
+        Advance(progress, Trip(_straight), 450, 0, 2);
 
+        // Counted with the two misses before it, the miss after the detour would be a third, 100 m ahead of the rearmost.
         var detour = Advance(progress, Trip(_straight), 700, 300, 3);
         var afterDetour = Advance(progress, Trip(_straight), 500, 0, 4);
 
@@ -194,5 +212,10 @@ public sealed class RouteProgressTests
         progress.Advance(trip, Lat(north), Lon(east), _start.AddSeconds(seconds));
 
     private static RouteMatch Rounded(RouteMatch match) =>
-        match with { AlongMetres = Math.Round(match.AlongMetres), OffsetMetres = Math.Round(match.OffsetMetres) };
+        match with
+        {
+            AlongMetres = Math.Round(match.AlongMetres),
+            OffsetMetres = Math.Round(match.OffsetMetres),
+            ReanchoredByMetres = Math.Round(match.ReanchoredByMetres),
+        };
 }

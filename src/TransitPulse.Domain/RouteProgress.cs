@@ -12,7 +12,7 @@ namespace TransitPulse.Domain;
 /// </para>
 /// <para>
 /// The distance never decreases on a trip: a small step back is GPS noise, and stop events must not see a stop twice.
-/// Thresholds are first guesses, to be set by the measured offsets of an archive hour (task 2.6).
+/// Thresholds and their measured effect: ADR-0011; they are checked again against stop events (task 2.7).
 /// </para>
 /// <para>
 /// A trip's first position may still land on the wrong pass: a vehicle first seen mid-trip (after a restart) on a street
@@ -35,7 +35,10 @@ public sealed class RouteProgress
     /// <summary>How far behind the last distance the window starts: room for GPS noise without letting the vehicle go back.</summary>
     public const double NoiseMetres = 30;
 
-    /// <summary>Added to the farthest drivable distance, so that a vehicle standing still still has a window ahead.</summary>
+    /// <summary>
+    /// Added to the farthest drivable distance. Covers HSL metro, whose position stays put for seconds and then jumps ahead
+    /// (with 30 m, 2 % of metro positions fell outside the window); lets a single fix up to this far ahead through.
+    /// </summary>
     public const double MarginMetres = 100;
 
     /// <summary>How many positions in a row on the line but outside the window place the vehicle anew.</summary>
@@ -43,7 +46,6 @@ public sealed class RouteProgress
 
     private string? _tripId;
     private DateOnly _serviceDate;
-    private RouteShape? _shape;
     private bool _onLine;
     private double _along;
     private DateTimeOffset _at;
@@ -66,13 +68,13 @@ public sealed class RouteProgress
             return new RouteMatch(RouteMatchStatus.NoShape, 0, 0);
         }
 
-        // Compared by id, not by instance: a reloaded schedule brings new instances of the same runs. A new shape instance
-        // comes only with a new snapshot, whose distances may differ, so the search starts over.
-        if (!string.Equals(_tripId, trip.TripId, StringComparison.Ordinal) || _serviceDate != trip.ServiceDate || _shape != shape)
+        // Compared by id, not by instance: the schedule is read again every day and on every new snapshot, bringing new
+        // instances of the same runs. The progress is kept and searched for on the new shape: starting over would put a
+        // vehicle mid-trip back on the line's first pass. If the new shape differs, the window misses and re-anchoring follows.
+        if (!string.Equals(_tripId, trip.TripId, StringComparison.Ordinal) || _serviceDate != trip.ServiceDate)
         {
             _tripId = trip.TripId;
             _serviceDate = trip.ServiceDate;
-            _shape = shape;
             _onLine = false;
             _along = 0;
             _misses = 0;
@@ -118,14 +120,17 @@ public sealed class RouteProgress
         // Direction is judged over the row, from its rearmost point: at one position a second, a train backing away moves
         // less per step than GPS noise. A vehicle standing still waits here until it moves off.
         _rearmost = _misses++ == 0 ? whole.AlongMetres : Math.Min(_rearmost, whole.AlongMetres);
+        // The vehicle was seen on the line, so the window does not grow as it does during a detour: growing, it would reach
+        // a later pass near a vehicle standing still and move it there without re-anchoring.
+        _at = at;
         if (_misses < ReanchorAfter || whole.AlongMetres - _rearmost <= NoiseMetres)
         {
             return new RouteMatch(RouteMatchStatus.OutsideWindow, _along, whole.OffsetMetres);
         }
 
         _misses = 0;
+        var jump = whole.AlongMetres - _along;
         _along = whole.AlongMetres;
-        _at = at;
-        return new RouteMatch(RouteMatchStatus.OnRoute, _along, whole.OffsetMetres, Reanchored: true);
+        return new RouteMatch(RouteMatchStatus.OnRoute, _along, whole.OffsetMetres, ReanchoredByMetres: jump);
     }
 }
