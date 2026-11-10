@@ -495,6 +495,39 @@ development PC, Postgres in Docker, warm cache.
   and a copy of each run. A background read once a day; left as is.
 - Measured with a throwaway console program holding each loaded schedule, heap measured after a full collection.
 
+### Stops in the schedule
+
+Task 2.7 gives each run its stops placed on its shape (`StopPattern`). Runs through the same stops on the same shape share
+one pattern, so two queries follow the shapes in the same transaction: a key per trip (an `md5` of its stop ids in order),
+then the stops of one trip per pattern. Same snapshot, days and machine as above; Release, after a warm-up, `main` and the
+branch alternated.
+
+| | Before (`main`) | With stops |
+|---|---:|---:|
+| Runs / with stops | 57 010 / — | 57 010 / 57 010 |
+| Patterns / stops placed / stops farther than 50 m from the line | | 982 / 28 986 / 0 |
+| Whole read through `TripScheduleReader`, 8 reads | 2.16–2.57 s | 4.01–4.34 s |
+| Stops of the 982 patterns, primary key index scan | | 0.13–0.28 s |
+
+**The key query decides the time.** Two forms, same 57 010 keys:
+
+| Form | Blocks read | Sort on disk | Execution in Postgres | Client, warm cache |
+|---|---:|---|---:|---:|
+| `GROUP BY trip_id` over `trip_id = ANY(...)` | 96 529 | yes, ~70 MB | 4.77 s | 4.26–5.06 s |
+| `unnest` + `LATERAL` per trip through the primary key | 10 861 | no | 2.39 s | 3.94–5.79 s |
+
+- The `GROUP BY` form scans the snapshot's whole `stop_times` partition (10.7 million rows, 9 million filtered out) and
+  sorts the 1.6 million kept on disk; with it the whole read took 8.29–11.23 s. The reader uses the `LATERAL` form.
+- Warm, the two are close; cold, blocks read decide, and the server's disk reads ~4 MB/s cold. Not measured there.
+- If the read is still slow on the target server (stage 8), the key can be computed once per snapshot at import, as a
+  column of `gtfs.trips`, leaving the read only the 0.13–0.28 s of the patterns' stops.
+- **Memory:** `GC.GetTotalMemory` gave 18.2 and 22.1 MiB for the whole schedule in two runs and nothing usable for
+  `main`, so the size is by arithmetic: 28 986 stops at ~70 bytes (the struct and its `stop_id` string) ≈ 2 MiB, plus a
+  reference in each run, over the 19.7 MiB above.
+- **`shape_dist_traveled` is not used:** in kilometres for HSL, metres for Entur, absent for MBTA (all three snapshots
+  checked), and for HSL metro it parts from the published shape by up to 275 m while every station lies within 17 m of
+  the line (`StopPatternTests`).
+
 ## Route matching
 
 How HSL positions are placed on their trip's line by `RouteProgress` (stage 2, task 2.6; ADR-0011).

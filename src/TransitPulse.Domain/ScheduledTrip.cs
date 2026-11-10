@@ -7,5 +7,9 @@ namespace TransitPulse.Domain;
 /// <param name="StartSeconds">Departure from the first stop, in seconds since the start of the service day; past 86400 after midnight.</param>
 /// <param name="ServiceDate">The service day the run belongs to, which may be the calendar day before its actual time.</param>
 /// <param name="Shape">The line the trip follows, one instance shared by all runs of the shape; <see langword="null"/> when the feed gives none.</param>
+/// <param name="Stops">
+/// The trip's stops placed on <paramref name="Shape"/>, one instance shared by all trips through the same stops on the same
+/// shape; <see langword="null"/> without a shape.
+/// </param>
 public sealed record ScheduledTrip(
-    string TripId, string RouteId, int DirectionId, int StartSeconds, DateOnly ServiceDate, RouteShape? Shape = null);
+    string TripId, string RouteId, int DirectionId, int StartSeconds, DateOnly ServiceDate, RouteShape? Shape = null, StopPattern? Stops = null);
