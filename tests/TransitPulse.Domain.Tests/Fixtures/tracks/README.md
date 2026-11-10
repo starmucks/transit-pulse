@@ -8,6 +8,8 @@ GTFS shape of that trip from the HSL snapshot loaded that day. Used by `RouteFix
   (HFP `tst`), in time order. Positions with `loc` `ODO` are left out, as the Ingestor drops them. Repeats and
   sub-second steps are kept: the test passes every row through `VehicleTrack` first, as the Processor does.
 - `<name>.shape.csv` — `lat,lon`: the trip's shape points in `shape_pt_sequence` order.
+- `<name>.stops.csv` — `sequence,stop_id,lat,lon,shape_dist_traveled`: the trip's stops from `stop_times.txt` joined to
+  `stops.txt`, in `stop_sequence` order; HSL gives the distance in kilometres. Used by `StopPatternTests` (task 2.7).
 
 | Name | Vehicle | HFP journey (route/direction/date/start) | GTFS `trip_id` | Shape length | Why it is here |
 |---|---|---|---|---|---|

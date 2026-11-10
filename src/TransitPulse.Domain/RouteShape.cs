@@ -109,19 +109,28 @@ public sealed class RouteShape
     /// <param name="lat">Latitude of the position, degrees.</param>
     /// <param name="lon">Longitude of the position, degrees.</param>
     /// <param name="withinMetres">How near the line must come.</param>
-    /// <returns>The nearest point of that pass, or of the whole line if it never comes that near.</returns>
-    public ShapeProjection ProjectFirstPass(double lat, double lon, double withinMetres)
+    /// <param name="fromMetres">Where along the line to start looking; the part before it is ignored. Clamped to the shape.</param>
+    /// <returns>
+    /// The nearest point of that pass, or of the line from <paramref name="fromMetres"/> on if it never comes that near.
+    /// </returns>
+    public ShapeProjection ProjectFirstPass(double lat, double lon, double withinMetres, double fromMetres = 0)
     {
+        var from = Math.Clamp(fromMetres, 0, LengthMetres);
         var xScale = XScale(lat);
         for (var i = 0; i < _along.Length - 1; i++)
         {
-            if (Nearest(i, lat, lon, xScale, 0, LengthMetres, out _) <= withinMetres * withinMetres)
+            if (_along[i + 1] < from)
             {
-                return Project(lat, lon, _along[i], _along[i + 1] + (2 * withinMetres));
+                continue;
+            }
+
+            if (Nearest(i, lat, lon, xScale, from, LengthMetres, out _) <= withinMetres * withinMetres)
+            {
+                return Project(lat, lon, Math.Max(_along[i], from), _along[i + 1] + (2 * withinMetres));
             }
         }
 
-        return Project(lat, lon);
+        return Project(lat, lon, from);
     }
 
     private static double XScale(double lat) => GeoDistance.MetresPerDegree * Math.Cos(double.DegreesToRadians(lat));
