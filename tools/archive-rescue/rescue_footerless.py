@@ -37,7 +37,8 @@ def scan_row_groups(data: bytes) -> list[list[tuple[int, int, object]]]:
     """Returns the complete row groups as lists of (offset, header length, page header), one entry per column.
 
     Stops at the first group that is not three whole data pages with the same value count: that is the group the
-    writer was in the middle of when it was killed, or the end of the file.
+    writer was in the middle of when it was killed, or the end of the file. After a host power-off the file can also
+    end in zeros (its size reached the disk, its last blocks did not); zeros parse as a header with no fields.
     """
     buffer = NumpyIO(np.frombuffer(data, dtype=np.uint8))
     groups = []
@@ -52,9 +53,12 @@ def scan_row_groups(data: bytes) -> list[list[tuple[int, int, object]]]:
                 header = ThriftObject.from_buffer(buffer, "PageHeader")
             except Exception:
                 return groups
+            # Checked before the size is used: a header read from zeros has no type and no size.
+            if header.type != DATA_PAGE:
+                return groups
             header_length = buffer.tell() - position
             end = position + header_length + header.compressed_page_size
-            if header.type != DATA_PAGE or end > len(data):
+            if end > len(data):
                 return groups
             pages.append((position, header_length, header))
             position = end
@@ -102,6 +106,8 @@ def build_footer(template: ParquetFile, groups: list) -> bytes:
 
 def rebuild(data: bytes, template: ParquetFile) -> tuple[bytes, int, int]:
     """Returns the rebuilt file, its row count and the number of trailing bytes dropped (an incomplete group)."""
+    if not data:
+        raise ValueError("empty file: the writer was stopped before writing anything")
     if not data.startswith(MAGIC):
         raise ValueError("not a Parquet file: no PAR1 at the start")
     groups = scan_row_groups(data)
@@ -115,15 +121,20 @@ def rebuild(data: bytes, template: ParquetFile) -> tuple[bytes, int, int]:
 
 
 def self_check(path: Path) -> int:
-    """Cuts the footer off a complete file, rebuilds it and compares every value with the original."""
+    """Cuts the footer off a complete file, rebuilds it and compares every value with the original; then the same
+    with zeros in place of the footer, as a host power-off leaves it."""
     data = path.read_bytes()
     footer_length = struct.unpack("<i", data[-8:-4])[0]
-    rebuilt, rows, dropped = rebuild(data[:-(footer_length + 8)], ParquetFile(str(path)))
+    body = data[:-(footer_length + 8)]
     original = pq.read_table(io.BytesIO(data))
-    restored = pq.read_table(io.BytesIO(rebuilt))
-    same = restored.equals(original)
-    print(f"{'OK' if same else 'MISMATCH'}: {rows} rows rebuilt, {original.num_rows} in the original, {dropped} bytes dropped")
-    return 0 if same and dropped == 0 else 1
+    failed = 0
+    for name, tail in (("cut", b""), ("zero tail", bytes(4096))):
+        rebuilt, rows, dropped = rebuild(body + tail, ParquetFile(str(path)))
+        same = pq.read_table(io.BytesIO(rebuilt)).equals(original)
+        failed += not (same and dropped == len(tail))
+        print(f"{'OK' if same else 'MISMATCH'} ({name}): {rows} rows rebuilt, {original.num_rows} in the original, "
+              f"{dropped} bytes dropped")
+    return 1 if failed else 0
 
 
 def rescue(template_path: Path, input_dir: Path, output_dir: Path) -> int:
