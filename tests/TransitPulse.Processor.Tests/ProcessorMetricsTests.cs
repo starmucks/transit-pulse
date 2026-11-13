@@ -56,6 +56,22 @@ public sealed class ProcessorMetricsTests : IDisposable
         Assert.Equal(results.Length, trips.GetMeasurementSnapshot().Select(m => m.Tags["result"]).Distinct().Count());
     }
 
+    [Fact]
+    public void Every_stop_event_kind_is_counted_under_a_tag_of_its_own()
+    {
+        using var events = new MetricCollector<long>(Factory, ProcessorMetrics.MeterName, "transitpulse.processor.stop_events");
+        var metrics = new ProcessorMetrics(Factory);
+        var kinds = Enum.GetValues<StopEventKind>();
+
+        foreach (var kind in kinds)
+        {
+            metrics.StopEvent(kind);
+        }
+
+        Assert.Equal(["arrival", "departure", "passed"], events.GetMeasurementSnapshot().Select(m => m.Tags["kind"]));
+        Assert.All(kinds, kind => Assert.Equal(1, metrics.Total(kind)));
+    }
+
     [Theory]
     [InlineData(nameof(RouteMatchStatus.OnRoute), "on_route", true)]
     [InlineData(nameof(RouteMatchStatus.OffRoute), "off_route", true)]

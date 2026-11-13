@@ -42,6 +42,14 @@ internal sealed class ProcessorMetrics
         new("status", "outside_window"),
     ];
 
+    // In the order of StopEventKind.
+    private static readonly KeyValuePair<string, object?>[] _stopEventTags =
+    [
+        new("kind", "arrival"),
+        new("kind", "departure"),
+        new("kind", "passed"),
+    ];
+
     private static readonly KeyValuePair<string, object?> _back = new("direction", "back");
     private static readonly KeyValuePair<string, object?> _forward = new("direction", "forward");
 
@@ -49,11 +57,13 @@ internal sealed class ProcessorMetrics
     private readonly Counter<long> _trips;
     private readonly Counter<long> _routes;
     private readonly Counter<long> _reanchors;
+    private readonly Counter<long> _stopEvents;
     private readonly Histogram<double> _lagTime;
     private readonly Histogram<double> _routeOffset;
     private readonly long[] _totals = new long[_verdictTags.Length];
     private readonly long[] _tripTotals = new long[_tripTags.Length];
     private readonly long[] _routeTotals = new long[_routeTags.Length];
+    private readonly long[] _stopEventTotals = new long[_stopEventTags.Length];
 
     // Replaced as a whole by the loop, read by the exporter's thread.
     private Measurement<long>[] _lag = [];
@@ -76,6 +86,7 @@ internal sealed class ProcessorMetrics
 
         // Steps back are what stop events must survive (ADR-0011); the simulation's count is to be checked on the live stream.
         _reanchors = meter.CreateCounter<long>("transitpulse.processor.reanchors", "{position}", "Vehicles placed anew on another pass of their trip's line, by direction.");
+        _stopEvents = meter.CreateCounter<long>("transitpulse.processor.stop_events", "{event}", "Stop events found, by kind.");
         _routeOffset = meter.CreateHistogram(
             "transitpulse.processor.route_offset",
             "m",
@@ -124,6 +135,18 @@ internal sealed class ProcessorMetrics
             _reanchors.Add(1, match.ReanchoredByMetres < 0 ? _back : _forward);
         }
     }
+
+    /// <summary>Counts one stop event found. Called by the loop only.</summary>
+    /// <param name="kind">What the vehicle did at the stop.</param>
+    public void StopEvent(StopEventKind kind)
+    {
+        _stopEventTotals[(int)kind]++;
+        _stopEvents.Add(1, _stopEventTags[(int)kind]);
+    }
+
+    /// <summary>Stop events of this kind since the start. Called by the loop only.</summary>
+    /// <param name="kind">The kind.</param>
+    public long Total(StopEventKind kind) => _stopEventTotals[(int)kind];
 
     /// <summary>Placements with this status since the start. Called by the loop only.</summary>
     /// <param name="status">The status.</param>

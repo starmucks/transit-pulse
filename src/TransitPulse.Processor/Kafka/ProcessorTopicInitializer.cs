@@ -23,7 +23,7 @@ internal sealed partial class ProcessorTopicInitializer(IOptions<ProcessorKafkaO
         [
             Topics.PositionsRaw with { Name = settings.InputTopic },
             Topics.PositionsEnriched with { Name = settings.OutputTopic },
-            Topics.EventsStop,
+            Topics.EventsStop with { Name = settings.StopEventsTopic },
             Topics.EventsAnomaly,
             Topics.PositionsRawDlq,
         ];
