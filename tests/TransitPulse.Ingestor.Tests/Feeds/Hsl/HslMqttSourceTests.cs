@@ -169,6 +169,49 @@ public sealed class HslMqttSourceTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
     }
 
+    [Fact]
+    public async Task Each_connection_of_a_split_feed_subscribes_to_its_own_filters_under_the_feed_id()
+    {
+        using var broker = new FakeBroker();
+        var output = Channel.CreateUnbounded<RawRecord>();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        var run = broker.CreateSource(connections: [["/vp/bus/#"], ["/vp/tram/#"]]).RunAsync(output.Writer, stop.Token);
+
+        using var one = await broker.AcceptAsync();
+        using var two = await broker.AcceptAsync();
+        await one.SendAsync((byte[])[.. ConnAck(0), .. _subAck, .. Publish("/vp/one", "1")], Ct);
+        await two.SendAsync((byte[])[.. ConnAck(0), .. _subAck, .. Publish("/vp/two", "2")], Ct);
+
+        var records = new[]
+        {
+            await output.Reader.ReadAsync(Ct).AsTask().WaitAsync(_timeout, Ct),
+            await output.Reader.ReadAsync(Ct).AsTask().WaitAsync(_timeout, Ct),
+        };
+        Assert.Equal(["/vp/bus/#", "/vp/tram/#"], broker.Subscriptions.Select(filters => Assert.Single(filters)).Order());
+        Assert.Equal(["/vp/one", "/vp/two"], records.Select(record => record.Topic).Order());
+        Assert.All(records, record => Assert.Equal("hsl", record.FeedId));
+
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+    }
+
+    [Fact]
+    public async Task One_connection_failing_to_set_up_closes_the_others_and_ends_the_run()
+    {
+        using var broker = new FakeBroker();
+        var run = broker.CreateSource(connections: [["/vp/bus/#"], ["/vp/tram/#"]]).RunAsync(Channel.CreateUnbounded<RawRecord>().Writer, Ct);
+
+        using var working = await broker.AcceptAsync();
+        using var refused = await broker.AcceptAsync();
+        await working.SendAsync((byte[])[.. ConnAck(0), .. _subAck], Ct);
+        await refused.SendAsync(ConnAck(5), Ct);
+
+        // The pipeline restarts the whole feed after its delay, so no connection may be left open behind it.
+        var error = await Assert.ThrowsAsync<IOException>(() => run.WaitAsync(_timeout, Ct));
+        Assert.Contains("CONNACK code 5", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, await working.ReceiveAsync(new byte[16], Ct).AsTask().WaitAsync(_timeout, Ct));
+    }
+
     private const string VpTopic = "/hfp/v2/journey/ongoing/vp/#";
 
     private static readonly byte[] _subAck = [0x90, 0x03, 0x00, 0x01, 0x00];
@@ -191,12 +234,17 @@ public sealed class HslMqttSourceTests
 
         public FakeBroker() => _listener.Start();
 
-        public HslMqttSource CreateSource(TimeProvider? time = null, string feedId = "hsl", string[]? topics = null)
+        /// <summary>The filters of each SUBSCRIBE read by <see cref="AcceptAsync"/>, in accept order.</summary>
+        public List<string[]> Subscriptions { get; } = [];
+
+        public HslMqttSource CreateSource(
+            TimeProvider? time = null, string feedId = "hsl", string[]? topics = null, string[][]? connections = null)
         {
             var settings = new HslMqttOptions
             {
                 FeedId = feedId,
-                Topics = topics ?? [VpTopic],
+                Topics = connections is null ? topics ?? [VpTopic] : [],
+                Connections = [.. (connections ?? []).Select(filters => new HslMqttConnectionOptions { Topics = filters })],
                 Host = IPAddress.Loopback.ToString(),
                 Port = ((IPEndPoint)_listener.LocalEndpoint).Port,
                 ConnectTimeout = _timeout,
@@ -219,7 +267,22 @@ public sealed class HslMqttSourceTests
                 filled += read;
             }
 
+            Subscriptions.Add(SubscribedFilters(buffer.AsSpan(0, filled)));
             return client;
+        }
+
+        /// <summary>The filters of the SUBSCRIBE that follows CONNECT: packet id, then length-prefixed filter and QoS each.</summary>
+        private static string[] SubscribedFilters(ReadOnlySpan<byte> data)
+        {
+            MqttWire.TryReadPacket(data, out _, out _, out _, out var connectLength);
+            MqttWire.TryReadPacket(data[connectLength..], out _, out _, out var body, out _);
+            var filters = new List<string>();
+            for (var at = 2; at < body.Length; at += 3 + ((body[at] << 8) | body[at + 1]))
+            {
+                filters.Add(Encoding.UTF8.GetString(body.Slice(at + 2, (body[at] << 8) | body[at + 1])));
+            }
+
+            return [.. filters];
         }
 
         public void Dispose() => _listener.Dispose();
