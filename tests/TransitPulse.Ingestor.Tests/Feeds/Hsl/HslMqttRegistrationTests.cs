@@ -26,7 +26,18 @@ public sealed class HslMqttRegistrationTests
 
         // Exactly the configured filters: a default in the options class would be kept and extended by the binder.
         var feeds = configuration.GetSection(HslMqttRegistration.SectionName).Get<List<HslMqttOptions>>()!;
-        Assert.Equal(["/hfp/v2/journey/ongoing/vp/#"], feeds[0].Topics);
+        // Positions over four connections that must cover every mode in both directions exactly once.
+        Assert.Empty(feeds[0].Topics);
+        var filters = feeds[0].TopicGroups.SelectMany(group => group).Select(topic => topic.Split('/')).ToList();
+        Assert.Equal(4, feeds[0].TopicGroups.Count);
+        Assert.All(filters, parts => Assert.Equal("/hfp/v2/journey/ongoing/vp", string.Join('/', parts[..6])));
+        Assert.All(filters, parts => Assert.Equal("+/+/+/#", string.Join('/', parts[7..10].Append(parts[11]))));
+        Assert.Equal(
+            ["bus", "ferry", "metro", "robot", "train", "tram", "ubus"],
+            filters.Select(parts => parts[6]).Distinct().Order());
+        Assert.All(
+            filters.GroupBy(parts => parts[6]),
+            mode => Assert.Equal(["1", "2"], mode.Select(parts => parts[10]).Order()));
         Assert.Equal(["arr", "ars", "pde", "dep", "pas", "wait"], feeds[1].Topics.Select(topic => topic.Split('/')[5]));
     }
 
