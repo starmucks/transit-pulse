@@ -196,6 +196,43 @@ public sealed class HslMqttSourceTests
     }
 
     [Fact]
+    public async Task A_drop_after_working_for_a_while_reconnects_only_that_connection_of_a_split_feed()
+    {
+        using var broker = new FakeBroker();
+        var time = new FakeTimeProvider();
+        var output = Channel.CreateUnbounded<RawRecord>();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+        var run = broker.CreateSource(time, connections: [["/vp/bus/#"], ["/vp/tram/#"]]).RunAsync(output.Writer, stop.Token);
+
+        using var kept = await broker.AcceptAsync();
+        using (var dropped = await broker.AcceptAsync())
+        {
+            await kept.SendAsync((byte[])[.. ConnAck(0), .. _subAck, .. Publish("/t", "a")], Ct);
+            await dropped.SendAsync((byte[])[.. ConnAck(0), .. _subAck, .. Publish("/t", "b")], Ct);
+            await output.Reader.ReadAsync(Ct).AsTask().WaitAsync(_timeout, Ct);
+            await output.Reader.ReadAsync(Ct).AsTask().WaitAsync(_timeout, Ct);
+            time.Advance(TimeSpan.FromSeconds(11));
+            dropped.LingerState = new LingerOption(true, 0);
+        }
+
+        // Only the dropped connection comes back, with its own filter; the kept one still delivers.
+        using var again = await broker.AcceptAsync();
+        Assert.Equal(broker.Subscriptions[1], broker.Subscriptions[2]);
+        await again.SendAsync((byte[])[.. ConnAck(0), .. _subAck, .. Publish("/t", "c")], Ct);
+        await kept.SendAsync(Publish("/t", "d"), Ct);
+        string[] payloads =
+        [
+            Encoding.UTF8.GetString((await output.Reader.ReadAsync(Ct).AsTask().WaitAsync(_timeout, Ct)).Payload),
+            Encoding.UTF8.GetString((await output.Reader.ReadAsync(Ct).AsTask().WaitAsync(_timeout, Ct)).Payload),
+        ];
+        Assert.Equal(["c", "d"], payloads.Order());
+        Assert.False(run.IsCompleted);
+
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+    }
+
+    [Fact]
     public async Task One_connection_failing_to_set_up_closes_the_others_and_ends_the_run()
     {
         using var broker = new FakeBroker();

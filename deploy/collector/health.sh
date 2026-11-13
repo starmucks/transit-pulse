@@ -101,8 +101,9 @@ for dir in "$archive"/*/; do
   elif [[ $feed == hsl ]]; then
     # Covers every broker connection (the hsl ones and hsl-stop): pings are answered every 30 s, so a live one is never quiet long.
     mapfile -t rcvs < <(hsl_lastrcvs)
-    # A reconnect leaves about a second without a connection: look once more before calling it down.
-    if (( ${#rcvs[@]} < hsl_expected )); then sleep 3; mapfile -t rcvs < <(hsl_lastrcvs); fi
+    # A reconnect leaves about a second without a connection, a failed setup restarts all of hsl after 5 s or more
+    # (ADR-0012): look once more after that before calling it down.
+    if (( ${#rcvs[@]} < hsl_expected )); then sleep 8; mapfile -t rcvs < <(hsl_lastrcvs); fi
     quietest=0
     for rcv in "${rcvs[@]}"; do if (( rcv > quietest )); then quietest=$rcv; fi; done
     if (( ${#rcvs[@]} == 0 )); then

@@ -77,6 +77,9 @@ internal sealed partial class HslMqttSource(
         {
             var started = timeProvider.GetTimestamp();
             var reason = await RunConnectionAsync(topics, output, cancellationToken);
+
+            // A read can end with a close at the moment a sibling's failure stops this connection: that is no drop to log.
+            cancellationToken.ThrowIfCancellationRequested();
             var lasted = timeProvider.GetElapsedTime(started);
             if (lasted < _healthyConnection)
             {
