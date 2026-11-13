@@ -10,6 +10,11 @@ GTFS shape of that trip from the HSL snapshot loaded that day. Used by `RouteFix
 - `<name>.shape.csv` — `lat,lon`: the trip's shape points in `shape_pt_sequence` order.
 - `<name>.stops.csv` — `sequence,stop_id,lat,lon,shape_dist_traveled`: the trip's stops from `stop_times.txt` joined to
   `stops.txt`, in `stop_sequence` order; HSL gives the distance in kilometres. Used by `StopPatternTests` (task 2.7).
+- `<name>.events.csv` — `seconds,event,stop_id`: HSL's own stop events for the same vehicle and journey (feed
+  `hsl-stop`, hours 05–07 UTC), on the track's time scale (HFP `tst`, not the time received) and only within the track;
+  events `arr`, `ars`, `pde`, `dep`, `pas`, exact repeats dropped. The vehicle comes from the topic, as for `VP`. Used by
+  `StopFixtureTests` to compare stop detection with HSL (task 2.7). No `metro.events.csv`: HSL sends no stop events for
+  metro. The `train` file has 2 stops only: the train's other stops came before its track starts.
 
 | Name | Vehicle | HFP journey (route/direction/date/start) | GTFS `trip_id` | Shape length | Why it is here |
 |---|---|---|---|---|---|
