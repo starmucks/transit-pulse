@@ -5,15 +5,13 @@
   </PropertyGroup>
 
   <ItemGroup Label="Aspire hosting">
-    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.1" />
-    <PackageVersion Include="Aspire.Hosting.Redis" Version="13.6.1" />
-    <!-- Pinned above the version Aspire 13.6.1 brings (2.5.302, GHSA-qhrr-8q5h-9q3h); drop once Aspire ships a fixed one. -->
-    <PackageVersion Include="MessagePack" Version="2.5.307" />
+    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.5" />
+    <PackageVersion Include="Aspire.Hosting.Redis" Version="13.6.5" />
   </ItemGroup>
 
   <ItemGroup Label="Hosting and telemetry">
     <!-- Client integration: NpgsqlDataSource from the AppHost connection string, with health check and telemetry. -->
-    <PackageVersion Include="Aspire.Npgsql" Version="13.6.1" />
+    <PackageVersion Include="Aspire.Npgsql" Version="13.6.5" />
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.13" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.13" />
     <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.19.1" />
