@@ -9,8 +9,10 @@ namespace TransitPulse.Ingestor.Feeds.Hsl;
 /// HSL HFP messages pushed over MQTT, one subscription per feed: vehicle positions (about 1 message per vehicle per
 /// second) or stop events, as the configured topic filters select. Every message is passed on unchanged with its
 /// topic, which carries event type, mode, route, direction and next stop.
+/// A feed may be split over several connections with disjoint filters, all feeding the same feed id (ADR-0012).
 /// A connection that drops after working for a while is re-opened at once, so a drop costs about a second of data;
-/// failing to connect, or dropping right after connecting, ends the run and the pipeline retries after its delay.
+/// failing to connect, or dropping right after connecting, ends the run of every connection of the feed and the
+/// pipeline retries after its delay.
 /// </summary>
 /// <remarks>
 /// A minimal MQTT 3.1.1 client (<see cref="MqttWire"/>) instead of MQTTnet: on the 1 vCPU collector server MQTTnet
@@ -54,25 +56,45 @@ internal sealed partial class HslMqttSource(
     /// <inheritdoc />
     public async Task RunAsync(ChannelWriter<RawRecord> output, CancellationToken cancellationToken)
     {
+        var groups = feed.TopicGroups;
+        using var stopOthers = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Task[] connections = [.. groups.Select((topics, index) => KeepConnectedAsync(index + 1, groups.Count, topics, output, stopOthers.Token))];
+
+        // A connection only ever ends by failing or by shutdown. One failing stops the rest, so the pipeline restarts
+        // the feed as a whole after its delay; waiting for them closes their sockets before that restart.
+        var first = await Task.WhenAny(connections);
+        await stopOthers.CancelAsync();
+        await Task.WhenAll(connections).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        await first;
+    }
+
+    /// <summary>Runs one connection of the feed, re-opening it at once after a drop that followed a healthy run.</summary>
+    /// <exception cref="IOException">The connection lasted under 10 s.</exception>
+    private async Task KeepConnectedAsync(
+        int connection, int connections, string[] topics, ChannelWriter<RawRecord> output, CancellationToken cancellationToken)
+    {
         while (true)
         {
             var started = timeProvider.GetTimestamp();
-            var reason = await RunConnectionAsync(output, cancellationToken);
+            var reason = await RunConnectionAsync(topics, output, cancellationToken);
+
+            // A read can end with a close at the moment a sibling's failure stops this connection: that is no drop to log.
+            cancellationToken.ThrowIfCancellationRequested();
             var lasted = timeProvider.GetElapsedTime(started);
             if (lasted < _healthyConnection)
             {
-                throw new IOException($"HSL MQTT connection lasted only {lasted:g}: {reason}");
+                throw new IOException($"HSL MQTT connection {connection} of {connections} lasted only {lasted:g}: {reason}");
             }
 
-            LogReconnecting(FeedId, reason, lasted);
+            LogReconnecting(FeedId, connection, connections, reason, lasted);
         }
     }
 
-    /// <summary>Connects, subscribes and forwards messages until the connection drops or goes silent.</summary>
+    /// <summary>Connects, subscribes to <paramref name="topics"/> and forwards messages until the connection drops or goes silent.</summary>
     /// <returns>Why the connection ended.</returns>
-    private async Task<string> RunConnectionAsync(ChannelWriter<RawRecord> output, CancellationToken cancellationToken)
+    private async Task<string> RunConnectionAsync(string[] topics, ChannelWriter<RawRecord> output, CancellationToken cancellationToken)
     {
-        await using var tls = await ConnectAsync(feed, cancellationToken);
+        await using var tls = await ConnectAsync(topics, cancellationToken);
 
         var buffer = new byte[BufferSize];
         var filled = 0;
@@ -106,7 +128,7 @@ internal sealed partial class HslMqttSource(
             }
 
             filled += read;
-            var consumed = ReadPackets(buffer.AsSpan(0, filled), timeProvider.GetUtcNow(), records);
+            var consumed = ReadPackets(buffer.AsSpan(0, filled), timeProvider.GetUtcNow(), topics, records);
             buffer.AsSpan(consumed, filled - consumed).CopyTo(buffer);
             filled -= consumed;
             if (filled == buffer.Length)
@@ -181,22 +203,23 @@ internal sealed partial class HslMqttSource(
         }
     }
 
-    /// <summary>Opens the transport and subscribes, all within <see cref="HslMqttOptions.ConnectTimeout"/>.</summary>
+    /// <summary>Opens the transport and subscribes to <paramref name="topics"/>, all within <see cref="HslMqttOptions.ConnectTimeout"/>.</summary>
     /// <returns>The stream, subscription sent; the caller owns it.</returns>
     /// <exception cref="TimeoutException">The setup did not finish in time; the pipeline retries after its delay.</exception>
-    private async Task<Stream> ConnectAsync(HslMqttOptions settings, CancellationToken cancellationToken)
+    private async Task<Stream> ConnectAsync(string[] topics, CancellationToken cancellationToken)
     {
         // The read loop's silence check starts only after this setup, so the setup needs a deadline of its own.
         using var setupTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        setupTimeout.CancelAfter(settings.ConnectTimeout);
+        setupTimeout.CancelAfter(feed.ConnectTimeout);
         Stream? stream = null;
         try
         {
-            stream = await _openTransport(settings, setupTimeout.Token);
+            stream = await _openTransport(feed, setupTimeout.Token);
 
             // Clean session with a random id: HFP is QoS 0, so there is nothing for the broker to keep between connections.
+            // Every connection of a split feed gets its own id: a shared one would make the broker close the older one.
             await stream.WriteAsync(MqttWire.Connect($"transitpulse-{Guid.NewGuid():N}", KeepAliveSeconds), setupTimeout.Token);
-            await stream.WriteAsync(MqttWire.Subscribe(1, settings.Topics), setupTimeout.Token);
+            await stream.WriteAsync(MqttWire.Subscribe(1, topics), setupTimeout.Token);
             return stream;
         }
         catch (Exception ex)
@@ -211,7 +234,7 @@ internal sealed partial class HslMqttSource(
             if (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested)
             {
                 throw new TimeoutException(
-                    $"HSL MQTT connection to {settings.Host}:{settings.Port} was not set up within {settings.ConnectTimeout:g}.", ex);
+                    $"HSL MQTT connection to {feed.Host}:{feed.Port} was not set up within {feed.ConnectTimeout:g}.", ex);
             }
 
             throw;
@@ -220,7 +243,7 @@ internal sealed partial class HslMqttSource(
 
     /// <summary>Consumes every complete packet at the start of <paramref name="data"/>.</summary>
     /// <returns>Bytes consumed; an incomplete packet at the end stays for the next read.</returns>
-    private int ReadPackets(ReadOnlySpan<byte> data, DateTimeOffset receivedAt, List<RawRecord> records)
+    private int ReadPackets(ReadOnlySpan<byte> data, DateTimeOffset receivedAt, string[] topics, List<RawRecord> records)
     {
         var consumed = 0;
         while (MqttWire.TryReadPacket(data[consumed..], out var type, out var flags, out var body, out var length))
@@ -235,13 +258,13 @@ internal sealed partial class HslMqttSource(
                 case MqttWire.ConnAck when body.Length < 2 || body[1] != 0:
                     throw new IOException($"HSL MQTT broker refused the connection (CONNACK code {(body.Length < 2 ? -1 : body[1])}).");
                 case MqttWire.SubAck:
-                    var refused = MqttWire.RefusedFilters(body, feed.Topics);
+                    var refused = MqttWire.RefusedFilters(body, topics);
                     if (refused.Count > 0)
                     {
                         throw new IOException($"HSL MQTT broker refused the subscription to {string.Join(", ", refused)}.");
                     }
 
-                    LogSubscribed(feed.Host, feed.Topics);
+                    LogSubscribed(feed.Host, topics);
                     break;
             }
         }
@@ -252,6 +275,7 @@ internal sealed partial class HslMqttSource(
     [LoggerMessage(Level = LogLevel.Information, Message = "Subscribed to {Topics} on {Host}")]
     private partial void LogSubscribed(string host, string[] topics);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "MQTT feed {FeedId}: connection ended after {Lasted}: {Reason}; reconnecting now")]
-    private partial void LogReconnecting(string feedId, string reason, TimeSpan lasted);
+    // health.sh counts drops by "MQTT feed .*connection ended": keep both parts when changing the text.
+    [LoggerMessage(Level = LogLevel.Warning, Message = "MQTT feed {FeedId}, connection {Connection} of {Connections}: connection ended after {Lasted}: {Reason}; reconnecting now")]
+    private partial void LogReconnecting(string feedId, int connection, int connections, string reason, TimeSpan lasted);
 }

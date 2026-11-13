@@ -26,7 +26,7 @@ hsl_lastrcvs() {
   ss -tnpi state established "( dport = :${HSL_PORT:-8883} )" 2>/dev/null |
     grep -A1 "pid=$pid," | grep -o 'lastrcv:[0-9]*' | cut -d: -f2 || true
 }
-# One broker connection per MQTT subscription; only entries of Feeds:Mqtt have a "Topics" key.
+# One broker connection per "Topics" key: a Feeds:Mqtt entry has one, or one per entry of its Connections (ADR-0012).
 hsl_expected=$(grep -c '"Topics"' "$app/appsettings.json" 2>/dev/null || true)
 [[ $hsl_expected =~ ^[1-9][0-9]*$ ]] || hsl_expected=1
 mib() { awk -v b="$1" 'BEGIN { printf "%.0f MiB", b / 1048576 }'; }
@@ -99,10 +99,11 @@ for dir in "$archive"/*/; do
       report OK feed "$feed: hour just started"
     fi
   elif [[ $feed == hsl ]]; then
-    # Covers every broker connection (hsl, hsl-stop): pings are answered every 30 s, so a live one is never quiet long.
+    # Covers every broker connection (the hsl ones and hsl-stop): pings are answered every 30 s, so a live one is never quiet long.
     mapfile -t rcvs < <(hsl_lastrcvs)
-    # A reconnect leaves about a second without a connection: look once more before calling it down.
-    if (( ${#rcvs[@]} < hsl_expected )); then sleep 3; mapfile -t rcvs < <(hsl_lastrcvs); fi
+    # A reconnect leaves about a second without a connection, a failed setup restarts all of hsl after 5 s or more
+    # (ADR-0012): look once more after that before calling it down.
+    if (( ${#rcvs[@]} < hsl_expected )); then sleep 8; mapfile -t rcvs < <(hsl_lastrcvs); fi
     quietest=0
     for rcv in "${rcvs[@]}"; do if (( rcv > quietest )); then quietest=$rcv; fi; done
     if (( ${#rcvs[@]} == 0 )); then
@@ -212,7 +213,7 @@ fi
 
 recent_log=$(journalctl -u "$unit" --since -1h -o cat --no-pager 2>/dev/null || true)
 
-# --- HSL broker drops in the last hour, of either connection: normally 0-2 a day. The service, its files and its
+# --- HSL broker drops in the last hour, of any connection: normally 0-2 a day. The service, its files and its
 # connections all look fine meanwhile, so nothing above notices. The cause can be on either side; what is lost during a
 # drop is lost either way. A connection that lasted under 10 s is logged as a failed feed, not as an ended connection.
 drops=$(grep -cE 'MQTT feed .*connection ended|Feed hsl[^ ]* failed' <<<"$recent_log" || true)

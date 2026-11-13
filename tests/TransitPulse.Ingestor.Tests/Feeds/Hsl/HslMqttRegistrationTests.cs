@@ -26,7 +26,18 @@ public sealed class HslMqttRegistrationTests
 
         // Exactly the configured filters: a default in the options class would be kept and extended by the binder.
         var feeds = configuration.GetSection(HslMqttRegistration.SectionName).Get<List<HslMqttOptions>>()!;
-        Assert.Equal(["/hfp/v2/journey/ongoing/vp/#"], feeds[0].Topics);
+        // Positions over four connections that must cover every mode in both directions exactly once.
+        Assert.Empty(feeds[0].Topics);
+        var filters = feeds[0].TopicGroups.SelectMany(group => group).Select(topic => topic.Split('/')).ToList();
+        Assert.Equal(4, feeds[0].TopicGroups.Count);
+        Assert.All(filters, parts => Assert.Equal("/hfp/v2/journey/ongoing/vp", string.Join('/', parts[..6])));
+        Assert.All(filters, parts => Assert.Equal("+/+/+/#", string.Join('/', parts[7..10].Append(parts[11]))));
+        Assert.Equal(
+            ["bus", "ferry", "metro", "robot", "train", "tram", "ubus"],
+            filters.Select(parts => parts[6]).Distinct().Order());
+        Assert.All(
+            filters.GroupBy(parts => parts[6]),
+            mode => Assert.Equal(["1", "2"], mode.Select(parts => parts[10]).Order()));
         Assert.Equal(["arr", "ars", "pde", "dep", "pas", "wait"], feeds[1].Topics.Select(topic => topic.Split('/')[5]));
     }
 
@@ -34,6 +45,7 @@ public sealed class HslMqttRegistrationTests
     [InlineData("Topics:0", "", "Topics")]
     [InlineData("SilenceTimeout", "00:00:00", "SilenceTimeout")]
     [InlineData("MaxSilence", "00:01:00", "MaxSilence")]
+    [InlineData("Connections:0:Topics:0", "/hfp/v2/journey/ongoing/vp/bus/#", "either Topics")]
     public void Invalid_subscription_fails_before_the_host_starts(string key, string value, string expected)
     {
         var settings = new Dictionary<string, string?>
@@ -49,6 +61,29 @@ public sealed class HslMqttRegistrationTests
 
         Assert.Contains("'hsl'", error.Message, StringComparison.Ordinal);
         Assert.Contains(expected, error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("/hfp/v2/journey/ongoing/vp/tram/#", null)]
+    [InlineData("", "Topics")]
+    public void A_feed_split_over_connections_is_one_source_and_needs_filters_in_every_connection(string second, string? expected)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Feeds:Mqtt:0:FeedId"] = "hsl",
+            ["Feeds:Mqtt:0:Connections:0:Topics:0"] = "/hfp/v2/journey/ongoing/vp/bus/#",
+            ["Feeds:Mqtt:0:Connections:1:Topics:0"] = second,
+        }).Build();
+
+        if (expected is null)
+        {
+            Assert.Equal("hsl", Assert.Single(Resolve(configuration)).FeedId);
+        }
+        else
+        {
+            var error = Assert.Throws<InvalidOperationException>(() => new ServiceCollection().AddHslMqttFeeds(configuration));
+            Assert.Contains(expected, error.Message, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
