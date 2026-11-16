@@ -1,33 +1,3 @@
-# Ingestor — local rules
+# Claude Code adapter
 
-- **Raw first.** Every message is archived exactly as received before anything else happens; the archive is the
-  source of truth. Normalization and publishing are a branch that may drop under backpressure (ADR-0005), never the reverse.
-- **Three modes, `Ingestor:Mode`:** `archive` (default; the collector server), `full` (local, adds Kafka) and
-  `replay` (reads the archive back through the `full` pipeline). A missing setting must keep meaning `archive`; never
-  add Kafka-dependent code to the archive path. Replay writes no archive, and its normalizing channel waits instead
-  of dropping (the archive is the source, so nothing could rebuild a drop): the only exception to ADR-0005.
-- **Kafka protocol only** (ADR-0002): `Confluent.Kafka` client features, no Redpanda-specific APIs or admin endpoints.
-  Topics are declared in code (`KafkaTopicInitializer`), not left to broker auto-creation.
-- **Message key is `{FeedId}/{VehicleId}`** (`PositionMessage.Key`): vehicle ids are unique only within a feed.
-- **HSL `VehicleId` comes from the MQTT topic** (`operator_id/vehicle_number`), never from the payload's `oper`: that is
-  the operator running the trip, and under subcontracting two vehicles share `oper`/`veh`.
-- **Native AOT** (ADR-0003): the publish fails on any new trim/AOT warning. Only Parquet.Net and Confluent.Kafka are
-  collapsed (see the csproj); Confluent.Kafka stays a `TrimmerRootAssembly`. Check a new library with
-  `deploy/collector/publish.sh` before relying on it. Bind configuration with options classes or plain strings, not
-  reflection-based enum/type conversion.
-- **Native librdkafka:** ship every `librdkafka*.so` variant next to a binary that uses Kafka; the default one needs
-  `libsasl2.so.3` (absent on Ubuntu 24.04) and the client falls back to `centos8-librdkafka.so`.
-- **Adapters clean values per vehicle:** a source value `VehiclePosition` would reject (NaN speed, missing time)
-  becomes `null` or skips that one vehicle; throwing from `Normalize` drops the whole message (a snapshot of hundreds).
-  A skipped vehicle is reported to `IPositionDrops` with a `PositionMetrics` reason; contract tests expect one drop
-  per `null` line.
-- **Feed silence limits** (`MaxSilence`) are set from measured gaps in the archive, not from the poll interval alone;
-  feeds whose unchanged responses are skipped (alerts, weather) have none.
-- **SIRI XML only through `XmlReader`** (responses reach several MB; no `XDocument`/`XmlDocument`).
-- **Time through `TimeProvider`** (needed by tests and replay); never `DateTime.UtcNow` or `Task.Delay` without it.
-- **Single reader.** Sinks, normalizers, the router and the deduplicator are called from one loop and keep state
-  without locks; callbacks from the Kafka client run on its own thread and use `Interlocked`.
-- **Logs at stream rate are logged per episode** (first failure, then the count on recovery), never per message.
-- **Tests:** unit tests in `tests/TransitPulse.Ingestor.Tests` (no Docker); broker tests in
-  `tests/TransitPulse.Integration.Tests` (Testcontainers, Docker required). Run like CI:
-  `dotnet test --solution TransitPulse.slnx`.
+@README.md
