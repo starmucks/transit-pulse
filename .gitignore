@@ -1,6 +1,9 @@
 # Personal Claude Code settings
 .claude/settings.local.json
 
+# Personal project guidance shared by local coding tools
+LOCAL_GUIDANCE.md
+
 # .NET build output and IDE state
 bin/
 obj/
