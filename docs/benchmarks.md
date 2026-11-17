@@ -597,3 +597,44 @@ Per trip, comparing the two rules:
 - The simulation reads 0.7 % more positions, since its deduplication is simpler than the Ingestor's.
 - The filter alone ran at about 115 000 messages/s on another hour ("Processor throughput"); the two hours differ, so this
   is no measure of what matching costs, only that the loop stays far above the C2 target of 12 000 positions/s.
+
+## Stop detection against HSL
+
+How closely `StopDetector` reproduces HSL's own stop events (stage 2, task 2.7). The scored window is Wednesday
+2026-11-04 06:00–07:00 UTC, the weekday morning peak. HSL GTFS snapshot 4 (2026-10-31 14:33) supplies the trip shapes and
+stops.
+
+**How:** a Release benchmark passed every raw `hsl` record received from 05:50 to 07:10 through the real
+`ArchiveReader`, `HslPositionNormalizer`, `PositionMessage` JSON boundary and `PartitionState`. The extra ten minutes on
+each side warm up and finish vehicle state; only events whose event time is in the scored hour count. This read 7 388 477
+raw records, normalized 7 312 422 positions and accepted 5 675 748 after the Processor's ordering and jump checks;
+5 656 204 accepted positions found one scheduled trip. It completed in 7 min 26 s on the development PC.
+
+The reference read `hsl-stop` records received from 04:00 to 10:00, so an event in the scored hour could arrive up to
+three hours late. Events are compared by their own `tst`, never their receive time. The vehicle owner and number come from
+the MQTT topic; the body supplies the trip descriptor and stop. A stopped call gives an arrival at `ars` and a departure
+at `dep`; a chain containing `pas` gives one pass event. Of 823 754 raw reference records in the six-hour receive window,
+822 406 parsed and resolved to one trip; unresolved records are outside the denominator.
+
+Events are paired one-to-one by vehicle, resolved GTFS trip, stop, kind and time, in order, at most 120 s apart. Pairing
+also sees two minutes outside the scored hour so an event at a boundary is not called missing or extra. **Found** is paired
+reference events divided by reference events; **extra** is unpaired detected events divided by detected events. The signed
+error is ours minus HSL; p95 uses its absolute value.
+
+| Kind | HSL reference | Matched | Found | Detected | Extra | Extra share | Median signed | p95 absolute |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Arrival | 30 988 | 27 758 | 89.58 % | 28 473 | 718 | 2.52 % | +0.90 s | 2.37 s |
+| Departure | 29 674 | 28 070 | 94.59 % | 28 807 | 750 | 2.60 % | −2.41 s | 9.96 s |
+| Passed | 12 442 | 12 099 | 97.24 % | 14 447 | 2 343 | 16.22 % | −4.68 s | 9.35 s |
+| **All** | **73 104** | **67 927** | **92.92 %** | **71 727** | **3 811** | **5.31 %** | **−1.56 s** | **7.95 s** |
+
+- The median offsets reproduce the six reviewed fixtures (+0.9 s arrivals, −2.3 s departures, −4.7 s passes). HSL's
+  stop radius ends farther past the stop than the detector's 30 m along-route zone, so departure and pass events are
+  earlier by design.
+- Time accuracy is consistent once an event is paired: the overall absolute p95 is below 8 s. Coverage, not timing, is
+  the main remaining question: 10.42 % of HSL arrivals are not paired.
+- Passes have the opposite shape: 97.24 % of HSL passes are found, but 16.22 % of detected passes have no paired HSL
+  pass. Together with the missing arrivals this is consistent with some stopped calls being classified as passes, but
+  this aggregate run does not prove that; cross-kind call matching is needed before changing the detector.
+- Acceptance thresholds are deliberately not inferred from this one hour. The author must approve them from this first
+  full measurement; in particular, decide whether to investigate pass classification before freezing regression bounds.
