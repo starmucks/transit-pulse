@@ -665,6 +665,7 @@ directly; it uses the same hour and 120 s boundary allowance as the event table.
 - Of our calls, 584 of 29 871 stopped calls (1.96 %) and 1 117 of 14 447 passed calls (7.73 %) remain unpaired after
   cross-kind matching: **1 701 of 44 318 (3.84 %)** overall. The other 1 226 event-level extra passes are HSL stopped
   calls classified differently, not independent phantom calls.
-- Proposed first regression bounds are: at least 97 % of reference calls paired, at least 95 % of paired calls keeping
-  their class, at most 5 % of detected calls unpaired, and event-time absolute p95 at most 10 s. They pass this hour but
-  remain unapproved; train quality is recorded as a known limitation rather than hidden by the overall bounds.
+- The first regression bounds, accepted on 2026-11-17, are: at least 97 % of reference calls paired, at least 95 % of
+  paired calls keeping their class, at most 5 % of detected calls unpaired, and event-time absolute p95 at most 10 s.
+  This hour passes all four. Train quality is a known limitation rather than hidden by the overall bounds; per-mode
+  route/stop tolerances are future work, not part of task 2.7.
