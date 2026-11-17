@@ -58,6 +58,23 @@ public sealed class StopDetectorTests
     }
 
     [Fact]
+    public void Current_stop_remains_next_until_its_zone_is_left()
+    {
+        var trip = Trip(500, 700);
+        var (detector, events) = (new StopDetector(), new List<StopEvent>());
+
+        Advance(detector, trip, OnRoute(440), 0, events);
+        Assert.Equal("A", detector.NextStop?.StopId);
+        Advance(detector, trip, OnRoute(520), 8, events);
+        Assert.Equal("A", detector.NextStop?.StopId);
+        Advance(detector, trip, OnRoute(540), 10, events);
+        Assert.Equal("B", detector.NextStop?.StopId);
+        Advance(detector, trip, OnRoute(740), 20, events);
+
+        Assert.Null(detector.NextStop);
+    }
+
+    [Fact]
     public void Placed_anew_back_the_vehicle_finds_the_stops_again()
     {
         var trip = Trip(500, 1500);

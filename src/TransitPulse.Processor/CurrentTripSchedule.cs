@@ -7,10 +7,14 @@ namespace TransitPulse.Processor;
 /// waits for the database and never sees a half-built schedule (ADR-0010).
 /// </summary>
 /// <param name="feedId">The only feed with a schedule so far; other cities join in stage 4.</param>
-internal sealed class CurrentTripSchedule(string feedId)
+/// <param name="timeZone">The feed's local time zone, used to turn GTFS service-day times into instants.</param>
+internal sealed class CurrentTripSchedule(string feedId, TimeZoneInfo timeZone)
 {
     // Written by the background service, read by the loop.
     private TripSchedule? _schedule;
+
+    /// <summary>The feed's local time zone.</summary>
+    public TimeZoneInfo TimeZone { get; } = timeZone ?? throw new ArgumentNullException(nameof(timeZone));
 
     /// <summary>Makes a new schedule the current one; a message already being handled finishes with the old one.</summary>
     /// <param name="schedule">The new schedule.</param>

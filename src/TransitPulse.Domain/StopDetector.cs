@@ -54,6 +54,12 @@ public sealed class StopDetector
     private bool _stood;
     private DateTimeOffset? _passedAt;
 
+    /// <summary>
+    /// The stop whose zone the vehicle is approaching or still occupies; the next call after it once the vehicle leaves.
+    /// <see langword="null"/> before the vehicle is placed on a trip with stops, or after its last stop.
+    /// </summary>
+    public StopCall? NextStop => _pattern is not null && _next < _pattern.Calls.Count ? _pattern.Calls[_next] : null;
+
     /// <summary>Takes the vehicle's next placed position and reports what it did at its trip's stops since the last one.</summary>
     /// <param name="trip">The trip the position belongs to.</param>
     /// <param name="match">Where <see cref="RouteProgress.Advance"/> placed the position; only one on the line moves the vehicle.</param>

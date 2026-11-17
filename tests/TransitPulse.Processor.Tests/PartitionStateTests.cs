@@ -11,15 +11,16 @@ public sealed class PartitionStateTests
     private static byte[] Message(int seconds, double lat = 60.2) =>
         PositionMessage.Value(new VehiclePosition("hsl", "40/415", null, "1009", lat, 24.9, 8f, null, null, null, _t0.AddSeconds(seconds)));
 
-    private static byte[] OnTrip(string feed, string tripId, int seconds = 0, double lat = 60.2) =>
-        PositionMessage.Value(new VehiclePosition(feed, "40/415", tripId, "1009", lat, 24.9, 8f, null, null, null, _t0.AddSeconds(seconds)));
+    private static byte[] OnTrip(string feed, string tripId, int seconds = 0, double lat = 60.2, int? delaySec = null) =>
+        PositionMessage.Value(new VehiclePosition(feed, "40/415", tripId, "1009", lat, 24.9, 8f, null, delaySec, null, _t0.AddSeconds(seconds)));
 
-    private static PartitionState NewState() => new(new CurrentTripSchedule("hsl"));
+    private static PartitionState NewState() => new(new CurrentTripSchedule("hsl", TimeZoneInfo.Utc));
 
-    private static TripSchedule ScheduleOf(int startHour, RouteShape? shape = null, StopPattern? stops = null)
+    private static TripSchedule ScheduleOf(
+        int startHour, RouteShape? shape = null, StopPattern? stops = null, StopTimetable? timetable = null)
     {
         DateOnly day = new(2026, 11, 5);
-        return new([day], [new ScheduledTrip($"1009_{startHour}", "1009", 0, startHour * 3600, day, shape, stops)]);
+        return new([day], [new ScheduledTrip($"1009_{startHour}", "1009", 0, startHour * 3600, day, shape, stops, timetable)]);
     }
 
     // A line running east along a parallel; the messages lie at 60.2° N, 24.9° E.
@@ -28,21 +29,24 @@ public sealed class PartitionStateTests
     [Fact]
     public void Accepted_position_looks_up_its_trip()
     {
-        var schedule = new CurrentTripSchedule("hsl");
+        var schedule = new CurrentTripSchedule("hsl", TimeZoneInfo.Utc);
         schedule.Replace(ScheduleOf(14));
         var state = new PartitionState(schedule);
 
         var found = state.Process(0, Vehicle, OnTrip("hsl", "1009/0/20261105/14:00:00"));
         var missed = state.Process(1, Vehicle, OnTrip("hsl", "9999/0/20261105/14:00:00", seconds: 1));
 
-        Assert.Equal(new ProcessedMessage(MessageVerdict.Accepted, TripResolution.Found, new RouteMatch(RouteMatchStatus.NoShape, 0, 0)), found);
-        Assert.Equal(new ProcessedMessage(MessageVerdict.Accepted, TripResolution.RouteUnknown), missed);
+        Assert.Equal(TripResolution.Found, found.Trip);
+        Assert.Equal(new RouteMatch(RouteMatchStatus.NoShape, 0, 0), found.Route);
+        Assert.Equal("1009_14", found.Position!.Schedule!.TripId);
+        Assert.Equal(TripResolution.RouteUnknown, missed.Trip);
+        Assert.Null(missed.Position!.Schedule);
     }
 
     [Fact]
     public void Position_of_a_found_trip_is_placed_on_its_line()
     {
-        var schedule = new CurrentTripSchedule("hsl");
+        var schedule = new CurrentTripSchedule("hsl", TimeZoneInfo.Utc);
         schedule.Replace(ScheduleOf(14, LineAt(60.2)));
 
         var route = new PartitionState(schedule).Process(0, Vehicle, OnTrip("hsl", "1009/0/20261105/14:00:00")).Route!.Value;
@@ -57,7 +61,7 @@ public sealed class PartitionStateTests
     public void Progress_on_the_line_is_kept_across_messages_and_a_position_without_a_trip_leaves_it()
     {
         // A line running north along the messages' meridian.
-        var schedule = new CurrentTripSchedule("hsl");
+        var schedule = new CurrentTripSchedule("hsl", TimeZoneInfo.Utc);
         schedule.Replace(ScheduleOf(14, new RouteShape([60.1, 60.3], [24.9, 24.9])));
         var state = new PartitionState(schedule);
 
@@ -77,7 +81,7 @@ public sealed class PartitionStateTests
     {
         // A line running north along the messages' meridian, one stop on it at 60.2° N; 0.0001° of latitude is ~11 m.
         var line = new RouteShape([60.1, 60.3], [24.9, 24.9]);
-        var schedule = new CurrentTripSchedule("hsl");
+        var schedule = new CurrentTripSchedule("hsl", TimeZoneInfo.Utc);
         schedule.Replace(ScheduleOf(14, line, new StopPattern(line, [new StopPoint("1020453", 1, 60.2, 24.9)])));
         var state = new PartitionState(schedule);
         const string trip = "1009/0/20261105/14:00:00";
@@ -103,9 +107,32 @@ public sealed class PartitionStateTests
     }
 
     [Fact]
+    public void Actual_arrival_updates_effective_delay_and_compares_it_with_the_source()
+    {
+        var line = new RouteShape([60.1, 60.3], [24.9, 24.9]);
+        var stops = new StopPattern(line, [new StopPoint("1020453", 1, 60.2, 24.9)]);
+        var timetable = new StopTimetable([new ScheduledStopTime(1, 12 * 3600, 12 * 3600)]);
+        var schedule = new CurrentTripSchedule("hsl", TimeZoneInfo.Utc);
+        schedule.Replace(ScheduleOf(12, line, stops, timetable));
+        var state = new PartitionState(schedule);
+        const string trip = "1009/0/20261105/12:00:00";
+
+        state.Process(0, Vehicle, OnTrip("hsl", trip, 0, 60.1995, delaySec: 10));
+        state.Process(1, Vehicle, OnTrip("hsl", trip, 5, 60.19985, delaySec: 12));
+        var arrived = state.Process(2, Vehicle, OnTrip("hsl", trip, 6, 60.19985, delaySec: 13));
+        var after = state.Process(3, Vehicle, OnTrip("hsl", trip, 7, 60.19985));
+
+        Assert.Equal(new DelayCheck(DelayCheckResult.Compared, CalculatedSec: 5, SourceSec: 12), arrived.Delay);
+        Assert.Equal(13, arrived.Position!.DelaySec);
+        Assert.Equal(5, after.Position!.DelaySec);
+        Assert.Equal("1020453", arrived.Position.Schedule!.NextStop!.StopId);
+        Assert.Equal(12 * 3600, arrived.Position.Schedule.NextStop.ArrivalSeconds);
+    }
+
+    [Fact]
     public void Position_far_from_its_trip_line_is_off_route()
     {
-        var schedule = new CurrentTripSchedule("hsl");
+        var schedule = new CurrentTripSchedule("hsl", TimeZoneInfo.Utc);
         schedule.Replace(ScheduleOf(14, LineAt(60.25)));
 
         var route = new PartitionState(schedule).Process(0, Vehicle, OnTrip("hsl", "1009/0/20261105/14:00:00")).Route!.Value;
@@ -117,7 +144,7 @@ public sealed class PartitionStateTests
     [Fact]
     public void Position_of_a_parked_vehicle_has_no_descriptor()
     {
-        var schedule = new CurrentTripSchedule("hsl");
+        var schedule = new CurrentTripSchedule("hsl", TimeZoneInfo.Utc);
         schedule.Replace(ScheduleOf(14));
 
         Assert.Equal(TripResolution.NoDescriptor, new PartitionState(schedule).Process(0, Vehicle, Message(0)).Trip);
@@ -128,7 +155,9 @@ public sealed class PartitionStateTests
     {
         var result = NewState().Process(0, Vehicle, OnTrip("hsl", "1009/0/20261105/14:00:00"));
 
-        Assert.Equal(new ProcessedMessage(MessageVerdict.Accepted, TripResolution.NoSchedule), result);
+        Assert.Equal(TripResolution.NoSchedule, result.Trip);
+        Assert.NotNull(result.Position);
+        Assert.Null(result.Position.Schedule);
     }
 
     [Fact]
@@ -137,13 +166,15 @@ public sealed class PartitionStateTests
         // A real Entur trip id: it must not count as a malformed HSL descriptor.
         var result = NewState().Process(0, "entur-sky/1", OnTrip("entur-sky", "SKY:ServiceJourney:6_1234"));
 
-        Assert.Equal(new ProcessedMessage(MessageVerdict.Accepted, null), result);
+        Assert.Null(result.Trip);
+        Assert.NotNull(result.Position);
+        Assert.Null(result.Position.Schedule);
     }
 
     [Fact]
     public void Dropped_position_makes_no_lookup()
     {
-        var schedule = new CurrentTripSchedule("hsl");
+        var schedule = new CurrentTripSchedule("hsl", TimeZoneInfo.Utc);
         schedule.Replace(ScheduleOf(14));
         var state = new PartitionState(schedule);
         state.Process(0, Vehicle, OnTrip("hsl", "1009/0/20261105/14:00:00", seconds: 10));
@@ -160,7 +191,7 @@ public sealed class PartitionStateTests
     [Fact]
     public void Replaced_schedule_applies_from_the_next_message()
     {
-        var schedule = new CurrentTripSchedule("hsl");
+        var schedule = new CurrentTripSchedule("hsl", TimeZoneInfo.Utc);
         schedule.Replace(ScheduleOf(14));
         var state = new PartitionState(schedule);
         var before = state.Process(0, Vehicle, OnTrip("hsl", "1009/0/20261105/15:00:00"));

@@ -528,6 +528,19 @@ branch alternated.
   checked), and for HSL metro it parts from the published shape by up to 275 m while every station lies within 17 m of
   the line (`StopPatternTests`).
 
+### Stop times in the schedule
+
+Task 2.8 loads the arrival and departure seconds of every active GTFS trip. They cannot live in the shared `StopPattern`:
+two runs through the same stops may have different running times. One `StopTimetable` belongs to a GTFS `trip_id` and is
+shared only by its calendar instances.
+
+**Measurement:** HSL snapshot 4 (2026-10-31 14:33), service days 03–05.11, Release build, Postgres in Docker with a warm
+cache. The 71 125 runs loaded in 10.23–10.39 s; the schedule held 67.5 MiB of managed memory after a full collection.
+The extra query uses one primary-key range scan per trip and returns about 1.6 million calls. A first representation with
+two `int?` fields used 82.9 MiB; storing missing values as zero and present seconds as seconds plus one reduced the same
+measurement by **15.4 MiB**. The 30 s startup wait still covers this development-PC measurement; a cold read on the target
+server remains a stage-8 check.
+
 ## Route matching
 
 How HSL positions are placed on their trip's line by `RouteProgress` (stage 2, task 2.6; ADR-0011).
@@ -669,3 +682,21 @@ directly; it uses the same hour and 120 s boundary allowance as the event table.
   paired calls keeping their class, at most 5 % of detected calls unpaired, and event-time absolute p95 at most 10 s.
   This hour passes all four. Train quality is a known limitation rather than hidden by the overall bounds; per-mode
   route/stop tolerances are future work, not part of task 2.7.
+
+## Schedule delay against HSL
+
+Task 2.8 recomputes delay at each detected arrival as `actual arrival − scheduled arrival`, positive when late. The
+scored hour, schedule and position pipeline are the same as "Stop detection against HSL" above. The HSL comparison value
+is the normalized `dl` of the position whose timestamp became the detected arrival; a missing source value stays missing.
+GTFS times are measured from local noon minus 12 hours of the service day, including values above 24:00 and daylight-saving
+transition days.
+
+| Actual arrivals | Compared with `dl` | No source `dl` | No scheduled arrival | Median calculated − `dl` | Absolute p95 | Within 30 s | Within 60 s |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 28 473 | 27 997 (98.33 %) | 476 (1.67 %) | 0 | +1.00 s | 8.00 s | 98.16 % | 98.77 % |
+
+- Every detected arrival had a scheduled time; comparison coverage is limited only by positions where HSL omitted `dl`.
+- The +1 s median means the independently detected schedule deviation is one second later than HSL's value at the median.
+  The absolute p95 of 8 s is close to the detector's event-time p95 and small enough for the map and the later ML baseline.
+- `positions.enriched.delaySec` uses the source delay when present. Otherwise it keeps the most recent independently
+  calculated arrival delay for that trip; the original source value remains inside the nested position for audit and ML.

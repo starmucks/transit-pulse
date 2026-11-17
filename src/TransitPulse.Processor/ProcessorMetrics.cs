@@ -53,13 +53,23 @@ internal sealed class ProcessorMetrics
     private static readonly KeyValuePair<string, object?> _back = new("direction", "back");
     private static readonly KeyValuePair<string, object?> _forward = new("direction", "forward");
 
+    // In the order of DelayCheckResult.
+    private static readonly KeyValuePair<string, object?>[] _delayTags =
+    [
+        new("result", "compared"),
+        new("result", "no_source_delay"),
+        new("result", "no_scheduled_arrival"),
+    ];
+
     private readonly Counter<long> _messages;
     private readonly Counter<long> _trips;
     private readonly Counter<long> _routes;
     private readonly Counter<long> _reanchors;
     private readonly Counter<long> _stopEvents;
+    private readonly Counter<long> _delayChecks;
     private readonly Histogram<double> _lagTime;
     private readonly Histogram<double> _routeOffset;
+    private readonly Histogram<double> _delayDifference;
     private readonly long[] _totals = new long[_verdictTags.Length];
     private readonly long[] _tripTotals = new long[_tripTags.Length];
     private readonly long[] _routeTotals = new long[_routeTags.Length];
@@ -87,6 +97,14 @@ internal sealed class ProcessorMetrics
         // Steps back are what stop events must survive (ADR-0011); the simulation's count is to be checked on the live stream.
         _reanchors = meter.CreateCounter<long>("transitpulse.processor.reanchors", "{position}", "Vehicles placed anew on another pass of their trip's line, by direction.");
         _stopEvents = meter.CreateCounter<long>("transitpulse.processor.stop_events", "{event}", "Stop events found, by kind.");
+        _delayChecks = meter.CreateCounter<long>(
+            "transitpulse.processor.delay_checks", "{arrival}", "Actual arrivals checked against the schedule and source delay.");
+        _delayDifference = meter.CreateHistogram<double>(
+            "transitpulse.processor.delay_difference",
+            "s",
+            "Calculated delay minus the source delay at the actual arrival.",
+            null,
+            new InstrumentAdvice<double> { HistogramBucketBoundaries = [-300, -120, -60, -30, -10, 0, 10, 30, 60, 120, 300] });
         _routeOffset = meter.CreateHistogram(
             "transitpulse.processor.route_offset",
             "m",
@@ -142,6 +160,17 @@ internal sealed class ProcessorMetrics
     {
         _stopEventTotals[(int)kind]++;
         _stopEvents.Add(1, _stopEventTags[(int)kind]);
+    }
+
+    /// <summary>Counts an actual-arrival delay check and records its signed difference when both values existed.</summary>
+    /// <param name="check">The check completed by the detector.</param>
+    public void Delay(DelayCheck check)
+    {
+        _delayChecks.Add(1, _delayTags[(int)check.Result]);
+        if (check is { Result: DelayCheckResult.Compared, CalculatedSec: { } calculated, SourceSec: { } source })
+        {
+            _delayDifference.Record((double)calculated - source);
+        }
     }
 
     /// <summary>Stop events of this kind since the start. Called by the loop only.</summary>

@@ -90,6 +90,21 @@ public sealed class TripScheduleReader(NpgsqlDataSource dataSource)
         ORDER BY st.trip_id, st.stop_sequence
         """;
 
+    // Unlike stop geometry, times cannot be shared by every trip through the same stops: running times vary during the day.
+    // LATERAL makes one primary-key range scan per trip instead of a scan and sort of the snapshot's whole stop_times table.
+    private const string StopTimesOfTrips =
+        """
+        SELECT t.trip_id, st.stop_sequence, st.arrival_sec, st.departure_sec
+        FROM unnest($2::text[]) WITH ORDINALITY AS t(trip_id, ordinal)
+        JOIN LATERAL (
+            SELECT s.stop_sequence, s.arrival_sec, s.departure_sec
+            FROM gtfs.stop_times s
+            WHERE s.snapshot_id = $1 AND s.trip_id = t.trip_id
+            ORDER BY s.stop_sequence
+        ) st ON true
+        ORDER BY t.ordinal, st.stop_sequence
+        """;
+
     /// <summary>Finds the feed's active snapshot: a cheap way to learn whether a loaded schedule is out of date.</summary>
     /// <param name="feedId">Feed, e.g. <c>hsl</c>.</param>
     /// <param name="cancellationToken">Stops the query.</param>
@@ -162,11 +177,17 @@ public sealed class TripScheduleReader(NpgsqlDataSource dataSource)
         }
 
         var stops = await ReadStopPatternsAsync(connection, transaction, snapshotId, shapeOfTrip, shapes, cancellationToken);
+        var timetables = await ReadStopTimetablesAsync(connection, transaction, snapshotId, shapeOfTrip.Keys, cancellationToken);
         for (var i = 0; i < trips.Count; i++)
         {
             if (shapeOfTrip.TryGetValue(trips[i].TripId, out var shapeId))
             {
-                trips[i] = trips[i] with { Shape = shapes[shapeId], Stops = stops.GetValueOrDefault(trips[i].TripId) };
+                trips[i] = trips[i] with
+                {
+                    Shape = shapes[shapeId],
+                    Stops = stops.GetValueOrDefault(trips[i].TripId),
+                    Timetable = timetables.GetValueOrDefault(trips[i].TripId),
+                };
             }
         }
 
@@ -265,6 +286,40 @@ public sealed class TripScheduleReader(NpgsqlDataSource dataSource)
         return stops;
     }
 
+    private static async Task<Dictionary<string, StopTimetable>> ReadStopTimetablesAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        int snapshotId,
+        IEnumerable<string> tripIds,
+        CancellationToken cancellationToken)
+    {
+        var ids = tripIds.ToArray();
+        var timetables = new Dictionary<string, StopTimetable>(ids.Length, StringComparer.Ordinal);
+        var calls = new List<ScheduledStopTime>();
+        string? current = null;
+        await using var select = new NpgsqlCommand(StopTimesOfTrips, connection, transaction) { CommandTimeout = ReadTimeoutSeconds };
+        select.Parameters.Add(new NpgsqlParameter { Value = snapshotId });
+        select.Parameters.Add(new NpgsqlParameter { Value = ids });
+        await using var reader = await select.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var tripId = reader.GetString(0);
+            if (tripId != current)
+            {
+                AddTimetable(timetables, current, calls);
+                current = tripId;
+            }
+
+            calls.Add(new ScheduledStopTime(
+                reader.GetInt32(1),
+                reader.IsDBNull(2) ? null : reader.GetInt32(2),
+                reader.IsDBNull(3) ? null : reader.GetInt32(3)));
+        }
+
+        AddTimetable(timetables, current, calls);
+        return timetables;
+    }
+
     private static void AddPattern(
         Dictionary<(string ShapeId, string StopKey), StopPattern> built,
         string? tripId,
@@ -279,6 +334,16 @@ public sealed class TripScheduleReader(NpgsqlDataSource dataSource)
         }
 
         points.Clear();
+    }
+
+    private static void AddTimetable(Dictionary<string, StopTimetable> timetables, string? tripId, List<ScheduledStopTime> calls)
+    {
+        if (tripId is not null)
+        {
+            timetables.Add(tripId, new StopTimetable(CollectionsMarshal.AsSpan(calls)));
+        }
+
+        calls.Clear();
     }
 
     private static void AddShape(Dictionary<string, RouteShape> shapes, string? shapeId, List<double> lats, List<double> lons)

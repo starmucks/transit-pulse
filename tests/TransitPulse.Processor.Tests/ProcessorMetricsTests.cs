@@ -72,6 +72,21 @@ public sealed class ProcessorMetricsTests : IDisposable
         Assert.All(kinds, kind => Assert.Equal(1, metrics.Total(kind)));
     }
 
+    [Fact]
+    public void Delay_checks_count_coverage_and_only_comparisons_record_a_difference()
+    {
+        using var checks = new MetricCollector<long>(Factory, ProcessorMetrics.MeterName, "transitpulse.processor.delay_checks");
+        using var differences = new MetricCollector<double>(Factory, ProcessorMetrics.MeterName, "transitpulse.processor.delay_difference");
+        var metrics = new ProcessorMetrics(Factory);
+
+        metrics.Delay(new DelayCheck(DelayCheckResult.Compared, CalculatedSec: 75, SourceSec: 60));
+        metrics.Delay(new DelayCheck(DelayCheckResult.NoSourceDelay, CalculatedSec: 75));
+        metrics.Delay(new DelayCheck(DelayCheckResult.NoScheduledArrival));
+
+        Assert.Equal(["compared", "no_source_delay", "no_scheduled_arrival"], checks.GetMeasurementSnapshot().Select(m => m.Tags["result"]));
+        Assert.Equal(15, Assert.Single(differences.GetMeasurementSnapshot()).Value);
+    }
+
     [Theory]
     [InlineData(nameof(RouteMatchStatus.OnRoute), "on_route", true)]
     [InlineData(nameof(RouteMatchStatus.OffRoute), "off_route", true)]

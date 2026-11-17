@@ -11,5 +11,13 @@ namespace TransitPulse.Domain;
 /// The trip's stops placed on <paramref name="Shape"/>, one instance shared by all trips through the same stops on the same
 /// shape; <see langword="null"/> without a shape.
 /// </param>
+/// <param name="Timetable">The trip's scheduled calls; calendar instances of the same GTFS trip share one.</param>
 public sealed record ScheduledTrip(
-    string TripId, string RouteId, int DirectionId, int StartSeconds, DateOnly ServiceDate, RouteShape? Shape = null, StopPattern? Stops = null);
+    string TripId,
+    string RouteId,
+    int DirectionId,
+    int StartSeconds,
+    DateOnly ServiceDate,
+    RouteShape? Shape = null,
+    StopPattern? Stops = null,
+    StopTimetable? Timetable = null);

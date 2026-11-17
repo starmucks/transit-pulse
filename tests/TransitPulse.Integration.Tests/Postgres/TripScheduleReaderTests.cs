@@ -32,7 +32,9 @@ public sealed class TripScheduleReaderTests(PostgresFixture postgres) : IClassFi
 
         Assert.Equal(RunsPerDay, loaded!.Schedule.RunCount);
         Assert.Equal(TripResolution.Found, loaded.Schedule.Find("1009/1/20261104/25:35:00", out var trip));
-        Assert.Equal(new ScheduledTrip("1009_20261030_Ke_2_2535", "1009", 1, (25 * 3600) + (35 * 60), _wednesday), trip! with { Shape = null, Stops = null });
+        Assert.Equal(
+            new ScheduledTrip("1009_20261030_Ke_2_2535", "1009", 1, (25 * 3600) + (35 * 60), _wednesday),
+            trip! with { Shape = null, Stops = null, Timetable = null });
     }
 
     [Fact]
@@ -76,6 +78,21 @@ public sealed class TripScheduleReaderTests(PostgresFixture postgres) : IClassFi
     }
 
     [Fact]
+    public async Task Runs_with_one_stop_pattern_keep_their_own_times()
+    {
+        var reader = new TripScheduleReader(await ImportAsync(Wednesdays));
+
+        var loaded = await reader.ReadAsync("hsl", [_wednesday], Ct);
+        loaded!.Schedule.Find("1009/1/20261104/14:52:00", out var afternoon);
+        loaded.Schedule.Find("1009/1/20261104/25:35:00", out var afterMidnight);
+
+        Assert.Same(afternoon!.Stops, afterMidnight!.Stops);
+        Assert.NotSame(afternoon.Timetable, afterMidnight.Timetable);
+        Assert.Equal(14 * 3600 + 52 * 60, afternoon.Timetable!.Calls[0].ArrivalSeconds);
+        Assert.Equal(25 * 3600 + 35 * 60, afterMidnight.Timetable!.Calls[0].ArrivalSeconds);
+    }
+
+    [Fact]
     public async Task First_departure_is_taken_from_the_first_stop()
     {
         var reader = new TripScheduleReader(await ImportAsync(Wednesdays));
@@ -97,6 +114,18 @@ public sealed class TripScheduleReaderTests(PostgresFixture postgres) : IClassFi
         Assert.Equal(TripResolution.Found, loaded.Schedule.Find("1009/0/20261028/14:28:00", out var trip));
         Assert.Equal(_previousWednesday, trip!.ServiceDate);
         Assert.Equal(TripResolution.NoDeparture, loaded.Schedule.Find("1009/0/20261105/14:28:00", out _));
+    }
+
+    [Fact]
+    public async Task Calendar_instances_of_one_gtfs_trip_share_their_timetable()
+    {
+        var reader = new TripScheduleReader(await ImportAsync(Wednesdays));
+
+        var loaded = await reader.ReadAsync("hsl", [_previousWednesday, _wednesday], Ct);
+        loaded!.Schedule.Find("1009/0/20261028/14:28:00", out var previous);
+        loaded.Schedule.Find("1009/0/20261104/14:28:00", out var current);
+
+        Assert.Same(previous!.Timetable, current!.Timetable);
     }
 
     [Theory]

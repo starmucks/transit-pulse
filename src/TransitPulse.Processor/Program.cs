@@ -25,7 +25,11 @@ builder.Services.AddOptions<TripScheduleOptions>()
     .Validate(o => o.StartupWait >= TimeSpan.Zero, "Schedule:StartupWait must not be negative.")
     .ValidateOnStart();
 builder.Services.AddSingleton(provider => new TripScheduleReader(provider.GetRequiredService<NpgsqlDataSource>()));
-builder.Services.AddSingleton(provider => new CurrentTripSchedule(provider.GetRequiredService<IOptions<TripScheduleOptions>>().Value.FeedId));
+builder.Services.AddSingleton(provider =>
+{
+    var options = provider.GetRequiredService<IOptions<TripScheduleOptions>>().Value;
+    return new CurrentTripSchedule(options.FeedId, TimeZoneInfo.FindSystemTimeZoneById(options.TimeZone));
+});
 builder.Services.AddSingleton<ProcessorMetrics>();
 // In this order: hosted services start one after another, so the loop finds its topics and its schedule in place.
 builder.Services.AddHostedService<ProcessorTopicInitializer>();

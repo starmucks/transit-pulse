@@ -19,7 +19,7 @@ public sealed class TripScheduleRefresherTests(PostgresFixture postgres) : IClas
     private const string TramOnWednesday = "1009/0/20261104/14:28:00";
 
     private readonly string _directory = Directory.CreateTempSubdirectory("gtfs-refresh-").FullName;
-    private readonly CurrentTripSchedule _schedule = new("hsl");
+    private readonly CurrentTripSchedule _schedule = new("hsl", TimeZoneInfo.Utc);
     private readonly FakeLogger<TripScheduleRefresher> _log = new();
     private FakeTimeProvider _clock = new(new DateTimeOffset(2026, 11, 4, 12, 0, 0, TimeSpan.Zero));
 
