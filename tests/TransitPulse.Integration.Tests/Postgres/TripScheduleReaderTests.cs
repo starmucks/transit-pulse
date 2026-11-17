@@ -32,7 +32,7 @@ public sealed class TripScheduleReaderTests(PostgresFixture postgres) : IClassFi
 
         Assert.Equal(RunsPerDay, loaded!.Schedule.RunCount);
         Assert.Equal(TripResolution.Found, loaded.Schedule.Find("1009/1/20261104/25:35:00", out var trip));
-        Assert.Equal(new ScheduledTrip("1009_20261030_Ke_2_2535", "1009", 1, (25 * 3600) + (35 * 60), _wednesday), trip! with { Shape = null });
+        Assert.Equal(new ScheduledTrip("1009_20261030_Ke_2_2535", "1009", 1, (25 * 3600) + (35 * 60), _wednesday), trip! with { Shape = null, Stops = null });
     }
 
     [Fact]
@@ -51,6 +51,28 @@ public sealed class TripScheduleReaderTests(PostgresFixture postgres) : IClassFi
 
         // HSL's own shape_dist_traveled, in kilometres: 9.900 at the last point of direction 1.
         Assert.Equal(9_900, back.Shape!.LengthMetres, tolerance: 99);
+    }
+
+    [Fact]
+    public async Task Runs_carry_their_stops_on_their_line_one_instance_per_pattern()
+    {
+        var reader = new TripScheduleReader(await ImportAsync(Wednesdays));
+
+        var loaded = await reader.ReadAsync("hsl", [_wednesday], Ct);
+        loaded!.Schedule.Find("1009/0/20261104/14:28:00", out var outward);
+        loaded.Schedule.Find("1009/1/20261104/14:52:00", out var back);
+        loaded.Schedule.Find("1009/1/20261104/25:35:00", out var lateBack);
+
+        // Both runs of direction 1 call at the same 27 stops along the same shape.
+        Assert.NotSame(outward!.Stops, back!.Stops);
+        Assert.Same(back.Stops, lateBack!.Stops);
+
+        var calls = back.Stops!.Calls;
+        Assert.Equal(Enumerable.Range(1, 27), calls.Select(c => c.Sequence));
+        Assert.Equal("1171402", calls[0].StopId);
+        Assert.All(calls, c => Assert.InRange(c.OffsetMetres, 0, StopPattern.NearLineMetres));
+        Assert.InRange(calls[0].AlongMetres, 0, 15);
+        Assert.InRange(calls[^1].AlongMetres, back.Shape!.LengthMetres - 15, back.Shape.LengthMetres);
     }
 
     [Fact]

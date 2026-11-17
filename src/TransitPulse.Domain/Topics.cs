@@ -18,7 +18,7 @@ public static class Topics
     /// <summary>Positions with the trip, the distance along the route and the delay.</summary>
     public static readonly TopicDefinition PositionsEnriched = new("positions.enriched", 12, TimeSpan.FromHours(24));
 
-    /// <summary>Stop arrivals and departures.</summary>
+    /// <summary>Stop arrivals, departures and passes, keyed by line (<see cref="StopEventMessage"/>).</summary>
     public static readonly TopicDefinition EventsStop = new("events.stop", 6, TimeSpan.FromDays(7));
 
     /// <summary>Bunching and other anomalies.</summary>

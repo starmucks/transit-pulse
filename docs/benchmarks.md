@@ -495,6 +495,39 @@ development PC, Postgres in Docker, warm cache.
   and a copy of each run. A background read once a day; left as is.
 - Measured with a throwaway console program holding each loaded schedule, heap measured after a full collection.
 
+### Stops in the schedule
+
+Task 2.7 gives each run its stops placed on its shape (`StopPattern`). Runs through the same stops on the same shape share
+one pattern, so two queries follow the shapes in the same transaction: a key per trip (an `md5` of its stop ids in order),
+then the stops of one trip per pattern. Same snapshot, days and machine as above; Release, after a warm-up, `main` and the
+branch alternated.
+
+| | Before (`main`) | With stops |
+|---|---:|---:|
+| Runs / with stops | 57 010 / — | 57 010 / 57 010 |
+| Patterns / stops placed / stops farther than 50 m from the line | | 982 / 28 986 / 0 |
+| Whole read through `TripScheduleReader`, 8 reads | 2.16–2.57 s | 4.01–4.34 s |
+| Stops of the 982 patterns, primary key index scan | | 0.13–0.28 s |
+
+**The key query decides the time.** Two forms, same 57 010 keys:
+
+| Form | Blocks read | Sort on disk | Execution in Postgres | Client, warm cache |
+|---|---:|---|---:|---:|
+| `GROUP BY trip_id` over `trip_id = ANY(...)` | 96 529 | yes, ~70 MB | 4.77 s | 4.26–5.06 s |
+| `unnest` + `LATERAL` per trip through the primary key | 10 861 | no | 2.39 s | 3.94–5.79 s |
+
+- The `GROUP BY` form scans the snapshot's whole `stop_times` partition (10.7 million rows, 9 million filtered out) and
+  sorts the 1.6 million kept on disk; with it the whole read took 8.29–11.23 s. The reader uses the `LATERAL` form.
+- Warm, the two are close; cold, blocks read decide, and the server's disk reads ~4 MB/s cold. Not measured there.
+- If the read is still slow on the target server (stage 8), the key can be computed once per snapshot at import, as a
+  column of `gtfs.trips`, leaving the read only the 0.13–0.28 s of the patterns' stops.
+- **Memory:** `GC.GetTotalMemory` gave 18.2 and 22.1 MiB for the whole schedule in two runs and nothing usable for
+  `main`, so the size is by arithmetic: 28 986 stops at ~70 bytes (the struct and its `stop_id` string) ≈ 2 MiB, plus a
+  reference in each run, over the 19.7 MiB above.
+- **`shape_dist_traveled` is not used:** in kilometres for HSL, metres for Entur, absent for MBTA (all three snapshots
+  checked), and for HSL metro it parts from the published shape by up to 275 m while every station lies within 17 m of
+  the line (`StopPatternTests`).
+
 ## Route matching
 
 How HSL positions are placed on their trip's line by `RouteProgress` (stage 2, task 2.6; ADR-0011).
@@ -564,3 +597,75 @@ Per trip, comparing the two rules:
 - The simulation reads 0.7 % more positions, since its deduplication is simpler than the Ingestor's.
 - The filter alone ran at about 115 000 messages/s on another hour ("Processor throughput"); the two hours differ, so this
   is no measure of what matching costs, only that the loop stays far above the C2 target of 12 000 positions/s.
+
+## Stop detection against HSL
+
+How closely `StopDetector` reproduces HSL's own stop events (stage 2, task 2.7). The scored window is Wednesday
+2026-11-04 06:00–07:00 UTC, the weekday morning peak. HSL GTFS snapshot 4 (2026-10-31 14:33) supplies the trip shapes and
+stops.
+
+**How:** a Release benchmark passed every raw `hsl` record received from 05:50 to 07:10 through the real
+`ArchiveReader`, `HslPositionNormalizer`, `PositionMessage` JSON boundary and `PartitionState`. The extra ten minutes on
+each side warm up and finish vehicle state; only events whose event time is in the scored hour count. This read 7 388 477
+raw records, normalized 7 312 422 positions and accepted 5 675 748 after the Processor's ordering and jump checks;
+5 656 204 accepted positions found one scheduled trip. It completed in 7 min 26 s on the development PC.
+
+The reference read `hsl-stop` records received from 04:00 to 10:00, so an event in the scored hour could arrive up to
+three hours late. Events are compared by their own `tst`, never their receive time. The vehicle owner and number come from
+the MQTT topic; the body supplies the trip descriptor and stop. A stopped call gives an arrival at `ars` and a departure
+at `dep`; a chain containing `pas` gives one pass event. Of 823 754 raw reference records in the six-hour receive window,
+822 406 parsed and resolved to one trip; unresolved records are outside the denominator.
+
+Events are paired one-to-one by vehicle, resolved GTFS trip, stop, kind and time, in order, at most 120 s apart. Pairing
+also sees two minutes outside the scored hour so an event at a boundary is not called missing or extra. **Found** is paired
+reference events divided by reference events; **extra** is unpaired detected events divided by detected events. The signed
+error is ours minus HSL; p95 uses its absolute value.
+
+| Kind | HSL reference | Matched | Found | Detected | Extra | Extra share | Median signed | p95 absolute |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Arrival | 30 988 | 27 758 | 89.58 % | 28 473 | 718 | 2.52 % | +0.90 s | 2.37 s |
+| Departure | 29 674 | 28 070 | 94.59 % | 28 807 | 750 | 2.60 % | −2.41 s | 9.96 s |
+| Passed | 12 442 | 12 099 | 97.24 % | 14 447 | 2 343 | 16.22 % | −4.68 s | 9.35 s |
+| **All** | **73 104** | **67 927** | **92.92 %** | **71 727** | **3 811** | **5.31 %** | **−1.56 s** | **7.95 s** |
+
+- The median offsets reproduce the six reviewed fixtures (+0.9 s arrivals, −2.3 s departures, −4.7 s passes). HSL's
+  stop radius ends farther past the stop than the detector's 30 m along-route zone, so departure and pass events are
+  earlier by design.
+- Time accuracy is consistent once an event is paired: the overall absolute p95 is below 8 s. Coverage, not timing, is
+  the main remaining question: 10.42 % of HSL arrivals are not paired.
+- Passes have the opposite shape: 97.24 % of HSL passes are found, but 16.22 % of detected passes have no paired HSL
+  pass. The call-level comparison below separates a genuinely unpaired call from the same call classified differently.
+
+### Stopped versus passed calls
+
+An arrival and its departure are one stopped call, not two independent decisions. A second comparison therefore joins
+our `Arrival` and `Departure`, represents an HSL stopped chain by `ars/pde/wait/dep`, and pairs calls by vehicle, trip,
+stop and overlapping time regardless of their classification. This tests the suspected `stood` → `passed` confusion
+directly; it uses the same hour and 120 s boundary allowance as the event table.
+
+| Mode | HSL class | Reference calls | Ours stood | Ours passed | Missed | Found |
+|---|---|---:|---:|---:|---:|---:|
+| All | Stood | 30 995 | 29 031 | 1 228 | 736 | 97.63 % |
+| All | Passed | 12 442 | 221 | 12 099 | 122 | 99.02 % |
+| Bus | Stood | 26 319 | 25 425 | 526 | 368 | 98.60 % |
+| Bus | Passed | 12 314 | 189 | 12 015 | 110 | 99.11 % |
+| Tram | Stood | 3 341 | 3 219 | 41 | 81 | 97.58 % |
+| Tram | Passed | 117 | 32 | 83 | 2 | 98.29 % |
+| Train | Stood | 1 335 | 387 | 661 | 287 | 78.50 % |
+| Train | Passed | 11 | 0 | 1 | 10 | 9.09 % |
+
+- Across both classes, 42 579 of 43 437 HSL calls are paired (**98.02 %**). Of the paired calls, 41 130 keep HSL's
+  stood/passed class (**96.60 %**); 1 449 change class.
+- The suspected confusion is real but concentrated in trains: 661 of the 1 228 stopped calls classified as passed are
+  trains. Buses change 526 of 25 951 paired stopped calls (2.03 %), trams 41 of 3 260 (1.26 %), while trains change 661
+  of 1 048 (63.07 %). HSL supplies almost no train passes, so their pass recall is not measurable from this hour.
+- Train positions were already measured 10 % off route because station tracks are 50–58 m from the published shape;
+  long platforms also defeated the small fixture. A larger global stop zone would tune the bus and tram majority to a
+  train-specific map offset, so the detector stays unchanged. Per-mode route/stop tolerances need a separate design.
+- Of our calls, 584 of 29 871 stopped calls (1.96 %) and 1 117 of 14 447 passed calls (7.73 %) remain unpaired after
+  cross-kind matching: **1 701 of 44 318 (3.84 %)** overall. The other 1 226 event-level extra passes are HSL stopped
+  calls classified differently, not independent phantom calls.
+- The first regression bounds, accepted on 2026-11-17, are: at least 97 % of reference calls paired, at least 95 % of
+  paired calls keeping their class, at most 5 % of detected calls unpaired, and event-time absolute p95 at most 10 s.
+  This hour passes all four. Train quality is a known limitation rather than hidden by the overall bounds; per-mode
+  route/stop tolerances are future work, not part of task 2.7.

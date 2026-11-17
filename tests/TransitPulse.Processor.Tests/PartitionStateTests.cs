@@ -16,10 +16,10 @@ public sealed class PartitionStateTests
 
     private static PartitionState NewState() => new(new CurrentTripSchedule("hsl"));
 
-    private static TripSchedule ScheduleOf(int startHour, RouteShape? shape = null)
+    private static TripSchedule ScheduleOf(int startHour, RouteShape? shape = null, StopPattern? stops = null)
     {
         DateOnly day = new(2026, 11, 5);
-        return new([day], [new ScheduledTrip($"1009_{startHour}", "1009", 0, startHour * 3600, day, shape)]);
+        return new([day], [new ScheduledTrip($"1009_{startHour}", "1009", 0, startHour * 3600, day, shape, stops)]);
     }
 
     // A line running east along a parallel; the messages lie at 60.2° N, 24.9° E.
@@ -70,6 +70,36 @@ public sealed class PartitionStateTests
         Assert.Null(parked.Route);
         Assert.Equal(RouteMatchStatus.OnRoute, next.Status);
         Assert.Equal(first.AlongMetres, next.AlongMetres);
+    }
+
+    [Fact]
+    public void Standing_at_a_stop_of_the_trip_gives_its_arrival_and_departure_once_each()
+    {
+        // A line running north along the messages' meridian, one stop on it at 60.2° N; 0.0001° of latitude is ~11 m.
+        var line = new RouteShape([60.1, 60.3], [24.9, 24.9]);
+        var schedule = new CurrentTripSchedule("hsl");
+        schedule.Replace(ScheduleOf(14, line, new StopPattern(line, [new StopPoint("1020453", 1, 60.2, 24.9)])));
+        var state = new PartitionState(schedule);
+        const string trip = "1009/0/20261105/14:00:00";
+
+        // 56 m before the stop, 17 m before it (in its zone), standing there, 67 m past it, then a position without a trip.
+        (int Seconds, double Lat, string? Trip)[] drive =
+            [(0, 60.1995, trip), (5, 60.19985, trip), (6, 60.19985, trip), (7, 60.19985, trip), (10, 60.2006, trip), (11, 60.2007, null)];
+        var found = drive
+            .Select((p, offset) =>
+            {
+                var message = p.Trip is null ? Message(p.Seconds, p.Lat) : OnTrip("hsl", p.Trip, p.Seconds, p.Lat);
+                state.Process(offset, Vehicle, message);
+                return state.StopEvents.ToList();
+            })
+            .ToList();
+
+        Assert.Equal([0, 0, 1, 0, 1, 0], found.Select(events => events.Count));
+        var arrival = found[2][0];
+        Assert.Equal(StopEventKind.Arrival, arrival.Kind);
+        Assert.Equal("hsl/40/415/1009_14/2026-11-05/1/arrival", arrival.Id);
+        Assert.Equal(_t0.AddSeconds(5), arrival.At);
+        Assert.Equal("hsl/40/415/1009_14/2026-11-05/1/departure", found[4][0].Id);
     }
 
     [Fact]

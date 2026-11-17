@@ -4,13 +4,18 @@ using TransitPulse.Domain;
 namespace TransitPulse.Processor;
 
 /// <summary>
-/// What the Processor keeps for one partition: the tracks of its vehicles and how far it has read. Kept per partition
+/// What the Processor keeps for one partition: the tracks of its vehicles, their progress along their trips and stops, and
+/// how far it has read. Kept per partition
 /// so a partition's state can leave with it in a rebalance. Not thread-safe: used only by the consume loop.
 /// </summary>
 /// <param name="schedule">Where accepted positions look up their trips.</param>
 internal sealed class PartitionState(CurrentTripSchedule schedule)
 {
     private readonly Dictionary<string, VehicleState> _vehicles = [];
+
+    // Reused for every message: events are rare, a new list per position would not be.
+    private readonly List<StopEvent> _found = [];
+    private readonly List<VehicleStopEvent> _stopEvents = [];
     private long? _committedOffset;
 
     /// <summary>The offset to resume from: one past the last message processed, as Kafka expects a commit to be.</summary>
@@ -18,6 +23,12 @@ internal sealed class PartitionState(CurrentTripSchedule schedule)
 
     /// <summary>Whether messages were processed since the last commit; an idle partition has nothing to commit.</summary>
     public bool HasUncommitted => NextOffset != _committedOffset;
+
+    /// <summary>
+    /// The stop events the last <see cref="Process"/> call found, in the order they happened; empty for most positions.
+    /// Valid until the next call.
+    /// </summary>
+    public IReadOnlyList<VehicleStopEvent> StopEvents => _stopEvents;
 
     /// <summary>Judges one message and moves the partition past it, whatever the verdict.</summary>
     /// <param name="offset">The message's offset.</param>
@@ -28,6 +39,7 @@ internal sealed class PartitionState(CurrentTripSchedule schedule)
     {
         // An unreadable message moves the offset too: it would fail the same way on every retry and block the partition.
         NextOffset = offset + 1;
+        _stopEvents.Clear();
 
         if (key is null || !TryParse(value, out var position))
         {
@@ -53,11 +65,24 @@ internal sealed class PartitionState(CurrentTripSchedule schedule)
     /// <param name="offset">The committed offset: the value <see cref="NextOffset"/> had when the commit was made.</param>
     public void MarkCommitted(long offset) => _committedOffset = offset;
 
-    // A position without a found trip leaves the progress as it was: the vehicle may be back on the same trip next time.
+    // A position without a found trip leaves the progress and the stop detection as they were: the vehicle may be back on
+    // the same trip next time.
     private ProcessedMessage Accept(VehicleState vehicle, VehiclePosition position)
     {
         var resolution = schedule.Resolve(position, out var trip);
-        RouteMatch? route = trip is null ? null : vehicle.Route.Advance(trip, position.Lat, position.Lon, position.ObservedAt);
+        if (trip is null)
+        {
+            return new ProcessedMessage(MessageVerdict.Accepted, resolution);
+        }
+
+        var route = vehicle.Route.Advance(trip, position.Lat, position.Lon, position.ObservedAt);
+        vehicle.Stops.Advance(trip, route, position.ObservedAt, _found);
+        foreach (var found in _found)
+        {
+            _stopEvents.Add(VehicleStopEvent.From(position, trip, found));
+        }
+
+        _found.Clear();
         return new ProcessedMessage(MessageVerdict.Accepted, resolution, route);
     }
 
@@ -81,5 +106,7 @@ internal sealed class PartitionState(CurrentTripSchedule schedule)
         public VehicleTrack Track { get; } = new();
 
         public RouteProgress Route { get; } = new();
+
+        public StopDetector Stops { get; } = new();
     }
 }

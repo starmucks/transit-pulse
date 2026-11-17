@@ -63,6 +63,33 @@ public sealed class TripScheduleReader(NpgsqlDataSource dataSource)
     private const string PointsOfShapes =
         "SELECT shape_id, lat, lon FROM gtfs.shapes WHERE snapshot_id = $1 AND shape_id = ANY($2) ORDER BY shape_id, sequence";
 
+    // One row per trip instead of one per call: trips through the same stops in the same order get the same key, so only
+    // one trip of each pattern has its stops read (HSL: 1 203 patterns for 380 543 trips). Separate from the runs query so
+    // that its measured plan stays as it is.
+    //
+    // Per trip through the primary key, not GROUP BY over trip_id = ANY(...): that scans the snapshot's whole stop_times and
+    // sorts 1.6 million rows on disk, reading 96 529 blocks against 10 861 here (docs/benchmarks.md "Stops in the schedule").
+    private const string StopKeysOfTrips =
+        """
+        SELECT t.trip_id, k.stop_key
+        FROM unnest($2::text[]) AS t(trip_id)
+        JOIN LATERAL (
+            SELECT md5(string_agg(st.stop_id, ',' ORDER BY st.stop_sequence)) AS stop_key
+            FROM gtfs.stop_times st
+            WHERE st.snapshot_id = $1 AND st.trip_id = t.trip_id
+        ) k ON k.stop_key IS NOT NULL
+        """;
+
+    // A stop without coordinates cannot be placed on the line: it is left out of its pattern.
+    private const string StopsOfTrips =
+        """
+        SELECT st.trip_id, st.stop_sequence, st.stop_id, s.lat, s.lon
+        FROM gtfs.stop_times st
+        JOIN gtfs.stops s ON s.snapshot_id = st.snapshot_id AND s.stop_id = st.stop_id
+        WHERE st.snapshot_id = $1 AND st.trip_id = ANY($2) AND s.lat IS NOT NULL AND s.lon IS NOT NULL
+        ORDER BY st.trip_id, st.stop_sequence
+        """;
+
     /// <summary>Finds the feed's active snapshot: a cheap way to learn whether a loaded schedule is out of date.</summary>
     /// <param name="feedId">Feed, e.g. <c>hsl</c>.</param>
     /// <param name="cancellationToken">Stops the query.</param>
@@ -123,11 +150,23 @@ public sealed class TripScheduleReader(NpgsqlDataSource dataSource)
 
         var shapes = await ReadShapesAsync(
             connection, transaction, snapshotId, [.. shapeIds.OfType<string>().Distinct()], cancellationToken);
+
+        // A trip's shape is the trip's own, the same on every day it runs: one entry per trip id.
+        var shapeOfTrip = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var i = 0; i < trips.Count; i++)
         {
-            if (shapeIds[i] is { } shapeId && shapes.TryGetValue(shapeId, out var shape))
+            if (shapeIds[i] is { } shapeId && shapes.ContainsKey(shapeId))
             {
-                trips[i] = trips[i] with { Shape = shape };
+                shapeOfTrip.TryAdd(trips[i].TripId, shapeId);
+            }
+        }
+
+        var stops = await ReadStopPatternsAsync(connection, transaction, snapshotId, shapeOfTrip, shapes, cancellationToken);
+        for (var i = 0; i < trips.Count; i++)
+        {
+            if (shapeOfTrip.TryGetValue(trips[i].TripId, out var shapeId))
+            {
+                trips[i] = trips[i] with { Shape = shapes[shapeId], Stops = stops.GetValueOrDefault(trips[i].TripId) };
             }
         }
 
@@ -162,6 +201,84 @@ public sealed class TripScheduleReader(NpgsqlDataSource dataSource)
 
         AddShape(shapes, current, lats, lons);
         return shapes;
+    }
+
+    // Trips with the same shape and the same stop key share one pattern, built from the stops of the first such trip.
+    private static async Task<Dictionary<string, StopPattern>> ReadStopPatternsAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        int snapshotId,
+        Dictionary<string, string> shapeOfTrip,
+        Dictionary<string, RouteShape> shapes,
+        CancellationToken cancellationToken)
+    {
+        var patternOfTrip = new Dictionary<string, (string ShapeId, string StopKey)>(shapeOfTrip.Count, StringComparer.Ordinal);
+        var firstTripOf = new Dictionary<(string ShapeId, string StopKey), string>();
+        await using (var select = new NpgsqlCommand(StopKeysOfTrips, connection, transaction) { CommandTimeout = ReadTimeoutSeconds })
+        {
+            select.Parameters.Add(new NpgsqlParameter { Value = snapshotId });
+            select.Parameters.Add(new NpgsqlParameter { Value = shapeOfTrip.Keys.ToArray() });
+            await using var reader = await select.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var tripId = reader.GetString(0);
+                var pattern = (shapeOfTrip[tripId], reader.GetString(1));
+                patternOfTrip.Add(tripId, pattern);
+                firstTripOf.TryAdd(pattern, tripId);
+            }
+        }
+
+        var built = new Dictionary<(string ShapeId, string StopKey), StopPattern>(firstTripOf.Count);
+        var patternOfFirstTrip = firstTripOf.ToDictionary(p => p.Value, p => p.Key, StringComparer.Ordinal);
+        var points = new List<StopPoint>();
+        string? current = null;
+        await using (var select = new NpgsqlCommand(StopsOfTrips, connection, transaction) { CommandTimeout = ReadTimeoutSeconds })
+        {
+            select.Parameters.Add(new NpgsqlParameter { Value = snapshotId });
+            select.Parameters.Add(new NpgsqlParameter { Value = patternOfFirstTrip.Keys.ToArray() });
+            await using var reader = await select.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var tripId = reader.GetString(0);
+                if (tripId != current)
+                {
+                    AddPattern(built, current, points, patternOfFirstTrip, shapes);
+                    current = tripId;
+                }
+
+                points.Add(new StopPoint(reader.GetString(2), reader.GetInt32(1), reader.GetDouble(3), reader.GetDouble(4)));
+            }
+        }
+
+        AddPattern(built, current, points, patternOfFirstTrip, shapes);
+
+        // A pattern whose stops all lack coordinates was never built: its trips go without stops.
+        var stops = new Dictionary<string, StopPattern>(patternOfTrip.Count, StringComparer.Ordinal);
+        foreach (var (tripId, pattern) in patternOfTrip)
+        {
+            if (built.TryGetValue(pattern, out var stopPattern))
+            {
+                stops.Add(tripId, stopPattern);
+            }
+        }
+
+        return stops;
+    }
+
+    private static void AddPattern(
+        Dictionary<(string ShapeId, string StopKey), StopPattern> built,
+        string? tripId,
+        List<StopPoint> points,
+        Dictionary<string, (string ShapeId, string StopKey)> patternOfFirstTrip,
+        Dictionary<string, RouteShape> shapes)
+    {
+        if (tripId is not null)
+        {
+            var pattern = patternOfFirstTrip[tripId];
+            built.Add(pattern, new StopPattern(shapes[pattern.ShapeId], CollectionsMarshal.AsSpan(points)));
+        }
+
+        points.Clear();
     }
 
     private static void AddShape(Dictionary<string, RouteShape> shapes, string? shapeId, List<double> lats, List<double> lons)

@@ -5,7 +5,8 @@ using TransitPulse.Domain;
 namespace TransitPulse.Processor.Kafka;
 
 /// <summary>
-/// The Processor's main loop: reads positions, drops the implausible ones and publishes the rest. Delivery is
+/// The Processor's main loop: reads positions, drops the implausible ones and publishes the rest with the stop events they
+/// complete. Delivery is
 /// at-least-once: a partition's offset is committed only after everything read before it was delivered, so a crash repeats
 /// recent messages and loses none. One loop serves all partitions of the process (ADR-0010).
 /// </summary>
@@ -140,12 +141,20 @@ internal sealed partial class PositionConsumer(
 
         if (verdict == MessageVerdict.Accepted)
         {
-            Publish(ForOutput(result.Message), producer, stopping);
+            Publish(_options.OutputTopic, ForOutput(result.Message), producer, stopping);
         }
         else if (verdict == MessageVerdict.Unreadable)
         {
             _unreadable++;
             _firstUnreadable ??= result.TopicPartitionOffset;
+        }
+
+        // Through the same producer: the flush before a commit covers the events too, so a crash repeats them, never loses them.
+        foreach (var stopEvent in state.StopEvents)
+        {
+            metrics.StopEvent(stopEvent.Kind);
+            var message = new Message<string, byte[]> { Key = StopEventMessage.Key(stopEvent), Value = StopEventMessage.Value(stopEvent) };
+            Publish(_options.StopEventsTopic, message, producer, stopping);
         }
     }
 
@@ -181,18 +190,20 @@ internal sealed partial class PositionConsumer(
         var (jumps, unreadable) = (metrics.Total(MessageVerdict.ImpossibleJump), metrics.Total(MessageVerdict.Unreadable));
         var (tripsFound, tripLookups) = (metrics.Total(TripResolution.Found), metrics.TripLookups);
         var (onRoute, routeMatches) = (metrics.Total(RouteMatchStatus.OnRoute), metrics.RouteMatches);
-        LogProgress(accepted, outOfOrder, jumps, unreadable, tripsFound, tripLookups, onRoute, routeMatches);
+        var (arrivals, departures, passes) = (
+            metrics.Total(StopEventKind.Arrival), metrics.Total(StopEventKind.Departure), metrics.Total(StopEventKind.Passed));
+        LogProgress(accepted, outOfOrder, jumps, unreadable, tripsFound, tripLookups, onRoute, routeMatches, arrivals, departures, passes);
     }
 
     // Blocks while the producer's buffer is full, which stops the reading too: the broker being down holds the input back
     // instead of filling memory.
-    private void Publish(Message<string, byte[]> message, IProducer<string, byte[]> producer, CancellationToken stopping)
+    private void Publish(string topic, Message<string, byte[]> message, IProducer<string, byte[]> producer, CancellationToken stopping)
     {
         while (true)
         {
             try
             {
-                producer.Produce(_options.OutputTopic, message, OnDelivered);
+                producer.Produce(topic, message, OnDelivered);
                 return;
             }
             catch (ProduceException<string, byte[]> ex) when (ex.Error.Code == ErrorCode.Local_QueueFull)
@@ -294,7 +305,7 @@ internal sealed partial class PositionConsumer(
         var failed = Interlocked.Read(ref _failedDeliveries);
         if (failed > 0)
         {
-            throw new InvalidOperationException($"{failed} positions were not delivered to {_options.OutputTopic}.");
+            throw new InvalidOperationException($"{failed} messages were not delivered to {_options.OutputTopic} or {_options.StopEventsTopic}.");
         }
     }
 
@@ -361,9 +372,10 @@ internal sealed partial class PositionConsumer(
         LogBrokerError(error.Code, error.Reason);
     }
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Since the start: {Accepted} accepted, {OutOfOrder} out of order, {Jumps} impossible jumps, {Unreadable} unreadable; trips found for {TripsFound} of {TripLookups}; on the trip's line {OnRoute} of {RouteMatches}")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Since the start: {Accepted} accepted, {OutOfOrder} out of order, {Jumps} impossible jumps, {Unreadable} unreadable; trips found for {TripsFound} of {TripLookups}; on the trip's line {OnRoute} of {RouteMatches}; stop events: {Arrivals} arrivals, {Departures} departures, {Passes} passes")]
     private partial void LogProgress(
-        long accepted, long outOfOrder, long jumps, long unreadable, long tripsFound, long tripLookups, long onRoute, long routeMatches);
+        long accepted, long outOfOrder, long jumps, long unreadable, long tripsFound, long tripLookups, long onRoute, long routeMatches,
+        long arrivals, long departures, long passes);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Partitions assigned: {Partitions}")]
     private partial void LogAssigned(List<int> partitions);
@@ -380,13 +392,13 @@ internal sealed partial class PositionConsumer(
     [LoggerMessage(Level = LogLevel.Warning, Message = "Skipped {Count} unreadable messages since the last commit; the first: {First}")]
     private partial void LogUnreadable(long count, string first);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "{Undelivered} positions were still undelivered after {Timeout}; not committing yet")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "{Undelivered} messages were still undelivered after {Timeout}; not committing yet")]
     private partial void LogFlushIncomplete(int undelivered, TimeSpan timeout);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Commit failed, will retry: {Code}: {Reason}")]
     private partial void LogCommitFailed(ErrorCode code, string reason);
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "A position was not delivered: {Reason}")]
+    [LoggerMessage(Level = LogLevel.Error, Message = "A message was not delivered: {Reason}")]
     private partial void LogDeliveryFailed(string reason);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Broker error {Code}: {Reason}")]
