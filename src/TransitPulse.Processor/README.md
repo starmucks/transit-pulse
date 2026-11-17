@@ -16,6 +16,13 @@
   a schedule. The one wait is at start, bounded by `Schedule:StartupWait`; a longer first read finishes in the background.
 - **Group by line through the found trip,** not by `VehiclePosition.RouteId`: HFP sends route variants and codes of trams not
   in service there (`docs/benchmarks.md`, "Trip lookup").
+- **`positions.enriched` keeps the normalized source position intact.** Its top-level delay prefers the source value and
+  otherwise carries the last delay observed from an actual arrival. This preserves HSL `dl` for comparison and gives MBTA
+  a delay after its first observed arrival without changing the common `positions.raw` contract.
+- **GTFS time belongs to a service day, not a calendar timestamp.** Convert it from local noon minus twelve hours, as the
+  GTFS Time type specifies; hours may exceed 24 and daylight-saving transition days do not start at local midnight.
+- **Stop geometry and stop times have different sharing.** Trips through the same stops on the same shape share one
+  `StopPattern`, but each GTFS `trip_id` keeps its own `StopTimetable`; calendar instances of that trip share the timetable.
 - **State belongs to a partition:** it is dropped when the partition is revoked or lost. A lost partition is never committed:
   it already belongs to another consumer.
 - **Same partitioner as the Ingestor** (`Murmur2Random`): a vehicle keeps its partition number from topic to topic.

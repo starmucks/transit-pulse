@@ -127,23 +127,30 @@ internal sealed partial class PositionConsumer(
             _partitions.Add(partition, state);
         }
 
-        var (verdict, trip, route) = state.Process(result.Offset.Value, result.Message.Key, result.Message.Value);
-        metrics.Message(verdict, LagSeconds(result.Message.Timestamp));
-        if (trip is { } found)
+        var processed = state.Process(result.Offset.Value, result.Message.Key, result.Message.Value);
+        metrics.Message(processed.Verdict, LagSeconds(result.Message.Timestamp));
+        if (processed.Trip is { } found)
         {
             metrics.Trip(found);
         }
 
-        if (route is { } placed)
+        if (processed.Route is { } placed)
         {
             metrics.Route(placed);
         }
 
-        if (verdict == MessageVerdict.Accepted)
+        if (processed.Delay is { } delay)
         {
-            Publish(_options.OutputTopic, ForOutput(result.Message), producer, stopping);
+            metrics.Delay(delay);
         }
-        else if (verdict == MessageVerdict.Unreadable)
+
+        if (processed.Verdict == MessageVerdict.Accepted)
+        {
+            var position = processed.Position
+                ?? throw new InvalidOperationException("An accepted position did not produce an enriched value.");
+            Publish(_options.OutputTopic, ForOutput(result.Message, position), producer, stopping);
+        }
+        else if (processed.Verdict == MessageVerdict.Unreadable)
         {
             _unreadable++;
             _firstUnreadable ??= result.TopicPartitionOffset;
@@ -159,9 +166,13 @@ internal sealed partial class PositionConsumer(
     }
 
     // The client accepts only a writer's time or none: passing on a time the broker stamped makes every Produce throw.
-    private static Message<string, byte[]> ForOutput(Message<string, byte[]> input) => input.Timestamp.Type == TimestampType.CreateTime
-        ? input
-        : new Message<string, byte[]> { Key = input.Key, Value = input.Value, Timestamp = Timestamp.Default };
+    private static Message<string, byte[]> ForOutput(Message<string, byte[]> input, EnrichedPosition position) => new()
+    {
+        Key = input.Key,
+        Value = EnrichedPositionMessage.Value(position),
+        Timestamp = input.Timestamp.Type == TimestampType.CreateTime ? input.Timestamp : Timestamp.Default,
+        Headers = input.Headers,
+    };
 
     private double? LagSeconds(Timestamp written) => written.Type == TimestampType.NotAvailable
         ? null

@@ -38,7 +38,12 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
         return (input, output);
     }
 
-    private PositionConsumer NewConsumer(string input, string output, TimeSpan? commitInterval = null, ILogger<PositionConsumer>? logger = null) => new(
+    private PositionConsumer NewConsumer(
+        string input,
+        string output,
+        TimeSpan? commitInterval = null,
+        ILogger<PositionConsumer>? logger = null,
+        CurrentTripSchedule? schedule = null) => new(
         Options.Create(new ProcessorKafkaOptions
         {
             BootstrapServers = redpanda.BootstrapServers,
@@ -48,7 +53,7 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
             // Long by default: a test sees the commit it provokes, not one the timer happened to make.
             CommitInterval = commitInterval ?? TimeSpan.FromHours(1),
         }),
-        new CurrentTripSchedule("hsl"),
+        schedule ?? new CurrentTripSchedule("hsl", TimeZoneInfo.Utc),
         new ProcessorMetrics(_services.GetRequiredService<IMeterFactory>()),
         TimeProvider.System,
         logger ?? NullLogger<PositionConsumer>.Instance);
@@ -131,9 +136,36 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
         await consumer.StopAsync(Ct);
 
         Assert.False(consumer.ExecuteTask!.IsFaulted);
-        var vehicle = received.Where(message => message.Message.Key == "hsl/40/415").Select(message => PositionMessage.Parse(message.Message.Value)).ToList();
+        var vehicle = received
+            .Where(message => message.Message.Key == "hsl/40/415")
+            .Select(message => EnrichedPositionMessage.Parse(message.Message.Value).Position)
+            .ToList();
         Assert.Equal([At("40/415", 0), At("40/415", 1), keptAfterJump], vehicle);
         Assert.Equal(4, received.Count);
+    }
+
+    [Fact]
+    public async Task Accepted_position_is_published_with_its_scheduled_trip_and_source_delay()
+    {
+        var (input, output) = await CreateTopicsAsync("enriched");
+        DateOnly day = new(2026, 11, 5);
+        var schedule = new CurrentTripSchedule("hsl", TimeZoneInfo.Utc);
+        schedule.Replace(new TripSchedule(
+            [day],
+            [new ScheduledTrip("1009_gtfs", "1009", 0, 12 * 3600, day)]));
+        var position = new VehiclePosition(
+            "hsl", "40/415", "1009/0/20261105/12:00:00", "1009", 60.2, 24.9, 8, null, 45, null, _t0);
+        Publish(input, position);
+
+        var consumer = NewConsumer(input, output, schedule: schedule);
+        await consumer.StartAsync(Ct);
+        var message = Assert.Single(ReadOutput(output, 1));
+        await consumer.StopAsync(Ct);
+
+        var enriched = EnrichedPositionMessage.Parse(message.Message.Value);
+        Assert.Equal(position, enriched.Position);
+        Assert.Equal("1009_gtfs", enriched.Schedule!.TripId);
+        Assert.Equal(45, enriched.DelaySec);
     }
 
     private async Task CreateTopicAsync(string name, string config, string value)
@@ -308,7 +340,12 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
         Assert.False(second.ExecuteTask!.IsFaulted);
         // No loss and no repeat: the commit interval is an hour, so only the commits at the handovers avoid repeats.
         Assert.Equal(published, received.Count);
-        Assert.Equal(published, received.Select(message => (message.Message.Key, PositionMessage.Parse(message.Message.Value).ObservedAt)).Distinct().Count());
+        Assert.Equal(
+            published,
+            received
+                .Select(message => (message.Message.Key, EnrichedPositionMessage.Parse(message.Message.Value).Position.ObservedAt))
+                .Distinct()
+                .Count());
     }
 
     /// <summary>Waits until the group has that many members and each of them holds at least one partition.</summary>

@@ -72,18 +72,68 @@ internal sealed class PartitionState(CurrentTripSchedule schedule)
         var resolution = schedule.Resolve(position, out var trip);
         if (trip is null)
         {
-            return new ProcessedMessage(MessageVerdict.Accepted, resolution);
+            return new ProcessedMessage(
+                MessageVerdict.Accepted,
+                resolution,
+                Position: new EnrichedPosition(position, null, position.DelaySec));
         }
 
+        vehicle.BeginTrip(trip);
         var route = vehicle.Route.Advance(trip, position.Lat, position.Lon, position.ObservedAt);
         vehicle.Stops.Advance(trip, route, position.ObservedAt, _found);
+        DelayCheck? delay = null;
         foreach (var found in _found)
         {
             _stopEvents.Add(VehicleStopEvent.From(position, trip, found));
+            if (found.Kind == StopEventKind.Arrival)
+            {
+                delay = ObserveDelay(vehicle, trip, found);
+            }
         }
 
         _found.Clear();
-        return new ProcessedMessage(MessageVerdict.Accepted, resolution, route);
+        if (trip.Stops is not null && route.Status == RouteMatchStatus.OnRoute)
+        {
+            vehicle.RememberDetectorPosition(position);
+        }
+
+        var progress = new ScheduledProgress(
+            trip.TripId,
+            trip.RouteId,
+            trip.DirectionId,
+            trip.ServiceDate,
+            route.Status == RouteMatchStatus.OnRoute ? route.AlongMetres : null,
+            route.Status == RouteMatchStatus.OnRoute ? NextStop(vehicle.Stops.NextStop, trip.Timetable) : null);
+        var enriched = new EnrichedPosition(position, progress, position.DelaySec ?? vehicle.ObservedDelaySec);
+        return new ProcessedMessage(MessageVerdict.Accepted, resolution, route, enriched, delay);
+    }
+
+    private DelayCheck ObserveDelay(VehicleState vehicle, ScheduledTrip trip, StopEvent arrival)
+    {
+        if (trip.Timetable is not { } timetable
+            || !timetable.TryFind(arrival.Stop.Sequence, out var call)
+            || call.ArrivalSeconds is not { } scheduled)
+        {
+            return new DelayCheck(DelayCheckResult.NoScheduledArrival);
+        }
+
+        var calculated = ScheduleDeviation.InSeconds(trip.ServiceDate, scheduled, arrival.At, schedule.TimeZone);
+        vehicle.ObservedDelaySec = calculated;
+        return vehicle.DetectorPositionAt == arrival.At && vehicle.DetectorDelaySec is { } source
+            ? new DelayCheck(DelayCheckResult.Compared, calculated, source)
+            : new DelayCheck(DelayCheckResult.NoSourceDelay, calculated);
+    }
+
+    private static EnrichedStop? NextStop(StopCall? stop, StopTimetable? timetable)
+    {
+        if (stop is not { } next)
+        {
+            return null;
+        }
+
+        var times = default(ScheduledStopTime);
+        timetable?.TryFind(next.Sequence, out times);
+        return new EnrichedStop(next.StopId, next.Sequence, times.ArrivalSeconds, times.DepartureSeconds);
     }
 
     private static bool TryParse(ReadOnlySpan<byte> value, out VehiclePosition position)
@@ -103,10 +153,41 @@ internal sealed class PartitionState(CurrentTripSchedule schedule)
     // Everything kept about one vehicle, in one place: one lookup per message.
     private sealed class VehicleState
     {
+        private string? _delayTripId;
+        private DateOnly _delayServiceDate;
+        private StopTimetable? _delayTimetable;
+
         public VehicleTrack Track { get; } = new();
 
         public RouteProgress Route { get; } = new();
 
         public StopDetector Stops { get; } = new();
+
+        public int? ObservedDelaySec { get; set; }
+
+        public DateTimeOffset? DetectorPositionAt { get; private set; }
+
+        public int? DetectorDelaySec { get; private set; }
+
+        public void BeginTrip(ScheduledTrip trip)
+        {
+            if (!string.Equals(_delayTripId, trip.TripId, StringComparison.Ordinal)
+                || _delayServiceDate != trip.ServiceDate
+                || !ReferenceEquals(_delayTimetable, trip.Timetable))
+            {
+                _delayTripId = trip.TripId;
+                _delayServiceDate = trip.ServiceDate;
+                _delayTimetable = trip.Timetable;
+                ObservedDelaySec = null;
+                DetectorPositionAt = null;
+                DetectorDelaySec = null;
+            }
+        }
+
+        public void RememberDetectorPosition(VehiclePosition position)
+        {
+            DetectorPositionAt = position.ObservedAt;
+            DetectorDelaySec = position.DelaySec;
+        }
     }
 }
