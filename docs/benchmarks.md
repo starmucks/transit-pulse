@@ -634,7 +634,37 @@ error is ours minus HSL; p95 uses its absolute value.
 - Time accuracy is consistent once an event is paired: the overall absolute p95 is below 8 s. Coverage, not timing, is
   the main remaining question: 10.42 % of HSL arrivals are not paired.
 - Passes have the opposite shape: 97.24 % of HSL passes are found, but 16.22 % of detected passes have no paired HSL
-  pass. Together with the missing arrivals this is consistent with some stopped calls being classified as passes, but
-  this aggregate run does not prove that; cross-kind call matching is needed before changing the detector.
-- Acceptance thresholds are deliberately not inferred from this one hour. The author must approve them from this first
-  full measurement; in particular, decide whether to investigate pass classification before freezing regression bounds.
+  pass. The call-level comparison below separates a genuinely unpaired call from the same call classified differently.
+
+### Stopped versus passed calls
+
+An arrival and its departure are one stopped call, not two independent decisions. A second comparison therefore joins
+our `Arrival` and `Departure`, represents an HSL stopped chain by `ars/pde/wait/dep`, and pairs calls by vehicle, trip,
+stop and overlapping time regardless of their classification. This tests the suspected `stood` → `passed` confusion
+directly; it uses the same hour and 120 s boundary allowance as the event table.
+
+| Mode | HSL class | Reference calls | Ours stood | Ours passed | Missed | Found |
+|---|---|---:|---:|---:|---:|---:|
+| All | Stood | 30 995 | 29 031 | 1 228 | 736 | 97.63 % |
+| All | Passed | 12 442 | 221 | 12 099 | 122 | 99.02 % |
+| Bus | Stood | 26 319 | 25 425 | 526 | 368 | 98.60 % |
+| Bus | Passed | 12 314 | 189 | 12 015 | 110 | 99.11 % |
+| Tram | Stood | 3 341 | 3 219 | 41 | 81 | 97.58 % |
+| Tram | Passed | 117 | 32 | 83 | 2 | 98.29 % |
+| Train | Stood | 1 335 | 387 | 661 | 287 | 78.50 % |
+| Train | Passed | 11 | 0 | 1 | 10 | 9.09 % |
+
+- Across both classes, 42 579 of 43 437 HSL calls are paired (**98.02 %**). Of the paired calls, 41 130 keep HSL's
+  stood/passed class (**96.60 %**); 1 449 change class.
+- The suspected confusion is real but concentrated in trains: 661 of the 1 228 stopped calls classified as passed are
+  trains. Buses change 526 of 25 951 paired stopped calls (2.03 %), trams 41 of 3 260 (1.26 %), while trains change 661
+  of 1 048 (63.07 %). HSL supplies almost no train passes, so their pass recall is not measurable from this hour.
+- Train positions were already measured 10 % off route because station tracks are 50–58 m from the published shape;
+  long platforms also defeated the small fixture. A larger global stop zone would tune the bus and tram majority to a
+  train-specific map offset, so the detector stays unchanged. Per-mode route/stop tolerances need a separate design.
+- Of our calls, 584 of 29 871 stopped calls (1.96 %) and 1 117 of 14 447 passed calls (7.73 %) remain unpaired after
+  cross-kind matching: **1 701 of 44 318 (3.84 %)** overall. The other 1 226 event-level extra passes are HSL stopped
+  calls classified differently, not independent phantom calls.
+- Proposed first regression bounds are: at least 97 % of reference calls paired, at least 95 % of paired calls keeping
+  their class, at most 5 % of detected calls unpaired, and event-time absolute p95 at most 10 s. They pass this hour but
+  remain unapproved; train quality is recorded as a known limitation rather than hidden by the overall bounds.
