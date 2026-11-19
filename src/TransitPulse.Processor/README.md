@@ -23,6 +23,9 @@
   GTFS Time type specifies; hours may exceed 24 and daylight-saving transition days do not start at local midnight.
 - **Stop geometry and stop times have different sharing.** Trips through the same stops on the same shape share one
   `StopPattern`, but each GTFS `trip_id` keeps its own `StopTimetable`; calendar instances of that trip share the timetable.
+- **Bunching is process-wide and the Processor is a singleton for now** (ADR-0013). Comparable vehicles share a feed,
+  route, direction and `StopPattern`. Their spatial gap is converted to scheduled travel time; below 25 % of planned
+  headway for 30 s opens one episode, and 30 s of recovery closes it. Revoke/lost removes that partition's vehicles.
 - **State belongs to a partition:** it is dropped when the partition is revoked or lost. A lost partition is never committed:
   it already belongs to another consumer.
 - **Same partitioner as the Ingestor** (`Murmur2Random`): a vehicle keeps its partition number from topic to topic.

@@ -43,13 +43,15 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
         string output,
         TimeSpan? commitInterval = null,
         ILogger<PositionConsumer>? logger = null,
-        CurrentTripSchedule? schedule = null) => new(
+        CurrentTripSchedule? schedule = null,
+        string? anomaly = null) => new(
         Options.Create(new ProcessorKafkaOptions
         {
             BootstrapServers = redpanda.BootstrapServers,
             GroupId = $"{input}-group",
             InputTopic = input,
             OutputTopic = output,
+            AnomalyEventsTopic = anomaly ?? $"{output}-anomaly",
             // Long by default: a test sees the commit it provokes, not one the timer happened to make.
             CommitInterval = commitInterval ?? TimeSpan.FromHours(1),
         }),
@@ -168,6 +170,83 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
         Assert.Equal(45, enriched.DelaySec);
     }
 
+    [Fact]
+    public async Task Confirmed_bunching_is_published_once_to_the_anomaly_topic()
+    {
+        var (input, output) = await CreateTopicsAsync("bunching");
+        var anomaly = "bunching-anomaly";
+        await KafkaTopicCreator.EnsureAsync(
+            redpanda.BootstrapServers,
+            [new TopicDefinition(anomaly, 3, TimeSpan.FromHours(1))],
+            Ct);
+        DateOnly day = new(2026, 11, 5);
+        const int LeaderStart = 12 * 3600;
+        const int FollowerStart = LeaderStart + 600;
+        var shape = new RouteShape([60.2, 60.2], [24.9, 24.918]);
+        var pattern = new StopPattern(
+            shape,
+            [new StopPoint("start", 1, 60.2, 24.9), new StopPoint("end", 2, 60.2, 24.918)]);
+        var leader = new ScheduledTrip(
+            "leader-trip",
+            "1009",
+            0,
+            LeaderStart,
+            day,
+            shape,
+            pattern,
+            new StopTimetable([new(1, LeaderStart, LeaderStart), new(2, LeaderStart + 1000, LeaderStart + 1000)]));
+        var follower = new ScheduledTrip(
+            "follower-trip",
+            "1009",
+            0,
+            FollowerStart,
+            day,
+            shape,
+            pattern,
+            new StopTimetable([new(1, FollowerStart, FollowerStart), new(2, FollowerStart + 1000, FollowerStart + 1000)]));
+        var schedule = new CurrentTripSchedule("hsl", TimeZoneInfo.Utc);
+        schedule.Replace(new TripSchedule([day], [leader, follower]));
+        var consumer = NewConsumer(input, output, schedule: schedule, anomaly: anomaly);
+        await consumer.StartAsync(Ct);
+
+        using (var producer = NewProducer())
+        {
+            for (var seconds = 0; seconds <= 35; seconds += 5)
+            {
+                var at = _t0.AddSeconds(seconds);
+                var leaderPosition = new VehiclePosition(
+                    "hsl", "leader", "1009/0/20261105/12:00:00", "1009", 60.2, 24.90108, 0, null, null, null, at);
+                var followerPosition = new VehiclePosition(
+                    "hsl", "follower", "1009/0/20261105/12:10:00", "1009", 60.2, 24.9, 0, null, null, null, at);
+                producer.Produce(
+                    input,
+                    new Message<string, byte[]>
+                    {
+                        Key = PositionMessage.Key(leaderPosition),
+                        Value = PositionMessage.Value(leaderPosition),
+                    });
+                producer.Produce(
+                    input,
+                    new Message<string, byte[]>
+                    {
+                        Key = PositionMessage.Key(followerPosition),
+                        Value = PositionMessage.Value(followerPosition),
+                    });
+                producer.Flush(TimeSpan.FromSeconds(10));
+                await Task.Delay(250, Ct);
+            }
+        }
+
+        var message = Assert.Single(ReadOutput(anomaly, 1));
+        await consumer.StopAsync(Ct);
+
+        var bunching = AnomalyEventMessage.ParseBunching(message.Message.Value);
+        Assert.Equal("hsl/1009", message.Message.Key);
+        Assert.Equal("follower", bunching.FollowerVehicleId);
+        Assert.Equal("leader", bunching.LeaderVehicleId);
+        Assert.InRange(bunching.HeadwayRatio, 0.09, 0.11);
+    }
+
     private async Task CreateTopicAsync(string name, string config, string value)
     {
         using var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = redpanda.BootstrapServers }).Build();
@@ -216,7 +295,13 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
     public async Task The_initializer_declares_the_configured_topics_with_the_partitions_of_the_real_ones()
     {
         var initializer = new ProcessorTopicInitializer(
-            Options.Create(new ProcessorKafkaOptions { BootstrapServers = redpanda.BootstrapServers, InputTopic = "init-in", OutputTopic = "init-out" }),
+            Options.Create(new ProcessorKafkaOptions
+            {
+                BootstrapServers = redpanda.BootstrapServers,
+                InputTopic = "init-in",
+                OutputTopic = "init-out",
+                AnomalyEventsTopic = "init-anomaly",
+            }),
             NullLogger<ProcessorTopicInitializer>.Instance);
 
         await initializer.StartAsync(Ct);
@@ -224,6 +309,7 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
         using var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = redpanda.BootstrapServers }).Build();
         Assert.Equal(Topics.PositionsRaw.Partitions, Assert.Single(admin.GetMetadata("init-in", TimeSpan.FromSeconds(10)).Topics).Partitions.Count);
         Assert.Equal(Topics.PositionsEnriched.Partitions, Assert.Single(admin.GetMetadata("init-out", TimeSpan.FromSeconds(10)).Topics).Partitions.Count);
+        Assert.Equal(Topics.EventsAnomaly.Partitions, Assert.Single(admin.GetMetadata("init-anomaly", TimeSpan.FromSeconds(10)).Topics).Partitions.Count);
     }
 
     [Fact]

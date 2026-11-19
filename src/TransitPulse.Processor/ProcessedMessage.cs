@@ -8,12 +8,14 @@ namespace TransitPulse.Processor;
 /// <param name="Route">Where the position lies on its found trip's line; <see langword="null"/> when no trip was found.</param>
 /// <param name="Position">The output value for an accepted position.</param>
 /// <param name="Delay">A delay check completed by an arrival, if any.</param>
+/// <param name="Run">The scheduled run found for an accepted position.</param>
 internal readonly record struct ProcessedMessage(
     MessageVerdict Verdict,
     TripResolution? Trip,
     RouteMatch? Route = null,
     EnrichedPosition? Position = null,
-    DelayCheck? Delay = null);
+    DelayCheck? Delay = null,
+    ScheduledTrip? Run = null);
 
 /// <summary>Why an actual arrival could or could not be compared with the source's delay.</summary>
 internal enum DelayCheckResult

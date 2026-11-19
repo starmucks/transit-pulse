@@ -31,9 +31,12 @@ internal sealed partial class PositionConsumer(
     private static readonly TimeSpan _queueFullBackoff = TimeSpan.FromMilliseconds(100);
 
     private readonly ProcessorKafkaOptions _options = options.Value;
+    private readonly BunchingDetector _bunching = new(schedule.TimeZone);
 
     // Touched only by the loop.
     private readonly Dictionary<int, PartitionState> _partitions = [];
+    private readonly Dictionary<int, HashSet<(string FeedId, string VehicleId)>> _bunchingVehicles = [];
+    private readonly List<BunchingEvent> _bunchingEvents = [];
     private long _unreadable;
     private TopicPartitionOffset? _firstUnreadable;
     private bool _abandoned;
@@ -128,6 +131,7 @@ internal sealed partial class PositionConsumer(
         }
 
         var processed = state.Process(result.Offset.Value, result.Message.Key, result.Message.Value);
+        _bunchingEvents.Clear();
         metrics.Message(processed.Verdict, LagSeconds(result.Message.Timestamp));
         if (processed.Trip is { } found)
         {
@@ -149,6 +153,17 @@ internal sealed partial class PositionConsumer(
             var position = processed.Position
                 ?? throw new InvalidOperationException("An accepted position did not produce an enriched value.");
             Publish(_options.OutputTopic, ForOutput(result.Message, position), producer, stopping);
+            if (processed is { Run: { } run, Route: { Status: RouteMatchStatus.OnRoute } route })
+            {
+                if (!_bunchingVehicles.TryGetValue(partition, out var vehicles))
+                {
+                    vehicles = [];
+                    _bunchingVehicles.Add(partition, vehicles);
+                }
+
+                vehicles.Add((position.Position.FeedId, position.Position.VehicleId));
+                _bunching.Advance(position.Position, run, route.AlongMetres, _bunchingEvents);
+            }
         }
         else if (processed.Verdict == MessageVerdict.Unreadable)
         {
@@ -162,6 +177,17 @@ internal sealed partial class PositionConsumer(
             metrics.StopEvent(stopEvent.Kind);
             var message = new Message<string, byte[]> { Key = StopEventMessage.Key(stopEvent), Value = StopEventMessage.Value(stopEvent) };
             Publish(_options.StopEventsTopic, message, producer, stopping);
+        }
+
+        foreach (var bunching in _bunchingEvents)
+        {
+            metrics.Bunching(bunching);
+            var message = new Message<string, byte[]>
+            {
+                Key = AnomalyEventMessage.Key(bunching),
+                Value = AnomalyEventMessage.Value(bunching),
+            };
+            Publish(_options.AnomalyEventsTopic, message, producer, stopping);
         }
     }
 
@@ -203,7 +229,19 @@ internal sealed partial class PositionConsumer(
         var (onRoute, routeMatches) = (metrics.Total(RouteMatchStatus.OnRoute), metrics.RouteMatches);
         var (arrivals, departures, passes) = (
             metrics.Total(StopEventKind.Arrival), metrics.Total(StopEventKind.Departure), metrics.Total(StopEventKind.Passed));
-        LogProgress(accepted, outOfOrder, jumps, unreadable, tripsFound, tripLookups, onRoute, routeMatches, arrivals, departures, passes);
+        LogProgress(
+            accepted,
+            outOfOrder,
+            jumps,
+            unreadable,
+            tripsFound,
+            tripLookups,
+            onRoute,
+            routeMatches,
+            arrivals,
+            departures,
+            passes,
+            metrics.BunchingTotal);
     }
 
     // Blocks while the producer's buffer is full, which stops the reading too: the broker being down holds the input back
@@ -301,6 +339,13 @@ internal sealed partial class PositionConsumer(
         foreach (var partition in partitions)
         {
             _partitions.Remove(partition);
+            if (_bunchingVehicles.Remove(partition, out var vehicles))
+            {
+                foreach (var (feedId, vehicleId) in vehicles)
+                {
+                    _bunching.Remove(feedId, vehicleId);
+                }
+            }
         }
     }
 
@@ -316,7 +361,8 @@ internal sealed partial class PositionConsumer(
         var failed = Interlocked.Read(ref _failedDeliveries);
         if (failed > 0)
         {
-            throw new InvalidOperationException($"{failed} messages were not delivered to {_options.OutputTopic} or {_options.StopEventsTopic}.");
+            throw new InvalidOperationException(
+                $"{failed} messages were not delivered to {_options.OutputTopic}, {_options.StopEventsTopic}, or {_options.AnomalyEventsTopic}.");
         }
     }
 
@@ -383,10 +429,10 @@ internal sealed partial class PositionConsumer(
         LogBrokerError(error.Code, error.Reason);
     }
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Since the start: {Accepted} accepted, {OutOfOrder} out of order, {Jumps} impossible jumps, {Unreadable} unreadable; trips found for {TripsFound} of {TripLookups}; on the trip's line {OnRoute} of {RouteMatches}; stop events: {Arrivals} arrivals, {Departures} departures, {Passes} passes")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Since the start: {Accepted} accepted, {OutOfOrder} out of order, {Jumps} impossible jumps, {Unreadable} unreadable; trips found for {TripsFound} of {TripLookups}; on the trip's line {OnRoute} of {RouteMatches}; stop events: {Arrivals} arrivals, {Departures} departures, {Passes} passes; {Bunching} bunching episodes")]
     private partial void LogProgress(
         long accepted, long outOfOrder, long jumps, long unreadable, long tripsFound, long tripLookups, long onRoute, long routeMatches,
-        long arrivals, long departures, long passes);
+        long arrivals, long departures, long passes, long bunching);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Partitions assigned: {Partitions}")]
     private partial void LogAssigned(List<int> partitions);
