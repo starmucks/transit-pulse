@@ -23,6 +23,9 @@ internal sealed class ProcessorKafkaOptions
     /// <summary>Topic to publish stop events to; another name keeps a measurement run out of the real one.</summary>
     public string StopEventsTopic { get; set; } = Topics.EventsStop.Name;
 
+    /// <summary>Topic to publish anomaly events to; another name keeps a measurement run out of the real one.</summary>
+    public string AnomalyEventsTopic { get; set; } = Topics.EventsAnomaly.Name;
+
     /// <summary>
     /// How often progress is saved: about what is processed again after a crash, or more if the last commits failed. Each
     /// commit waits for every published message to be delivered, so a shorter interval costs throughput.
