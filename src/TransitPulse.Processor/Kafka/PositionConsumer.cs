@@ -31,7 +31,7 @@ internal sealed partial class PositionConsumer(
     private static readonly TimeSpan _queueFullBackoff = TimeSpan.FromMilliseconds(100);
 
     private readonly ProcessorKafkaOptions _options = options.Value;
-    private readonly BunchingDetector _bunching = new(schedule.TimeZone);
+    private readonly BunchingEventTimeBuffer _bunching = new(schedule.TimeZone);
 
     // Touched only by the loop.
     private readonly Dictionary<int, PartitionState> _partitions = [];
@@ -67,7 +67,14 @@ internal sealed partial class PositionConsumer(
                 ThrowIfFailed();
                 if (TryConsume(consumer) is { } result)
                 {
-                    Handle(result, producer, stopping);
+                    if (result.IsPartitionEOF)
+                    {
+                        HandlePartitionEnd(result.Partition.Value, producer, stopping);
+                    }
+                    else
+                    {
+                        Handle(result, producer, stopping);
+                    }
                 }
 
                 var now = timeProvider.GetUtcNow();
@@ -153,6 +160,7 @@ internal sealed partial class PositionConsumer(
             var position = processed.Position
                 ?? throw new InvalidOperationException("An accepted position did not produce an enriched value.");
             Publish(_options.OutputTopic, ForOutput(result.Message, position), producer, stopping);
+            var receivedAt = ReceivedAt(result.Message.Timestamp);
             if (processed is { Run: { } run, Route: { Status: RouteMatchStatus.OnRoute } route })
             {
                 if (!_bunchingVehicles.TryGetValue(partition, out var vehicles))
@@ -162,7 +170,11 @@ internal sealed partial class PositionConsumer(
                 }
 
                 vehicles.Add((position.Position.FeedId, position.Position.VehicleId));
-                _bunching.Advance(position.Position, run, route.AlongMetres, _bunchingEvents);
+                _bunching.Observe(partition, position.Position, receivedAt, run, route.AlongMetres, _bunchingEvents);
+            }
+            else
+            {
+                _bunching.Observe(partition, position.Position, receivedAt, null, null, _bunchingEvents);
             }
         }
         else if (processed.Verdict == MessageVerdict.Unreadable)
@@ -179,6 +191,18 @@ internal sealed partial class PositionConsumer(
             Publish(_options.StopEventsTopic, message, producer, stopping);
         }
 
+        PublishBunching(producer, stopping);
+    }
+
+    private void HandlePartitionEnd(int partition, IProducer<string, byte[]> producer, CancellationToken stopping)
+    {
+        _bunchingEvents.Clear();
+        _bunching.ReachedEnd(partition, _bunchingEvents);
+        PublishBunching(producer, stopping);
+    }
+
+    private void PublishBunching(IProducer<string, byte[]> producer, CancellationToken stopping)
+    {
         foreach (var bunching in _bunchingEvents)
         {
             metrics.Bunching(bunching);
@@ -203,6 +227,18 @@ internal sealed partial class PositionConsumer(
     private double? LagSeconds(Timestamp written) => written.Type == TimestampType.NotAvailable
         ? null
         : (timeProvider.GetUtcNow().ToUnixTimeMilliseconds() - written.UnixTimestampMs) / 1000.0;
+
+    private DateTimeOffset ReceivedAt(Timestamp written)
+    {
+        var now = timeProvider.GetUtcNow();
+        if (written.Type == TimestampType.NotAvailable)
+        {
+            return now;
+        }
+
+        var brokerAt = DateTimeOffset.FromUnixTimeMilliseconds(written.UnixTimestampMs);
+        return brokerAt < now ? brokerAt : now;
+    }
 
     // The high watermark comes from the client's last fetch, so this asks the broker nothing and cannot hold up the loop.
     // A partition with no message read yet has no position to measure from and is left out.
@@ -309,6 +345,7 @@ internal sealed partial class PositionConsumer(
     private void OnAssigned(List<TopicPartition> assigned)
     {
         var partitions = assigned.Select(partition => partition.Partition.Value).ToList();
+        _bunching.Assign(partitions);
         LogAssigned(partitions);
     }
 
@@ -336,17 +373,17 @@ internal sealed partial class PositionConsumer(
 
     private void Forget(List<int> partitions)
     {
+        var forgotten = new List<(string FeedId, string VehicleId)>();
         foreach (var partition in partitions)
         {
             _partitions.Remove(partition);
             if (_bunchingVehicles.Remove(partition, out var vehicles))
             {
-                foreach (var (feedId, vehicleId) in vehicles)
-                {
-                    _bunching.Remove(feedId, vehicleId);
-                }
+                forgotten.AddRange(vehicles);
             }
         }
+
+        _bunching.Remove(partitions, forgotten);
     }
 
     // A message the broker never accepted cannot be skipped: committing past it would lose it. Stopping the process
@@ -397,6 +434,8 @@ internal sealed partial class PositionConsumer(
         EnableAutoCommit = false,
         // A partition with no commit is read from its start: positions published before the first start are not lost.
         AutoOffsetReset = AutoOffsetReset.Earliest,
+        // Empty or caught-up partitions must not hold the event-time watermark back.
+        EnablePartitionEof = true,
         // Only the partitions changing owner stop: the others keep their state through a rebalance.
         PartitionAssignmentStrategy = PartitionAssignmentStrategy.CooperativeSticky,
     })

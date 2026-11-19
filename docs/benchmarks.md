@@ -730,6 +730,7 @@ The accepted rule is actual headway below **25 %** of scheduled headway for **30
 treated as separate episodes. By local time: 28 events at 00–06, 893 at 06–12, 1 108 at 12–18 and 306 at 18–24.
 
 A second replay of the established 04.11 06:00–07:00 UTC hour ran the exact in-process path through normalized JSON,
-`PartitionState`, stop and delay detection, enriched/stop/anomaly serialization and `BunchingDetector`. It processed
-5 579 194 raw records in 134.3 s: **41 500 raw records/s**, 3.46 times the 12 000/s replay target. This excludes Kafka
-network and broker waits; task 2.11 still measures the complete live service and lag.
+`PartitionState`, stop and delay detection, enriched/stop/anomaly serialization, the per-partition event-time buffer and
+`BunchingDetector`. It processed 5 579 194 raw records in 140.2 s: **39 800 raw records/s**, 3.32 times the 12 000/s replay
+target, and emitted the same 202 episodes as the ordered baseline. This excludes Kafka network and broker waits; task
+2.11 still measures the complete live service and lag.

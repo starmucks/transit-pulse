@@ -207,7 +207,6 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
         var schedule = new CurrentTripSchedule("hsl", TimeZoneInfo.Utc);
         schedule.Replace(new TripSchedule([day], [leader, follower]));
         var consumer = NewConsumer(input, output, schedule: schedule, anomaly: anomaly);
-        await consumer.StartAsync(Ct);
 
         using (var producer = NewProducer())
         {
@@ -216,8 +215,6 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
                 var at = _t0.AddSeconds(seconds);
                 var leaderPosition = new VehiclePosition(
                     "hsl", "leader", "1009/0/20261105/12:00:00", "1009", 60.2, 24.90108, 0, null, null, null, at);
-                var followerPosition = new VehiclePosition(
-                    "hsl", "follower", "1009/0/20261105/12:10:00", "1009", 60.2, 24.9, 0, null, null, null, at);
                 producer.Produce(
                     input,
                     new Message<string, byte[]>
@@ -225,6 +222,13 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
                         Key = PositionMessage.Key(leaderPosition),
                         Value = PositionMessage.Value(leaderPosition),
                     });
+            }
+
+            for (var seconds = 0; seconds <= 35; seconds += 5)
+            {
+                var at = _t0.AddSeconds(seconds);
+                var followerPosition = new VehiclePosition(
+                    "hsl", "follower", "1009/0/20261105/12:10:00", "1009", 60.2, 24.9, 0, null, null, null, at);
                 producer.Produce(
                     input,
                     new Message<string, byte[]>
@@ -232,11 +236,12 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
                         Key = PositionMessage.Key(followerPosition),
                         Value = PositionMessage.Value(followerPosition),
                     });
-                producer.Flush(TimeSpan.FromSeconds(10));
-                await Task.Delay(250, Ct);
             }
+
+            producer.Flush(TimeSpan.FromSeconds(10));
         }
 
+        await consumer.StartAsync(Ct);
         var message = Assert.Single(ReadOutput(anomaly, 1));
         await consumer.StopAsync(Ct);
 

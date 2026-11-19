@@ -28,7 +28,9 @@ this design is in use.
   has not held for 30 seconds. Publish one `Bunching` event when the entry interval completes.
 - Keep vehicle state owned by its input partition. When a partition is revoked or lost, remove its vehicles from the
   process-wide comparison before another process can build its own state.
-- Use no locks and make no network call per position. The same loop that orders all updates advances the detector.
+- Use no locks and make no network call per position. Before advancing the detector, restore bounded event-time order
+  with per-partition watermarks and a five-second lateness allowance. A partition at its current Kafka end does not hold
+  the watermark back; a source timestamp over five seconds ahead of Kafka receipt is ignored by this detector.
 
 ## Alternatives considered
 
@@ -45,8 +47,8 @@ this design is in use.
 ## Consequences
 
 - The detector reuses the existing map-matched distance and GTFS timetable without a new topic or service.
-- One loop keeps cross-partition comparisons deterministic and lock-free. Its throughput must be measured again with the
-  detector enabled.
+- One loop and the event-time buffer keep cross-partition comparisons deterministic and lock-free. The buffer holds only
+  positions not yet behind the slowest active partition's watermark.
 - A rebalance drops comparisons involving moved partitions; a continuing episode must satisfy the 30-second entry rule
   again. Stage 2.10 will snapshot vehicle and episode state together with offsets.
 - Running several Processor instances undercounts bunching between vehicles assigned to different processes. Deployment
