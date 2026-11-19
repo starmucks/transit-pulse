@@ -14,8 +14,8 @@ WorkingDirectory=/opt/transitpulse/ingestor
 ExecStart=/opt/transitpulse/ingestor/TransitPulse.Ingestor
 Environment=DOTNET_ENVIRONMENT=Production
 Environment=Archive__RootDirectory=/var/lib/transitpulse/archive
-# Peak during a row group flush is ~3x the buffer per feed (payloads + encoded column + zstd output): with ten feeds
-# 16 MiB needs a few hundred MiB at weekday HSL peaks, well inside the 750 MiB GC heap limit (75% of MemoryMax).
+# Peak during a row group flush is ~3x the buffer per feed (payloads + encoded column + zstd output). Keep the measured
+# 16 MiB balance between compression frequency and temporary memory; MemoryMax below supplies the required headroom.
 Environment=Archive__RowGroupMaxBytes=16777216
 # The GC keeps memory it has committed instead of returning it to the OS: on the collector's VMware host a page the
 # guest touches again after releasing it is slow to get back, so returning memory costs CPU in the kernel.
@@ -31,8 +31,9 @@ RestartSec=10
 TimeoutStopSec=120
 # Ten times the default weight: an OS job (apt) or our own upload must yield the CPU to the collector.
 CPUWeight=1000
-# Steady use is ~300 MB; the cap protects the 2 GB server from a leak.
-MemoryMax=1G
+# The 1 GiB cap gives .NET a 768 MiB GC heap and caused an OOM during an Entur full snapshot plus Zstd compression.
+# At 1.25 GiB the heap gets 960 MiB, while the measured host peak still leaves about 600 MiB for the OS.
+MemoryMax=1280M
 
 NoNewPrivileges=true
 ProtectSystem=strict
