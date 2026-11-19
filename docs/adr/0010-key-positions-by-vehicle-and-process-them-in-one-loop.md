@@ -37,6 +37,6 @@ messages/s on one core of a development PC, about ten times the target. This has
 - Each vehicle is ordered, and no vehicle depends on a lock or on another thread.
 - One slow message delays every partition of the process. The loop does no network calls per message, so this stays cheap
   until later tasks add work to it; the lag metrics show it if it stops being so.
-- With several instances, the vehicles of a line can be in different processes, so bunching (2.9) will have to handle a
-  line it sees only partly. That is not solved here.
+- With several instances, the vehicles of a line can be in different processes. ADR-0013 keeps stage-2 bunching in one
+  process and records the route-repartitioning boundary for later horizontal scaling.
 - A process cannot use more than about one core for processing.

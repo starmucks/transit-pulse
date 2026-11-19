@@ -51,6 +51,7 @@ internal sealed class ProcessorMetrics
     ];
 
     private static readonly KeyValuePair<string, object?> _back = new("direction", "back");
+    private static readonly KeyValuePair<string, object?> _bunching = new("kind", "bunching");
     private static readonly KeyValuePair<string, object?> _forward = new("direction", "forward");
 
     // In the order of DelayCheckResult.
@@ -66,14 +67,17 @@ internal sealed class ProcessorMetrics
     private readonly Counter<long> _routes;
     private readonly Counter<long> _reanchors;
     private readonly Counter<long> _stopEvents;
+    private readonly Counter<long> _anomalyEvents;
     private readonly Counter<long> _delayChecks;
     private readonly Histogram<double> _lagTime;
     private readonly Histogram<double> _routeOffset;
     private readonly Histogram<double> _delayDifference;
+    private readonly Histogram<double> _bunchingRatio;
     private readonly long[] _totals = new long[_verdictTags.Length];
     private readonly long[] _tripTotals = new long[_tripTags.Length];
     private readonly long[] _routeTotals = new long[_routeTags.Length];
     private readonly long[] _stopEventTotals = new long[_stopEventTags.Length];
+    private long _bunchingTotal;
 
     // Replaced as a whole by the loop, read by the exporter's thread.
     private Measurement<long>[] _lag = [];
@@ -97,6 +101,14 @@ internal sealed class ProcessorMetrics
         // Steps back are what stop events must survive (ADR-0011); the simulation's count is to be checked on the live stream.
         _reanchors = meter.CreateCounter<long>("transitpulse.processor.reanchors", "{position}", "Vehicles placed anew on another pass of their trip's line, by direction.");
         _stopEvents = meter.CreateCounter<long>("transitpulse.processor.stop_events", "{event}", "Stop events found, by kind.");
+        _anomalyEvents = meter.CreateCounter<long>(
+            "transitpulse.processor.anomaly_events", "{event}", "Anomaly episodes confirmed, by kind.");
+        _bunchingRatio = meter.CreateHistogram<double>(
+            "transitpulse.processor.bunching_headway_ratio",
+            "1",
+            "Actual headway as a share of scheduled headway when a bunching episode is confirmed.",
+            null,
+            new InstrumentAdvice<double> { HistogramBucketBoundaries = [0.05, 0.10, 0.15, 0.20, 0.25] });
         _delayChecks = meter.CreateCounter<long>(
             "transitpulse.processor.delay_checks", "{arrival}", "Actual arrivals checked against the schedule and source delay.");
         _delayDifference = meter.CreateHistogram<double>(
@@ -172,6 +184,18 @@ internal sealed class ProcessorMetrics
             _delayDifference.Record((double)calculated - source);
         }
     }
+
+    /// <summary>Counts one confirmed bunching episode and records its headway ratio.</summary>
+    /// <param name="bunching">The episode.</param>
+    public void Bunching(BunchingEvent bunching)
+    {
+        _bunchingTotal++;
+        _anomalyEvents.Add(1, _bunching);
+        _bunchingRatio.Record(bunching.HeadwayRatio);
+    }
+
+    /// <summary>Confirmed bunching episodes since the start. Called by the loop only.</summary>
+    public long BunchingTotal => _bunchingTotal;
 
     /// <summary>Stop events of this kind since the start. Called by the loop only.</summary>
     /// <param name="kind">The kind.</param>

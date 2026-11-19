@@ -4,6 +4,9 @@
 # Personal project guidance shared by local coding tools
 LOCAL_GUIDANCE.md
 
+# Private handoff between sequential coding-tool sessions
+LOCAL_SESSION.md
+
 # .NET build output and IDE state
 bin/
 obj/

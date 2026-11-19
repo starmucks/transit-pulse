@@ -105,7 +105,7 @@ internal sealed class PartitionState(CurrentTripSchedule schedule)
             route.Status == RouteMatchStatus.OnRoute ? route.AlongMetres : null,
             route.Status == RouteMatchStatus.OnRoute ? NextStop(vehicle.Stops.NextStop, trip.Timetable) : null);
         var enriched = new EnrichedPosition(position, progress, position.DelaySec ?? vehicle.ObservedDelaySec);
-        return new ProcessedMessage(MessageVerdict.Accepted, resolution, route, enriched, delay);
+        return new ProcessedMessage(MessageVerdict.Accepted, resolution, route, enriched, delay, trip);
     }
 
     private DelayCheck ObserveDelay(VehicleState vehicle, ScheduledTrip trip, StopEvent arrival)

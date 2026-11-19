@@ -24,7 +24,7 @@ internal sealed partial class ProcessorTopicInitializer(IOptions<ProcessorKafkaO
             Topics.PositionsRaw with { Name = settings.InputTopic },
             Topics.PositionsEnriched with { Name = settings.OutputTopic },
             Topics.EventsStop with { Name = settings.StopEventsTopic },
-            Topics.EventsAnomaly,
+            Topics.EventsAnomaly with { Name = settings.AnomalyEventsTopic },
             Topics.PositionsRawDlq,
         ];
         var created = await KafkaTopicCreator.EnsureAsync(settings.BootstrapServers, topics, cancellationToken);

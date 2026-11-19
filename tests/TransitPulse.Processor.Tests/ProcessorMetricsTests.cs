@@ -87,6 +87,34 @@ public sealed class ProcessorMetricsTests : IDisposable
         Assert.Equal(15, Assert.Single(differences.GetMeasurementSnapshot()).Value);
     }
 
+    [Fact]
+    public void Bunching_events_are_counted_and_record_their_ratio()
+    {
+        using var events = new MetricCollector<long>(Factory, ProcessorMetrics.MeterName, "transitpulse.processor.anomaly_events");
+        using var ratios = new MetricCollector<double>(Factory, ProcessorMetrics.MeterName, "transitpulse.processor.bunching_headway_ratio");
+        var metrics = new ProcessorMetrics(Factory);
+        var bunching = new BunchingEvent(
+            "hsl",
+            "1009",
+            0,
+            "follower",
+            "leader",
+            "follower-trip",
+            "leader-trip",
+            new DateOnly(2026, 11, 4),
+            new DateOnly(2026, 11, 4),
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            120,
+            600);
+
+        metrics.Bunching(bunching);
+
+        Assert.Equal("bunching", Assert.Single(events.GetMeasurementSnapshot()).Tags["kind"]);
+        Assert.Equal(0.2, Assert.Single(ratios.GetMeasurementSnapshot()).Value);
+        Assert.Equal(1, metrics.BunchingTotal);
+    }
+
     [Theory]
     [InlineData(nameof(RouteMatchStatus.OnRoute), "on_route", true)]
     [InlineData(nameof(RouteMatchStatus.OffRoute), "off_route", true)]

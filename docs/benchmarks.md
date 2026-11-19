@@ -700,3 +700,37 @@ transition days.
   The absolute p95 of 8 s is close to the detector's event-time p95 and small enough for the map and the later ML baseline.
 - `positions.enriched.delaySec` uses the source delay when present. Otherwise it keeps the most recent independently
   calculated arrival delay for that trip; the original source value remains inside the nested position for audit and ML.
+
+## Bunching threshold
+
+Task 2.9 orders fresh, on-route vehicles of one feed, GTFS route, direction and shared stop pattern by their distance
+along the shape. The actual spatial gap is converted to seconds by interpolating the follower's GTFS stop times. Its
+scheduled headway is the difference between the two trips' passage times at the follower's position. Pairs outside the
+timed part of the pattern or in the opposite scheduled order are not scored.
+
+The measurement replayed the complete Helsinki weekday **2026-11-04 00:00–24:00 local time** (03.11 22:00–04.11
+22:00 UTC), with ten minutes of warm-up around four non-overlapping six-hour scoring windows. It used HSL snapshot 4
+(2026-10-31 14:33), the normalizer, plausibility filter, trip lookup and route matching. A raw threshold crossing ends as
+soon as the condition breaks; the production detector additionally keeps an active episode through interruptions shorter
+than its 30 s recovery interval.
+
+| Actual / scheduled headway | Raw crossings | Lasting ≥ 10 s | Lasting ≥ 30 s | Lasting ≥ 60 s | Bus ≥ 30 s |
+|---:|---:|---:|---:|---:|---:|
+| 10 % | 11 659 | 2 634 | 2 005 | 1 278 | 983 |
+| 15 % | 13 857 | 3 110 | 2 419 | 1 646 | 1 239 |
+| 20 % | 15 277 | 3 478 | 2 712 | 1 935 | 1 441 |
+| **25 %** | **17 586** | **4 077** | **3 130** | **2 276** | **1 712** |
+| 30 % | 19 885 | 4 849 | 3 716 | 2 703 | 2 121 |
+| 40 % | 25 865 | 7 005 | 5 394 | 3 933 | 3 247 |
+| 50 % | 34 501 | 10 093 | 7 904 | 5 943 | 5 094 |
+
+The accepted rule is actual headway below **25 %** of scheduled headway for **30 continuous seconds**, with another
+30 seconds outside the condition before the episode closes. The production state machine emitted **2 335 episodes**:
+1 293 bus, 482 tram, 394 train and 166 metro. The recovery interval joined 795 brief breaks that the raw ≥ 30 s count
+treated as separate episodes. By local time: 28 events at 00–06, 893 at 06–12, 1 108 at 12–18 and 306 at 18–24.
+
+A second replay of the established 04.11 06:00–07:00 UTC hour ran the exact in-process path through normalized JSON,
+`PartitionState`, stop and delay detection, enriched/stop/anomaly serialization, the per-partition event-time buffer and
+`BunchingDetector`. It processed 5 579 194 raw records in 140.2 s: **39 800 raw records/s**, 3.32 times the 12 000/s replay
+target, and emitted the same 202 episodes as the ordered baseline. This excludes Kafka network and broker waits; task
+2.11 still measures the complete live service and lag.

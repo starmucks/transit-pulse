@@ -38,6 +38,7 @@ public sealed class PartitionStateTests
 
         Assert.Equal(TripResolution.Found, found.Trip);
         Assert.Equal(new RouteMatch(RouteMatchStatus.NoShape, 0, 0), found.Route);
+        Assert.Equal("1009_14", found.Run!.TripId);
         Assert.Equal("1009_14", found.Position!.Schedule!.TripId);
         Assert.Equal(TripResolution.RouteUnknown, missed.Trip);
         Assert.Null(missed.Position!.Schedule);

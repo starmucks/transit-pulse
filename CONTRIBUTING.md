@@ -6,6 +6,7 @@ constraints live in `PROJECT_BRIEF.md`; current work lives in `docs/STATUS.md`; 
 
 ## Working process
 
+- Use the tool-independent workflow in `docs/development-sessions.md` for `/start_session` and `/end_session`.
 - Work towards the goals and measurable acceptance criteria in `PROJECT_BRIEF.md`, in stage order.
 - Before selecting work, read `docs/STATUS.md` and the relevant `docs/stages/stage-N.md`.
 - Keep `docs/STATUS.md` to roughly one screen. Update it and the current stage checklist when finishing a task.
