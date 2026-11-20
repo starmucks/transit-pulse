@@ -114,6 +114,10 @@ internal static class ProcessorCheckpoint
         return new RestoredProcessorState(partitions, bunching, ownership);
     }
 
+    /// <summary>
+    /// Restores checkpoint state and keeps only partitions this instance owns. The Redis snapshot is process-wide, so a
+    /// joiner after a rebalance must drop the other members' partitions instead of rejecting the whole snapshot.
+    /// </summary>
     public static RestoredProcessorState RestoreOwned(
         ProcessorCheckpointSnapshot snapshot,
         CurrentTripSchedule schedule,
@@ -121,14 +125,23 @@ internal static class ProcessorCheckpoint
     {
         ArgumentNullException.ThrowIfNull(ownedPartitions);
         var restored = Restore(snapshot, schedule);
-        if (restored.Partitions.Keys.Any(partition => !ownedPartitions.Contains(partition))
-            || restored.BunchingVehicles.Keys.Any(partition => !ownedPartitions.Contains(partition))
-            || snapshot.Bunching.Partitions.Any(partition => !ownedPartitions.Contains(partition.Partition)))
+        var foreign = restored.Partitions.Keys.Where(partition => !ownedPartitions.Contains(partition)).ToList();
+        if (foreign.Count == 0)
         {
-            throw new InvalidOperationException(
-                "The Processor checkpoint contains state for a partition not owned by this instance.");
+            return restored;
         }
 
+        var forgotten = new List<(string FeedId, string VehicleId)>();
+        foreach (var partition in foreign)
+        {
+            restored.Partitions.Remove(partition);
+            if (restored.BunchingVehicles.Remove(partition, out var vehicles))
+            {
+                forgotten.AddRange(vehicles);
+            }
+        }
+
+        restored.Bunching.Remove(foreign, forgotten);
         return restored;
     }
 

@@ -392,20 +392,23 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
     public async Task After_a_clean_stop_the_next_start_continues_without_repeating()
     {
         var (input, output) = await CreateTopicsAsync("restart");
+        // Same store as Redis in production: a new empty Memory store would fail closed after committed offsets.
+        var checkpoints = new MemoryProcessorCheckpointStore();
         Publish(input, [.. Enumerable.Range(0, 5).Select(s => At("40/415", s))]);
 
-        var first = NewConsumer(input, output);
+        var first = NewConsumer(input, output, checkpoints: checkpoints);
         await first.StartAsync(Ct);
         Assert.Equal(5, ReadOutput(output, 5).Count);
         await first.StopAsync(Ct);
         Assert.Equal(5, CommittedTotal(input));
 
         Publish(input, [.. Enumerable.Range(5, 3).Select(s => At("40/415", s))]);
-        var second = NewConsumer(input, output);
+        var second = NewConsumer(input, output, checkpoints: checkpoints);
         await second.StartAsync(Ct);
         var received = ReadOutput(output, 8);
         await second.StopAsync(Ct);
 
+        Assert.False(second.ExecuteTask!.IsFaulted);
         Assert.Equal(8, received.Count);
         Assert.Equal(8, CommittedTotal(input));
     }
@@ -519,18 +522,20 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
     {
         var (input, output) = await CreateTopicsAsync("rebalance");
         var firstLog = new FakeLogger<PositionConsumer>();
+        // Shared like Redis: each instance must see the other's saves or fail-closed kills the joiner.
+        var checkpoints = new MemoryProcessorCheckpointStore();
         var published = 0;
 
         // Every vehicle's positions are one apart in time, so each batch is new for all of them.
         void PublishRound(int round) => Publish(input, [.. Enumerable.Range(0, 12).Select(vehicle => At($"40/{vehicle}", round))]);
 
-        var first = NewConsumer(input, output, logger: firstLog);
+        var first = NewConsumer(input, output, logger: firstLog, checkpoints: checkpoints);
         await first.StartAsync(Ct);
         PublishRound(0);
         published += 12;
         Assert.Equal(published, ReadOutput(output, published).Count);
 
-        var second = NewConsumer(input, output);
+        var second = NewConsumer(input, output, checkpoints: checkpoints);
         await second.StartAsync(Ct);
         await WaitForMembersAsync($"{input}-group", 2);
 

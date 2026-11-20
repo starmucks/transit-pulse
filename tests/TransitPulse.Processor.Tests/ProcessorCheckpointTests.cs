@@ -110,18 +110,27 @@ public sealed class ProcessorCheckpointTests
     }
 
     [Fact]
-    public void State_for_an_unowned_partition_is_rejected()
+    public void RestoreOwned_keeps_only_partitions_this_instance_owns()
     {
         var schedule = new CurrentTripSchedule("hsl", TimeZoneInfo.Utc);
-        var saved = ProcessorCheckpoint.Capture(
-            new Dictionary<int, PartitionState> { [99] = new(schedule) },
-            new BunchingEventTimeBuffer(TimeZoneInfo.Utc),
-            new Dictionary<int, HashSet<(string FeedId, string VehicleId)>>());
+        var partitions = new Dictionary<int, PartitionState>
+        {
+            [0] = Partition(schedule, 3, "hsl/leader", Position("leader", 0)),
+            [1] = Partition(schedule, 7, "hsl/follower", Position("follower", 0)),
+        };
+        var ownership = new Dictionary<int, HashSet<(string FeedId, string VehicleId)>>
+        {
+            [0] = [("hsl", "leader")],
+            [1] = [("hsl", "follower")],
+        };
+        var saved = ProcessorCheckpoint.Capture(partitions, new BunchingEventTimeBuffer(TimeZoneInfo.Utc), ownership);
 
-        var error = Assert.Throws<InvalidOperationException>(() =>
-            ProcessorCheckpoint.RestoreOwned(saved, schedule, new HashSet<int> { 0, 1, 2 }));
+        var restored = ProcessorCheckpoint.RestoreOwned(saved, schedule, new HashSet<int> { 1 });
 
-        Assert.Contains("not owned by this instance", error.Message, StringComparison.Ordinal);
+        Assert.False(restored.Partitions.ContainsKey(0));
+        Assert.Equal(8, restored.Partitions[1].NextOffset);
+        Assert.False(restored.BunchingVehicles.ContainsKey(0));
+        Assert.Contains(("hsl", "follower"), restored.BunchingVehicles[1]);
     }
 
     [Fact]

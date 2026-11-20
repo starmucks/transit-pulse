@@ -475,13 +475,16 @@ internal sealed partial class PositionConsumer(
                 {
                     _bunchingVehicles.Add(partition, vehicles);
                 }
-
-                return;
             }
 
-            // Cooperative re-assign: keep live partitions, refill only the ones that left and came back.
+            // Cold start or cooperative re-assign: refill only newcomers still missing after the restore above.
             foreach (var partition in newcomers)
             {
+                if (_partitions.ContainsKey(partition))
+                {
+                    continue;
+                }
+
                 if (!restored.Partitions.TryGetValue(partition, out var state))
                 {
                     if (HasCommittedProgress(consumer, assigned.Where(topic => topic.Partition.Value == partition)))
@@ -519,8 +522,9 @@ internal sealed partial class PositionConsumer(
             return false;
         }
 
+        // Committed offset is the next message to read: > 0 means at least one record was finished.
         return consumer.Committed(list, TimeSpan.FromSeconds(10))
-            .Any(committed => !committed.Offset.IsSpecial && committed.Offset.Value >= 0);
+            .Any(committed => !committed.Offset.IsSpecial && committed.Offset.Value > 0);
     }
 
     // Runs on the loop's thread, inside Consume or Close. The new owner resumes from the commit made here, and without it
