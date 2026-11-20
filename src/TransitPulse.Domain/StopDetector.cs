@@ -54,6 +54,87 @@ public sealed class StopDetector
     private bool _stood;
     private DateTimeOffset? _passedAt;
 
+    internal StopDetectorSnapshot Capture()
+    {
+        if (_tripId is null)
+        {
+            return default;
+        }
+
+        if (_pattern is null || !_hasLast)
+        {
+            return new StopDetectorSnapshot(_tripId, _serviceDate, false, 0, 0, default, false, false, false, null);
+        }
+
+        return new StopDetectorSnapshot(
+            _tripId,
+            _serviceDate,
+            true,
+            _next,
+            _lastAlong,
+            _lastAt,
+            _inZone,
+            _entered,
+            _stood,
+            _passedAt);
+    }
+
+    internal static StopDetector Restore(StopDetectorSnapshot snapshot, StopPattern? pattern)
+    {
+        if (snapshot.TripId is null)
+        {
+            if (snapshot.ServiceDate != default
+                || snapshot.HasPattern
+                || snapshot.Next != 0
+                || snapshot.LastAlongMetres != 0
+                || snapshot.LastAt != default
+                || snapshot.InZone
+                || snapshot.Entered
+                || snapshot.Stood
+                || snapshot.PassedAt is not null)
+            {
+                throw InvalidSnapshot();
+            }
+
+            return new StopDetector();
+        }
+
+        if (!snapshot.HasPattern)
+        {
+            if (!ValidUnplaced(snapshot))
+            {
+                throw InvalidSnapshot();
+            }
+
+            return new StopDetector { _tripId = snapshot.TripId, _serviceDate = snapshot.ServiceDate };
+        }
+
+        if (pattern is null || snapshot.Next < 0 || snapshot.Next > pattern.Calls.Count)
+        {
+            throw new ArgumentException("The stop detector snapshot cannot be bound to this pattern.", nameof(pattern));
+        }
+
+        if (!ValidPlaced(snapshot, pattern.Calls.Count))
+        {
+            throw InvalidSnapshot();
+        }
+
+        return new StopDetector
+        {
+            _tripId = snapshot.TripId,
+            _serviceDate = snapshot.ServiceDate,
+            _pattern = pattern,
+            _next = snapshot.Next,
+            _hasLast = true,
+            _lastAlong = snapshot.LastAlongMetres,
+            _lastAt = snapshot.LastAt,
+            _inZone = snapshot.InZone,
+            _entered = snapshot.Entered,
+            _stood = snapshot.Stood,
+            _passedAt = snapshot.PassedAt,
+        };
+    }
+
     /// <summary>
     /// The stop whose zone the vehicle is approaching or still occupies; the next call after it once the vehicle leaves.
     /// <see langword="null"/> before the vehicle is placed on a trip with stops, or after its last stop.
@@ -188,4 +269,44 @@ public sealed class StopDetector
         var fraction = along > _lastAlong ? Math.Clamp((distance - _lastAlong) / (along - _lastAlong), 0, 1) : 1;
         return _lastAt + ((at - _lastAt) * fraction);
     }
+
+    private static bool ValidUnplaced(StopDetectorSnapshot snapshot) =>
+        !string.IsNullOrWhiteSpace(snapshot.TripId)
+        && snapshot.ServiceDate != default
+        && snapshot.Next == 0
+        && snapshot.LastAlongMetres == 0
+        && snapshot.LastAt == default
+        && !snapshot.InZone
+        && !snapshot.Entered
+        && !snapshot.Stood
+        && snapshot.PassedAt is null;
+
+    private static bool ValidPlaced(StopDetectorSnapshot snapshot, int stopCount) =>
+        !string.IsNullOrWhiteSpace(snapshot.TripId)
+        && snapshot.ServiceDate != default
+        && double.IsFinite(snapshot.LastAlongMetres)
+        && snapshot.LastAlongMetres >= 0
+        && snapshot.LastAt != default
+        && snapshot.LastAt.Offset == TimeSpan.Zero
+        && (!snapshot.Entered || snapshot.InZone)
+        && (!snapshot.Stood || snapshot.InZone)
+        && (snapshot.PassedAt is not { } passed
+            || snapshot.InZone && passed != default && passed.Offset == TimeSpan.Zero && passed <= snapshot.LastAt)
+        && (snapshot.Next < stopCount
+            || !snapshot.InZone && !snapshot.Entered && !snapshot.Stood && snapshot.PassedAt is null);
+
+    private static ArgumentException InvalidSnapshot() =>
+        new("The stop detector snapshot is inconsistent.", "snapshot");
 }
+
+internal readonly record struct StopDetectorSnapshot(
+    string? TripId,
+    DateOnly ServiceDate,
+    bool HasPattern,
+    int Next,
+    double LastAlongMetres,
+    DateTimeOffset LastAt,
+    bool InZone,
+    bool Entered,
+    bool Stood,
+    DateTimeOffset? PassedAt);

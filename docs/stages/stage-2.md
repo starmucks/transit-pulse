@@ -119,17 +119,25 @@ events.stop ──► Worker: StopEventSink ─► Postgres stop_events (upsert 
   `docs/benchmarks.md`, «Schedule delay against HSL».
 
 ### 2.9 Слипание (#47)
-- [ ] По линии и направлению: машины упорядочены по дистанции вдоль маршрута; интервал до впереди идущей < X % планового → `events.anomaly` `Bunching` (одно событие на эпизод, не на каждую позицию).
+- [x] По линии и направлению: машины упорядочены по дистанции вдоль маршрута; интервал до впереди идущей < 25 %
+  планового в течение 30 с → `events.anomaly` `Bunching`. Эпизод закрывается после 30 с восстановления; одно событие
+  на эпизод, не на каждую позицию. Process-wide состояние и singleton-ограничение — ADR-0013.
 
 **Готово, когда:** unit-тесты (две машины сближаются и расходятся → одно событие); число эпизодов за будний день на архиве записано, X утверждён автором.
+- ✅ 2026-11-19: порог 25 % и выдержка входа/выхода 30 с утверждены; за 04.11 production-детектор дал 2 335
+  эпизодов (1 293 bus, 482 tram, 394 train, 166 metro). Точный часовой replay — 39 800 raw/с при цели 12 000/с.
+  Методика и полный перебор порогов — `docs/benchmarks.md`, «Bunching threshold».
 
 ### 2.10 Надёжность: снапшот, рестарт, идемпотентный приёмник (#48)
-- [ ] Снапшот состояния Processor в Redis вместе с offset'ами партиций; commit offset'ов только после снапшота; восстановление при старте и при ребалансе.
-- [ ] Ошибка обработки сообщения → N попыток → `positions.raw.dlq` с причиной; поток не останавливается.
-- [ ] Worker: `StopEventSink` — `events.stop` → таблица `stop_events` (upsert по id события; hypertable — в этапе 3).
-- [ ] Интеграционный тест (Testcontainers: Redpanda + Redis + Postgres): поток → kill Processor посередине → рестарт → набор событий в `stop_events` совпадает с прогоном без рестарта, дублей нет.
+- [x] Снапшот состояния Processor в Redis вместе с offset'ами партиций; commit offset'ов только после снапшота; восстановление при старте и при ребалансе.
+  - Fail-closed, если после committed offsets нет checkpoint; partial re-assign восстанавливает newcomers из Redis (ADR-0014).
+- [x] Ошибка обработки сообщения → N попыток → `positions.raw.dlq` с причиной; поток не останавливается.
+- [x] Worker: `StopEventSink` — `events.stop` → таблица `stop_events` (upsert по id события; hypertable — в этапе 3).
+  - Битый record: skip + log + advance offset (не цикл рестартов).
+- [x] Интеграционный тест (Testcontainers: Redpanda + Redis + Postgres): crash до и после Redis write → `stop_events` как у uninterrupted; restart читает Redis.
 
 **Готово, когда:** тест kill/restart зелёный в CI; ADR 4 принят.
+- ✅ 2026-11-20: `ProcessorRecoveryTests` (before/after checkpoint), `Missing_checkpoint_after_committed_offsets_fails_closed`, ADR-0014.
 
 ### 2.11 Replay-тест и живой lag (#49)
 - [ ] `tests/TransitPulse.Replay.Tests`: эталонный срез архива → Ingestor replay → Processor → ожидаемые события (сравнение с зафиксированным результатом; изменение — осознанно, с обновлением эталона).
@@ -151,15 +159,15 @@ events.stop ──► Worker: StopEventSink ─► Postgres stop_events (upsert 
 
 ## Критерии приёмки этапа (бриф §10)
 - [ ] **События прибытия совпадают с проверкой на выборке:** расхождение с эталоном HSL `ars`/`dep` на ≥ 1 ч будничных данных в пределах порогов, утверждённых по первому замеру (2.7); плюс ручная проверка 20 случайных событий на карте трека.
-- [ ] **Kill/restart Processor без потерь и дублей:** интеграционный тест 2.10 зелёный в CI.
+- [x] **Kill/restart Processor без потерь и дублей:** crash before/after Redis → тот же `stop_events`; fail-closed без checkpoint (`ProcessorRecoveryTests`, 2026-11-20).
 - [ ] **Lag стабильно около нуля на живом потоке:** прогон `full` ≥ 1 ч в будний пик — lag Processor не растёт, p95 < 1 с по времени (2.11).
 - [ ] Unit-тесты доменной логики на фикстурах реальных треков; replay-тест на эталонном срезе зелёный в CI.
-- [ ] ADR 1, 3, 4 приняты (ADR 6 принят на этапе 1).
+- [x] ADR 1, 3, 4 приняты (ADR 6 принят на этапе 1): ADR-0009, ADR-0010, ADR-0014.
 
 ## ADR этапа
 - ADR-0009 (ADR 1 брифа) — Modular monolith with four deployable units (Worker появился в 2.3; ADR — в 2.4 вместе с Processor, решение автора 2026-11-02).
 - ADR-0010 (ADR 3 брифа) — Key positions by vehicle and process them in one loop (задача 2.4).
-- ADR 4 — At-least-once with idempotent receivers instead of exactly-once: снапшот + offset, детерминированные id, upsert (задача 2.10).
+- ADR-0014 (ADR 4 брифа) — Checkpoint Processor state before committing offsets; at-least-once + idempotent `StopEventSink` (задача 2.10).
 - ADR-0008 — Store GTFS snapshots as partitions, with plain SQL migrations (задача 2.3).
 
 ## Решения, принятые в этой спецификации (утверждены 2026-11-02)

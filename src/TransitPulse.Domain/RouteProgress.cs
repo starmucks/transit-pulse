@@ -53,6 +53,57 @@ public sealed class RouteProgress
     private int _misses;
     private double _rearmost;
 
+    internal RouteProgressSnapshot Capture()
+    {
+        if (_tripId is null)
+        {
+            return default;
+        }
+
+        return new RouteProgressSnapshot(
+            _tripId,
+            _serviceDate,
+            _onLine,
+            _along,
+            _onLine ? _at : default,
+            _misses,
+            _misses > 0 ? _rearmost : 0);
+    }
+
+    internal static RouteProgress Restore(RouteProgressSnapshot snapshot)
+    {
+        if (snapshot.TripId is null)
+        {
+            if (snapshot.ServiceDate != default
+                || snapshot.OnLine
+                || snapshot.AlongMetres != 0
+                || snapshot.At != default
+                || snapshot.Misses != 0
+                || snapshot.RearmostMetres != 0)
+            {
+                throw InvalidSnapshot();
+            }
+
+            return new RouteProgress();
+        }
+
+        if (!Valid(snapshot))
+        {
+            throw InvalidSnapshot();
+        }
+
+        return new RouteProgress
+        {
+            _tripId = snapshot.TripId,
+            _serviceDate = snapshot.ServiceDate,
+            _onLine = snapshot.OnLine,
+            _along = snapshot.AlongMetres,
+            _at = snapshot.At,
+            _misses = snapshot.Misses,
+            _rearmost = snapshot.RearmostMetres,
+        };
+    }
+
     /// <summary>Places the vehicle's next position on its trip's line and updates the progress.</summary>
     /// <param name="trip">The trip the position belongs to.</param>
     /// <param name="lat">Latitude of the position, degrees.</param>
@@ -137,4 +188,39 @@ public sealed class RouteProgress
         _along = whole.AlongMetres;
         return new RouteMatch(RouteMatchStatus.OnRoute, _along, whole.OffsetMetres, ReanchoredByMetres: jump);
     }
+
+    private static bool Valid(RouteProgressSnapshot snapshot)
+    {
+        if (string.IsNullOrWhiteSpace(snapshot.TripId)
+            || snapshot.ServiceDate == default
+            || !double.IsFinite(snapshot.AlongMetres)
+            || snapshot.AlongMetres < 0
+            || snapshot.Misses < 0
+            || !double.IsFinite(snapshot.RearmostMetres)
+            || snapshot.RearmostMetres < 0)
+        {
+            return false;
+        }
+
+        return snapshot.OnLine
+            ? snapshot.At != default
+                && snapshot.At.Offset == TimeSpan.Zero
+                && (snapshot.Misses > 0 || snapshot.RearmostMetres == 0)
+            : snapshot.AlongMetres == 0
+                && snapshot.At == default
+                && snapshot.Misses == 0
+                && snapshot.RearmostMetres == 0;
+    }
+
+    private static ArgumentException InvalidSnapshot() =>
+        new("The route progress snapshot is inconsistent.", "snapshot");
 }
+
+internal readonly record struct RouteProgressSnapshot(
+    string? TripId,
+    DateOnly ServiceDate,
+    bool OnLine,
+    double AlongMetres,
+    DateTimeOffset At,
+    int Misses,
+    double RearmostMetres);

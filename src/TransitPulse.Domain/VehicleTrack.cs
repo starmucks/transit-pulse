@@ -30,6 +30,40 @@ public sealed class VehicleTrack
     private Fix? _place;
     private Fix? _setAside;
 
+    internal VehicleTrackSnapshot Capture() => new(
+        _lastObservedAt,
+        _place is { } place ? Snapshot(place) : null,
+        _setAside is { } setAside ? Snapshot(setAside) : null);
+
+    internal static VehicleTrack Restore(VehicleTrackSnapshot snapshot)
+    {
+        if (snapshot.Place is not { } place)
+        {
+            if (snapshot.LastObservedAt != default || snapshot.SetAside is not null)
+            {
+                throw InvalidSnapshot();
+            }
+
+            return new VehicleTrack();
+        }
+
+        if (!Valid(place)
+            || snapshot.LastObservedAt == default
+            || snapshot.LastObservedAt.Offset != TimeSpan.Zero
+            || snapshot.LastObservedAt < place.At
+            || snapshot.SetAside is { } setAside && (!Valid(setAside) || setAside.At != snapshot.LastObservedAt))
+        {
+            throw InvalidSnapshot();
+        }
+
+        return new VehicleTrack
+        {
+            _lastObservedAt = snapshot.LastObservedAt,
+            _place = Restore(place),
+            _setAside = snapshot.SetAside is { } pending ? Restore(pending) : null,
+        };
+    }
+
     /// <summary>Judges the vehicle's next position and updates the track with it.</summary>
     /// <param name="position">The vehicle's next position.</param>
     /// <returns>Whether the position may be processed, or why not.</returns>
@@ -78,9 +112,29 @@ public sealed class VehicleTrack
         return metres > MinJumpMetres && metres > MaxSpeedMps * (to.At - from.At).TotalSeconds;
     }
 
+    private static VehicleTrackFixSnapshot Snapshot(Fix fix) => new(fix.Lat, fix.Lon, fix.At);
+
+    private static Fix Restore(VehicleTrackFixSnapshot fix) => new(fix.Lat, fix.Lon, fix.At);
+
+    private static bool Valid(VehicleTrackFixSnapshot fix) =>
+        fix.Lat is >= -90 and <= 90
+        && fix.Lon is >= -180 and <= 180
+        && fix.At != default
+        && fix.At.Offset == TimeSpan.Zero;
+
+    private static ArgumentException InvalidSnapshot() =>
+        new("The vehicle track snapshot is inconsistent.", "snapshot");
+
     private readonly record struct Fix(double Lat, double Lon, DateTimeOffset At)
     {
         // Exact on purpose: a repeat carries the same numbers, and a nearly equal fix is a new one.
         public bool IsAt(Fix other) => Lat == other.Lat && Lon == other.Lon;
     }
 }
+
+internal readonly record struct VehicleTrackSnapshot(
+    DateTimeOffset LastObservedAt,
+    VehicleTrackFixSnapshot? Place,
+    VehicleTrackFixSnapshot? SetAside);
+
+internal readonly record struct VehicleTrackFixSnapshot(double Lat, double Lon, DateTimeOffset At);

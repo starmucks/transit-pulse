@@ -38,6 +38,7 @@ public sealed class PartitionStateTests
 
         Assert.Equal(TripResolution.Found, found.Trip);
         Assert.Equal(new RouteMatch(RouteMatchStatus.NoShape, 0, 0), found.Route);
+        Assert.Equal("1009_14", found.Run!.TripId);
         Assert.Equal("1009_14", found.Position!.Schedule!.TripId);
         Assert.Equal(TripResolution.RouteUnknown, missed.Trip);
         Assert.Null(missed.Position!.Schedule);
@@ -309,5 +310,74 @@ public sealed class PartitionStateTests
         var other = PositionMessage.Value(new VehiclePosition("hsl", "12/7", null, null, 62.0, 25.0, null, null, null, null, _t0));
 
         Assert.Equal(MessageVerdict.Accepted, state.Process(1, "hsl/12/7", other).Verdict);
+    }
+
+    [Fact]
+    public void Snapshot_round_trip_rebinds_stop_and_delay_state_to_a_reloaded_schedule()
+    {
+        var line = new RouteShape([60.1, 60.3], [24.9, 24.9]);
+        var stops = new StopPattern(line, [new StopPoint("1020453", 1, 60.2, 24.9)]);
+        var timetable = new StopTimetable([new ScheduledStopTime(1, 12 * 3600, 12 * 3600)]);
+        var schedule = new CurrentTripSchedule("hsl", TimeZoneInfo.Utc);
+        schedule.Replace(ScheduleOf(12, line, stops, timetable));
+        var state = new PartitionState(schedule);
+        const string trip = "1009/0/20261105/12:00:00";
+        state.Process(0, Vehicle, OnTrip("hsl", trip, 0, 60.1995, delaySec: 10));
+        state.Process(1, Vehicle, OnTrip("hsl", trip, 5, 60.19985, delaySec: 12));
+        state.Process(2, Vehicle, OnTrip("hsl", trip, 6, 60.19985, delaySec: 13));
+
+        var reloadedLine = new RouteShape([60.1, 60.3], [24.9, 24.9]);
+        var reloadedStops = new StopPattern(reloadedLine, [new StopPoint("1020453", 1, 60.2, 24.9)]);
+        var reloadedTimes = new StopTimetable([new ScheduledStopTime(1, 12 * 3600, 12 * 3600)]);
+        schedule.Replace(ScheduleOf(12, reloadedLine, reloadedStops, reloadedTimes));
+        var restored = PartitionState.Restore(state.Capture(), schedule);
+
+        var standing = restored.Process(3, Vehicle, OnTrip("hsl", trip, 7, 60.19985));
+        var departed = restored.Process(4, Vehicle, OnTrip("hsl", trip, 10, 60.2006));
+
+        Assert.Equal(3, state.NextOffset);
+        Assert.Equal(5, standing.Position!.DelaySec);
+        Assert.Single(restored.StopEvents);
+        Assert.Equal(StopEventKind.Departure, restored.StopEvents[0].Kind);
+        Assert.Equal(5, departed.Position!.DelaySec);
+    }
+
+    [Fact]
+    public void Restored_checkpoint_offset_is_not_uncommitted()
+    {
+        var state = NewState();
+        state.Process(41, Vehicle, Message(0));
+
+        var restored = PartitionState.Restore(state.Capture(), new CurrentTripSchedule("hsl", TimeZoneInfo.Utc));
+
+        Assert.Equal(42, restored.NextOffset);
+        // Redis can be newer than Kafka when the previous process died between the checkpoint and the offset commit.
+        Assert.True(restored.HasUncommitted);
+    }
+
+    [Fact]
+    public void Snapshot_round_trip_keeps_vehicle_keys_separate()
+    {
+        var state = NewState();
+        state.Process(0, Vehicle, Message(10));
+        state.Process(1, "hsl/12/7", Message(20));
+
+        var restored = PartitionState.Restore(state.Capture(), new CurrentTripSchedule("hsl", TimeZoneInfo.Utc));
+
+        Assert.Equal(MessageVerdict.OutOfOrder, restored.Process(2, Vehicle, Message(9)).Verdict);
+        Assert.Equal(MessageVerdict.OutOfOrder, restored.Process(3, "hsl/12/7", Message(19)).Verdict);
+    }
+
+    [Fact]
+    public void Active_schedule_state_cannot_restore_without_its_trip()
+    {
+        var line = new RouteShape([60.1, 60.3], [24.9, 24.9]);
+        var schedule = new CurrentTripSchedule("hsl", TimeZoneInfo.Utc);
+        schedule.Replace(ScheduleOf(14, line, new StopPattern(line, [new StopPoint("A", 1, 60.2, 24.9)])));
+        var state = new PartitionState(schedule);
+        state.Process(0, Vehicle, OnTrip("hsl", "1009/0/20261105/14:00:00"));
+        schedule.Replace(ScheduleOf(15));
+
+        Assert.Throws<InvalidOperationException>(() => PartitionState.Restore(state.Capture(), schedule));
     }
 }

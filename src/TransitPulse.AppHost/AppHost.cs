@@ -18,8 +18,10 @@ var postgres = builder.AddPostgres("postgres", password: postgresPassword, port:
 
 var database = postgres.AddDatabase("transitpulse");
 
-builder.AddRedis("redis", port: 16379, password: redisPassword)
+var redis = builder.AddRedis("redis", port: 16379, password: redisPassword)
     .WithImageTag("8.8.3-alpine")
+    // Checkpoints become authoritative before Kafka commits; WAITAOF in the Processor confirms their local fsync.
+    .WithArgs("--appendonly", "yes", "--appendfsync", "everysec")
     .WithDataVolume("transit-pulse-redis")
     .WithContainerRuntimeArgs("--memory=256m")
     .WithLifetime(ContainerLifetime.Persistent);
@@ -64,9 +66,11 @@ builder.AddProject<Projects.TransitPulse_Ingestor>("ingestor")
 
 builder.AddProject<Projects.TransitPulse_Processor>("processor")
     .WithReference(database)
+    .WithReference(redis)
     .WithEnvironment("Kafka__BootstrapServers", redpanda.GetEndpoint("kafka").Property(EndpointProperty.HostAndPort))
     .WaitFor(redpanda)
-    .WaitFor(database);
+    .WaitFor(database)
+    .WaitFor(redis);
 
 // GTFS snapshots as the collector lays them out; GtfsSnapshotDirectory in user secrets points at another copy.
 var gtfsSnapshots = builder.Configuration["GtfsSnapshotDirectory"]
@@ -74,6 +78,8 @@ var gtfsSnapshots = builder.Configuration["GtfsSnapshotDirectory"]
 builder.AddProject<Projects.TransitPulse_Worker>("worker")
     .WithReference(database)
     .WithEnvironment("GtfsImport__SnapshotDirectory", gtfsSnapshots)
-    .WaitFor(database);
+    .WithEnvironment("Kafka__BootstrapServers", redpanda.GetEndpoint("kafka").Property(EndpointProperty.HostAndPort))
+    .WaitFor(database)
+    .WaitFor(redpanda);
 
 await builder.Build().RunAsync();

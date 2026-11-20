@@ -1,11 +1,15 @@
 # TransitPulse.Processor development notes
 
-- **Commit only after a complete flush.** An offset may be committed only when everything read before it was delivered:
-  `CommitProcessed` flushes first and skips the commit if anything is left. Never enable the automatic commit.
+- **Commit only after a complete flush and a Redis checkpoint** (ADR-0014). `CommitProcessed` flushes every output
+  (enriched positions, stop events, anomalies and DLQ), saves the process checkpoint, then commits offsets. Never enable
+  the automatic commit.
+- **Missing checkpoint after committed offsets fails closed.** A cold assign with Kafka commits but no Redis checkpoint
+  (or no state for a returning partition) stops the process; it must not resume with empty in-memory state.
 - **A commit stores the next offset to read:** the last processed offset + 1 (`PartitionState.NextOffset`).
 - **A message the broker never accepted stops the process** (`ThrowIfFailed`). Skipping it and committing further would
-  lose it; a restart repeats everything since the last commit. An unreadable message is the opposite: it fails the same way
-  every time, so it moves the offset and is counted.
+  lose it; a restart repeats everything since the last commit. An unreadable message is the opposite: after
+  `Kafka:ProcessingAttempts` decode failures it is published to `positions.raw.dlq` with the reason, the offset moves and
+  the stream continues.
 - **One loop, no locks** (ADR-0010). `PartitionState` and `_partitions` are touched only by the loop thread. Rebalance
   handlers run on that thread too, inside `Consume` or `Close`. Delivery reports and client errors arrive on the client's
   thread and use `Interlocked`/`Volatile`.
@@ -23,6 +27,11 @@
   GTFS Time type specifies; hours may exceed 24 and daylight-saving transition days do not start at local midnight.
 - **Stop geometry and stop times have different sharing.** Trips through the same stops on the same shape share one
   `StopPattern`, but each GTFS `trip_id` keeps its own `StopTimetable`; calendar instances of that trip share the timetable.
+- **Bunching is process-wide and the Processor is a singleton for now** (ADR-0013). Comparable vehicles share a feed,
+  route, direction and `StopPattern`. Their spatial gap is converted to scheduled travel time; below 25 % of planned
+  headway for 30 s opens one episode, and 30 s of recovery closes it. A per-partition watermark restores event-time order
+  before comparison; Kafka partition EOF releases idle partitions. Revoke/lost removes that partition's queued and active
+  vehicles.
 - **State belongs to a partition:** it is dropped when the partition is revoked or lost. A lost partition is never committed:
   it already belongs to another consumer.
 - **Same partitioner as the Ingestor** (`Murmur2Random`): a vehicle keeps its partition number from topic to topic.
