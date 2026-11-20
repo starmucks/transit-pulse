@@ -12,12 +12,14 @@ namespace TransitPulse.Processor.Kafka;
 /// </summary>
 /// <param name="options">Broker and consumer settings.</param>
 /// <param name="schedule">Where accepted positions look up their trips.</param>
+/// <param name="checkpoints">Durable state saved after output delivery and before offset commit.</param>
 /// <param name="metrics">Counters and lag.</param>
 /// <param name="timeProvider">Clock for the commit interval and the lag.</param>
 /// <param name="logger">Log for broker errors, dropped messages and progress.</param>
 internal sealed partial class PositionConsumer(
     IOptions<ProcessorKafkaOptions> options,
     CurrentTripSchedule schedule,
+    IProcessorCheckpointStore checkpoints,
     ProcessorMetrics metrics,
     TimeProvider timeProvider,
     ILogger<PositionConsumer> logger) : BackgroundService
@@ -31,7 +33,7 @@ internal sealed partial class PositionConsumer(
     private static readonly TimeSpan _queueFullBackoff = TimeSpan.FromMilliseconds(100);
 
     private readonly ProcessorKafkaOptions _options = options.Value;
-    private readonly BunchingEventTimeBuffer _bunching = new(schedule.TimeZone);
+    private BunchingEventTimeBuffer _bunching = new(schedule.TimeZone);
 
     // Touched only by the loop.
     private readonly Dictionary<int, PartitionState> _partitions = [];
@@ -105,14 +107,19 @@ internal sealed partial class PositionConsumer(
             // may be committed, including by Close below: the next start repeats everything since the last commit.
             _abandoned = true;
         }
+        catch
+        {
+            // Leave the group promptly after a failed run, but do not let the revoke callback commit the failed boundary.
+            _abandoned = true;
+            throw;
+        }
         finally
         {
             // Also after a failure: the totals of a failed run are what explains it.
             LogTotals();
+            // Close sends LeaveGroup. Dispose alone can leave the dead member assigned until its session times out.
+            consumer.Close();
         }
-
-        // Leaves the group at once, so the partitions move now rather than after the session times out.
-        consumer.Close();
     }
 
     private ConsumeResult<string, byte[]>? TryConsume(IConsumer<string, byte[]> consumer)
@@ -121,7 +128,7 @@ internal sealed partial class PositionConsumer(
         {
             return consumer.Consume(_pollTimeout);
         }
-        catch (ConsumeException ex) when (!ex.Error.IsFatal)
+        catch (ConsumeException ex) when (!ex.Error.IsFatal && ex.InnerException is null)
         {
             LogConsumeError(ex.Error.Code, ex.Error.Reason);
             return null;
@@ -313,6 +320,14 @@ internal sealed partial class PositionConsumer(
             return;
         }
 
+        // Never replace the last useful checkpoint after this instance has lost or revoked everything.
+        if (_partitions.Count == 0)
+        {
+            return;
+        }
+
+        checkpoints.Save(ProcessorCheckpoint.Capture(_partitions, _bunching, _bunchingVehicles));
+
         List<TopicPartitionOffset> offsets =
         [
             .. partitions
@@ -341,12 +356,37 @@ internal sealed partial class PositionConsumer(
         }
     }
 
-    // A partition's state is created by its first message.
-    private void OnAssigned(List<TopicPartition> assigned)
+    // Restores the whole process checkpoint only when no live partition state could be mixed with it.
+    private IEnumerable<TopicPartitionOffset> OnAssigned(List<TopicPartition> assigned)
     {
         var partitions = assigned.Select(partition => partition.Partition.Value).ToList();
+        var owned = new HashSet<int>(_partitions.Keys);
+        owned.UnionWith(partitions);
+        if (_partitions.Count == 0 && checkpoints.Load() is { } saved)
+        {
+            var restored = ProcessorCheckpoint.RestoreOwned(saved, schedule, owned);
+            foreach (var (partition, state) in restored.Partitions)
+            {
+                _partitions.Add(partition, state);
+            }
+
+            _bunching = restored.Bunching;
+            foreach (var (partition, vehicles) in restored.BunchingVehicles)
+            {
+                _bunchingVehicles.Add(partition, vehicles);
+            }
+        }
+
         _bunching.Assign(partitions);
         LogAssigned(partitions);
+        return
+        [
+            .. assigned.Select(partition => new TopicPartitionOffset(
+                partition,
+                _partitions.TryGetValue(partition.Partition.Value, out var state) && state.NextOffset is { } next
+                    ? new Offset(next)
+                    : Offset.Unset)),
+        ];
     }
 
     // Runs on the loop's thread, inside Consume or Close. The new owner resumes from the commit made here, and without it
