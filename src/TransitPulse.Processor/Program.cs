@@ -10,6 +10,8 @@ var builder = Host.CreateApplicationBuilder(args);
 builder.AddServiceDefaults();
 // Connection string ConnectionStrings:transitpulse, given by the AppHost; adds Npgsql health check, traces and metrics.
 builder.AddNpgsqlDataSource("transitpulse");
+// Redis resource named by the AppHost; registers the shared client, health check and telemetry.
+builder.AddRedisClient("redis");
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddOptions<ProcessorKafkaOptions>()
@@ -30,6 +32,8 @@ builder.Services.AddSingleton(provider =>
     var options = provider.GetRequiredService<IOptions<TripScheduleOptions>>().Value;
     return new CurrentTripSchedule(options.FeedId, TimeZoneInfo.FindSystemTimeZoneById(options.TimeZone));
 });
+builder.Services.AddSingleton<ICheckpointBlobStore, RedisCheckpointBlobStore>();
+builder.Services.AddSingleton<IProcessorCheckpointStore, ProcessorCheckpointStore>();
 builder.Services.AddSingleton<ProcessorMetrics>();
 // In this order: hosted services start one after another, so the loop finds its topics and its schedule in place.
 builder.Services.AddHostedService<ProcessorTopicInitializer>();
