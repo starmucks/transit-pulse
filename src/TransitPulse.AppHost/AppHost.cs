@@ -78,6 +78,8 @@ var gtfsSnapshots = builder.Configuration["GtfsSnapshotDirectory"]
 builder.AddProject<Projects.TransitPulse_Worker>("worker")
     .WithReference(database)
     .WithEnvironment("GtfsImport__SnapshotDirectory", gtfsSnapshots)
-    .WaitFor(database);
+    .WithEnvironment("Kafka__BootstrapServers", redpanda.GetEndpoint("kafka").Property(EndpointProperty.HostAndPort))
+    .WaitFor(database)
+    .WaitFor(redpanda);
 
 await builder.Build().RunAsync();
