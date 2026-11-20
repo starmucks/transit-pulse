@@ -55,6 +55,30 @@ public sealed class TripScheduleTests
     }
 
     [Fact]
+    public void Gtfs_identity_finds_the_exact_calendar_run()
+    {
+        var first = Trip("1001_x", "1001", 0, 5, 37, _day);
+        var second = Trip("1001_x", "1001", 0, 5, 37, _nextDay);
+        var schedule = Schedule(second, first);
+
+        var found = schedule.TryFindByIdentity("1001_x", _nextDay, out var trip);
+
+        Assert.True(found);
+        Assert.Same(second, trip);
+    }
+
+    [Fact]
+    public void Unknown_gtfs_identity_is_not_found()
+    {
+        var schedule = Schedule(Trip("1001_x", "1001", 0, 5, 37));
+
+        var found = schedule.TryFindByIdentity("missing", _day, out var trip);
+
+        Assert.False(found);
+        Assert.Null(trip);
+    }
+
+    [Fact]
     public void Two_runs_of_a_route_at_one_time_are_ambiguous_by_route_but_not_by_variant()
     {
         var plain = Trip("1006_20261103_Ke_2_0728", "1006", 1, 7, 28);
@@ -160,10 +184,32 @@ public sealed class TripScheduleTests
     }
 
     [Fact]
+    public void Identity_lookup_allocates_nothing()
+    {
+        var schedule = Schedule(Trip("1001_x", "1001", 0, 5, 37));
+        schedule.TryFindByIdentity("1001_x", _day, out _);
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        schedule.TryFindByIdentity("1001_x", _day, out _);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0, allocated);
+    }
+
+    [Fact]
     public void Run_outside_the_given_days_is_rejected()
     {
         var late = Trip("1001_x", "1001", 0, 5, 37, _nextDay.AddDays(1));
 
         Assert.Throws<ArgumentException>(() => Schedule(late));
+    }
+
+    [Fact]
+    public void Duplicate_gtfs_identity_is_rejected()
+    {
+        var first = Trip("1001_x", "1001", 0, 5, 37);
+        var duplicate = Trip("1001_x", "1002", 1, 6, 0);
+
+        Assert.Throws<ArgumentException>(() => Schedule(first, duplicate));
     }
 }

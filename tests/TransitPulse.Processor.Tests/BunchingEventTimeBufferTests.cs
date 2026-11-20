@@ -55,6 +55,58 @@ public sealed class BunchingEventTimeBufferTests
         Assert.Single(found);
     }
 
+    [Fact]
+    public void Snapshot_round_trip_keeps_pending_order_and_partition_end()
+    {
+        var fixture = new Fixture();
+        var buffer = new BunchingEventTimeBuffer(TimeZoneInfo.Utc);
+        var found = new List<BunchingEvent>();
+        buffer.Assign([0, 1, 2]);
+        buffer.ReachedEnd(2, found);
+        for (var seconds = 0; seconds <= 35; seconds += 5)
+        {
+            Fixture.Observe(buffer, found, partition: 0, vehicle: "leader", fixture.Leader, seconds, fixture.Length * 0.06);
+        }
+
+        var reloaded = new Fixture();
+        var restored = BunchingEventTimeBuffer.Restore(buffer.Capture(), reloaded.Schedule(), TimeZoneInfo.Utc);
+        for (var seconds = 0; seconds <= 35; seconds += 5)
+        {
+            Fixture.Observe(restored, found, partition: 1, vehicle: "follower", reloaded.Follower, seconds, alongMetres: 0);
+        }
+
+        var bunching = Assert.Single(found);
+        Assert.Equal(_t0, bunching.StartedAt);
+        Assert.Equal(_t0.AddSeconds(30), bunching.ConfirmedAt);
+    }
+
+    [Fact]
+    public void Capture_discards_pending_observations_from_an_old_generation()
+    {
+        var fixture = new Fixture();
+        var buffer = new BunchingEventTimeBuffer(TimeZoneInfo.Utc);
+        buffer.Assign([0, 1]);
+        Fixture.Observe(buffer, [], partition: 0, vehicle: "leader", fixture.Leader, 0, fixture.Length * 0.06);
+
+        buffer.Remove([0], []);
+        buffer.Assign([0]);
+
+        Assert.Empty(buffer.Capture().Pending);
+    }
+
+    [Fact]
+    public void Pending_snapshot_cannot_restore_without_its_trip()
+    {
+        var fixture = new Fixture();
+        var buffer = new BunchingEventTimeBuffer(TimeZoneInfo.Utc);
+        buffer.Assign([0, 1]);
+        Fixture.Observe(buffer, [], partition: 0, vehicle: "leader", fixture.Leader, 0, fixture.Length * 0.06);
+        var incomplete = new TripSchedule([_day], [fixture.Follower]);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            BunchingEventTimeBuffer.Restore(buffer.Capture(), incomplete, TimeZoneInfo.Utc));
+    }
+
     private sealed class Fixture
     {
         private readonly RouteShape _shape = new([60.2, 60.2], [24.9, 24.918]);
@@ -74,6 +126,8 @@ public sealed class BunchingEventTimeBufferTests
         public ScheduledTrip Leader { get; }
 
         public ScheduledTrip Follower { get; }
+
+        public TripSchedule Schedule() => new([_day], [Leader, Follower]);
 
         public static void Observe(
             BunchingEventTimeBuffer buffer,

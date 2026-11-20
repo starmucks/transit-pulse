@@ -44,7 +44,11 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
         TimeSpan? commitInterval = null,
         ILogger<PositionConsumer>? logger = null,
         CurrentTripSchedule? schedule = null,
-        string? anomaly = null) => new(
+        string? anomaly = null,
+        string? deadLetter = null,
+        int processingAttempts = 3,
+        IProcessorCheckpointStore? checkpoints = null,
+        ICommitBarrier? commitBarrier = null) => new(
         Options.Create(new ProcessorKafkaOptions
         {
             BootstrapServers = redpanda.BootstrapServers,
@@ -52,10 +56,15 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
             InputTopic = input,
             OutputTopic = output,
             AnomalyEventsTopic = anomaly ?? $"{output}-anomaly",
+            DeadLetterTopic = deadLetter ?? $"{output}-dlq",
+            ProcessingAttempts = processingAttempts,
             // Long by default: a test sees the commit it provokes, not one the timer happened to make.
             CommitInterval = commitInterval ?? TimeSpan.FromHours(1),
         }),
         schedule ?? new CurrentTripSchedule("hsl", TimeZoneInfo.Utc),
+        checkpoints ?? new MemoryProcessorCheckpointStore(),
+        new PositionMessageReader(),
+        commitBarrier ?? new PassThroughCommitBarrier(),
         new ProcessorMetrics(_services.GetRequiredService<IMeterFactory>()),
         TimeProvider.System,
         logger ?? NullLogger<PositionConsumer>.Instance);
@@ -124,6 +133,11 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
     public async Task Plausible_positions_are_published_in_order_and_the_rest_are_dropped()
     {
         var (input, output) = await CreateTopicsAsync("flow");
+        var dlq = $"{output}-dlq";
+        await KafkaTopicCreator.EnsureAsync(
+            redpanda.BootstrapServers,
+            [new TopicDefinition(dlq, 1, TimeSpan.FromHours(1))],
+            Ct);
         var keptAfterJump = At("40/415", 3);
         Publish(input, At("40/415", 0), At("40/415", 1), At("40/415", 2, lat: 61.5), keptAfterJump, At("12/7", 0));
         using (var producer = NewProducer())
@@ -132,9 +146,10 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
             producer.Flush(TimeSpan.FromSeconds(10));
         }
 
-        var consumer = NewConsumer(input, output);
+        var consumer = NewConsumer(input, output, deadLetter: dlq);
         await consumer.StartAsync(Ct);
         var received = ReadOutput(output, 4);
+        var deadLetters = ReadOutput(dlq, 1);
         await consumer.StopAsync(Ct);
 
         Assert.False(consumer.ExecuteTask!.IsFaulted);
@@ -144,6 +159,10 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
             .ToList();
         Assert.Equal([At("40/415", 0), At("40/415", 1), keptAfterJump], vehicle);
         Assert.Equal(4, received.Count);
+        var deadLetter = RawPositionDeadLetterMessage.Parse(Assert.Single(deadLetters).Message.Value);
+        Assert.Equal(nameof(System.Text.Json.JsonException), deadLetter.ErrorType);
+        Assert.Equal(3, deadLetter.Attempts);
+        Assert.Equal("not json"u8.ToArray(), deadLetter.SourceValue);
     }
 
     [Fact]
@@ -373,22 +392,129 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
     public async Task After_a_clean_stop_the_next_start_continues_without_repeating()
     {
         var (input, output) = await CreateTopicsAsync("restart");
+        // Same store as Redis in production: a new empty Memory store would fail closed after committed offsets.
+        var checkpoints = new MemoryProcessorCheckpointStore();
         Publish(input, [.. Enumerable.Range(0, 5).Select(s => At("40/415", s))]);
 
-        var first = NewConsumer(input, output);
+        var first = NewConsumer(input, output, checkpoints: checkpoints);
         await first.StartAsync(Ct);
         Assert.Equal(5, ReadOutput(output, 5).Count);
         await first.StopAsync(Ct);
         Assert.Equal(5, CommittedTotal(input));
 
         Publish(input, [.. Enumerable.Range(5, 3).Select(s => At("40/415", s))]);
-        var second = NewConsumer(input, output);
+        var second = NewConsumer(input, output, checkpoints: checkpoints);
         await second.StartAsync(Ct);
         var received = ReadOutput(output, 8);
         await second.StopAsync(Ct);
 
+        Assert.False(second.ExecuteTask!.IsFaulted);
         Assert.Equal(8, received.Count);
         Assert.Equal(8, CommittedTotal(input));
+    }
+
+    [Fact]
+    public async Task Checkpoint_is_saved_after_output_delivery_and_before_offset_commit()
+    {
+        var (input, output) = await CreateTopicsAsync("checkpoint-order");
+        Publish(input, [.. Enumerable.Range(0, 5).Select(s => At("40/415", s))]);
+        long? committedAtFirstSave = null;
+        var checkpoints = new MemoryProcessorCheckpointStore
+        {
+            OnSave = _ => committedAtFirstSave ??= CommittedTotal(input),
+        };
+
+        var consumer = NewConsumer(input, output, checkpoints: checkpoints);
+        await consumer.StartAsync(Ct);
+        Assert.Equal(5, ReadOutput(output, 5).Count);
+        await consumer.StopAsync(Ct);
+
+        Assert.Equal(0, committedAtFirstSave);
+        Assert.True(checkpoints.Value.HasValue);
+        Assert.Equal(5, CommittedTotal(input));
+    }
+
+    [Fact]
+    public async Task Restart_uses_checkpoint_when_process_fails_after_save_before_offset_commit()
+    {
+        var (input, output) = await CreateTopicsAsync("checkpoint-failure");
+        Publish(input, [.. Enumerable.Range(0, 3).Select(s => At("40/415", s))]);
+        var checkpoints = new MemoryProcessorCheckpointStore();
+        var barrier = new FaultingCommitBarrier
+        {
+            Fault = new InvalidOperationException("crash after checkpoint"),
+        };
+        var consumer = NewConsumer(input, output, checkpoints: checkpoints, commitBarrier: barrier);
+
+        await consumer.StartAsync(Ct);
+        var delivered = ReadOutput(output, 3).Count;
+        await consumer.StopAsync(Ct);
+
+        Assert.Equal(3, delivered);
+        Assert.True(consumer.ExecuteTask!.IsFaulted);
+        Assert.IsType<InvalidOperationException>(consumer.ExecuteTask.Exception!.GetBaseException());
+        Assert.Equal(0, CommittedTotal(input));
+        var saved = Assert.Single(checkpoints.Value!.Value.Partitions);
+        Assert.Equal(delivered, saved.State.NextOffset);
+
+        var endBeforeRestart = TopicEndOffsets(output);
+        barrier.Fault = null;
+        var loadsBeforeRestart = checkpoints.LoadCount;
+        var restarted = NewConsumer(input, output, checkpoints: checkpoints, commitBarrier: barrier);
+        await restarted.StartAsync(Ct);
+        var restoreDeadline = DateTime.UtcNow.AddSeconds(15);
+        while (checkpoints.LoadCount == loadsBeforeRestart && DateTime.UtcNow < restoreDeadline)
+        {
+            await Task.Delay(100, Ct);
+        }
+
+        Assert.True(checkpoints.LoadCount > loadsBeforeRestart, "The restarted consumer did not load its checkpoint in time.");
+        // Checkpoint already covered the three messages: resume must not republish them.
+        Assert.Empty(ReadFromOffsets(output, endBeforeRestart, expected: 0));
+        Publish(input, [.. Enumerable.Range(3, 2).Select(s => At("40/415", s))]);
+        var continued = ReadFromOffsets(output, endBeforeRestart, expected: 2);
+        await restarted.StopAsync(Ct);
+
+        Assert.False(restarted.ExecuteTask!.IsFaulted);
+        Assert.Equal(2, continued.Count);
+        Assert.Equal(
+            [_t0.AddSeconds(3), _t0.AddSeconds(4)],
+            continued
+                .Select(message => EnrichedPositionMessage.Parse(message.Message.Value).Position.ObservedAt)
+                .Order()
+                .ToList());
+        Assert.Equal(5, CommittedTotal(input));
+    }
+
+    [Fact]
+    public async Task Missing_checkpoint_after_committed_offsets_fails_closed()
+    {
+        var (input, output) = await CreateTopicsAsync("missing-checkpoint");
+        Publish(input, [.. Enumerable.Range(0, 3).Select(s => At("40/415", s))]);
+        var checkpoints = new MemoryProcessorCheckpointStore();
+
+        var first = NewConsumer(input, output, checkpoints: checkpoints);
+        await first.StartAsync(Ct);
+        Assert.Equal(3, ReadOutput(output, 3).Count);
+        await first.StopAsync(Ct);
+        Assert.False(first.ExecuteTask!.IsFaulted);
+        Assert.Equal(3, CommittedTotal(input));
+        Assert.True(checkpoints.Value.HasValue);
+
+        checkpoints.Value = null;
+        var restarted = NewConsumer(input, output, checkpoints: checkpoints);
+        await restarted.StartAsync(Ct);
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        while (!restarted.ExecuteTask!.IsCompleted && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(100, Ct);
+        }
+
+        Assert.True(restarted.ExecuteTask.IsFaulted);
+        Assert.Contains(
+            "checkpoint is missing",
+            restarted.ExecuteTask.Exception!.GetBaseException().Message,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -396,18 +522,20 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
     {
         var (input, output) = await CreateTopicsAsync("rebalance");
         var firstLog = new FakeLogger<PositionConsumer>();
+        // Shared like Redis: each instance must see the other's saves or fail-closed kills the joiner.
+        var checkpoints = new MemoryProcessorCheckpointStore();
         var published = 0;
 
         // Every vehicle's positions are one apart in time, so each batch is new for all of them.
         void PublishRound(int round) => Publish(input, [.. Enumerable.Range(0, 12).Select(vehicle => At($"40/{vehicle}", round))]);
 
-        var first = NewConsumer(input, output, logger: firstLog);
+        var first = NewConsumer(input, output, logger: firstLog, checkpoints: checkpoints);
         await first.StartAsync(Ct);
         PublishRound(0);
         published += 12;
         Assert.Equal(published, ReadOutput(output, published).Count);
 
-        var second = NewConsumer(input, output);
+        var second = NewConsumer(input, output, checkpoints: checkpoints);
         await second.StartAsync(Ct);
         await WaitForMembersAsync($"{input}-group", 2);
 
@@ -474,5 +602,95 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
         await consumer.StopAsync(Ct);
 
         Assert.Equal(5, committed);
+    }
+
+    private Dictionary<int, long> TopicEndOffsets(string topic)
+    {
+        using var admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = redpanda.BootstrapServers }).Build();
+        using var client = new ConsumerBuilder<string, byte[]>(new ConsumerConfig
+        {
+            BootstrapServers = redpanda.BootstrapServers,
+            GroupId = $"watermark-{Guid.NewGuid():N}",
+        }).Build();
+        var meta = admin.GetMetadata(topic, TimeSpan.FromSeconds(10));
+        var ends = new Dictionary<int, long>();
+        foreach (var partition in meta.Topics[0].Partitions)
+        {
+            var high = client.QueryWatermarkOffsets(new TopicPartition(topic, partition.PartitionId), TimeSpan.FromSeconds(10)).High;
+            ends[partition.PartitionId] = high.IsSpecial ? 0 : high.Value;
+        }
+
+        return ends;
+    }
+
+    private List<ConsumeResult<string, byte[]>> ReadFromOffsets(string topic, Dictionary<int, long> start, int expected)
+    {
+        using var reader = new ConsumerBuilder<string, byte[]>(new ConsumerConfig
+        {
+            BootstrapServers = redpanda.BootstrapServers,
+            GroupId = $"reader-{Guid.NewGuid():N}",
+            AutoOffsetReset = AutoOffsetReset.Earliest,
+            EnableAutoCommit = false,
+            EnablePartitionEof = true,
+        }).Build();
+        reader.Assign(start.Select(pair => new TopicPartitionOffset(topic, pair.Key, pair.Value)));
+
+        var received = new List<ConsumeResult<string, byte[]>>();
+        // expected 0: a short quiet window must stay empty. expected > 0: wait until they arrive.
+        var deadline = DateTime.UtcNow.AddSeconds(expected == 0 ? 2 : 30);
+        while (DateTime.UtcNow < deadline && (expected == 0 || received.Count < expected))
+        {
+            if (reader.Consume(TimeSpan.FromMilliseconds(200)) is { IsPartitionEOF: false } result)
+            {
+                received.Add(result);
+                if (expected == 0)
+                {
+                    break;
+                }
+            }
+        }
+
+        reader.Close();
+        return received;
+    }
+
+    private sealed class MemoryProcessorCheckpointStore : IProcessorCheckpointStore
+    {
+        public ProcessorCheckpointSnapshot? Value { get; set; }
+
+        public Action<ProcessorCheckpointSnapshot>? OnSave { get; init; }
+
+        public Exception? SaveFailure { get; set; }
+
+        public int LoadCount { get; private set; }
+
+        public ProcessorCheckpointSnapshot? Load()
+        {
+            LoadCount++;
+            return Value;
+        }
+
+        public void Save(ProcessorCheckpointSnapshot snapshot)
+        {
+            Value = snapshot;
+            OnSave?.Invoke(snapshot);
+            if (SaveFailure is not null)
+            {
+                throw SaveFailure;
+            }
+        }
+    }
+
+    private sealed class FaultingCommitBarrier : ICommitBarrier
+    {
+        public Exception? Fault { get; set; }
+
+        public void AfterCheckpointSaved()
+        {
+            if (Fault is not null)
+            {
+                throw Fault;
+            }
+        }
     }
 }

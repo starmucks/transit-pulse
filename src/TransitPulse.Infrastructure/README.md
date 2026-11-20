@@ -7,3 +7,5 @@
 - **The schedule read (`RunsOfDays`) changes only with a measurement on a real snapshot.** `MATERIALIZED` keeps its plan
   from flipping after `ANALYZE` (a 30 s timeout was measured); on the test slice every plan is instant, so tests cannot
   catch a slow one (`docs/benchmarks.md`, "Trip lookup").
+- **`stop_events` is a plain table until stage 3.** Upsert by the deterministic event id (`StopEventStore`); hypertable
+  conversion comes with Timescale retention work, not with the Worker sink.

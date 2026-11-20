@@ -40,6 +40,7 @@ public sealed class TripSchedule
 
         _serviceDays = [.. serviceDates.Select(date => date.DayNumber)];
         _trips = [.. trips];
+        Array.Sort(_trips, CompareIdentity);
         _runs = new Dictionary<RunKey, int>(_trips.Length);
         _routeCodesBySpan = _routeCodes.GetAlternateLookup<ReadOnlySpan<char>>();
 
@@ -49,6 +50,11 @@ public sealed class TripSchedule
             if (!_serviceDays.Contains(trip.ServiceDate.DayNumber))
             {
                 throw new ArgumentException($"Trip {trip.TripId} runs on {trip.ServiceDate}, outside the given days.", nameof(trips));
+            }
+
+            if (i > 0 && SameIdentity(_trips[i - 1], trip))
+            {
+                throw new ArgumentException($"Trip {trip.TripId} occurs more than once on {trip.ServiceDate}.", nameof(trips));
             }
 
             Add(trip.RouteId, trip, i);
@@ -105,6 +111,38 @@ public sealed class TripSchedule
         return TripResolution.Found;
     }
 
+    internal bool TryFindByIdentity(string tripId, DateOnly serviceDate, out ScheduledTrip? trip)
+    {
+        var (low, high) = (0, _trips.Length - 1);
+        while (low <= high)
+        {
+            var middle = low + ((high - low) / 2);
+            var candidate = _trips[middle];
+            var comparison = string.CompareOrdinal(candidate.TripId, tripId);
+            if (comparison == 0)
+            {
+                comparison = candidate.ServiceDate.DayNumber.CompareTo(serviceDate.DayNumber);
+            }
+
+            if (comparison < 0)
+            {
+                low = middle + 1;
+            }
+            else if (comparison > 0)
+            {
+                high = middle - 1;
+            }
+            else
+            {
+                trip = candidate;
+                return true;
+            }
+        }
+
+        trip = null;
+        return false;
+    }
+
     private void Add(ReadOnlySpan<char> route, ScheduledTrip trip, int index)
     {
         if (!_routeCodesBySpan.TryGetValue(route, out var routeCode))
@@ -119,6 +157,15 @@ public sealed class TripSchedule
             _runs[key] = SeveralRuns;
         }
     }
+
+    private static int CompareIdentity(ScheduledTrip first, ScheduledTrip second)
+    {
+        var byTrip = string.CompareOrdinal(first.TripId, second.TripId);
+        return byTrip != 0 ? byTrip : first.ServiceDate.DayNumber.CompareTo(second.ServiceDate.DayNumber);
+    }
+
+    private static bool SameIdentity(ScheduledTrip first, ScheduledTrip second) =>
+        string.Equals(first.TripId, second.TripId, StringComparison.Ordinal) && first.ServiceDate == second.ServiceDate;
 
     private static ReadOnlySpan<char> Variant(string tripId)
     {

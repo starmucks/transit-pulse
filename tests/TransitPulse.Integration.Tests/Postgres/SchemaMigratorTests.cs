@@ -16,10 +16,12 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres) : IClassFixtur
         var second = await SchemaMigrator.MigrateAsync(database, Ct);
 
         Assert.Contains("0001_gtfs_schema", first);
+        Assert.Contains("0002_stop_events", first);
         Assert.Empty(second);
         Assert.Equal(
             ["calendar", "calendar_dates", "routes", "shapes", "stop_times", "stops", "trips"],
             await PartitionedTablesAsync(database, "gtfs"));
+        Assert.True(await TableExistsAsync(database, "public", "stop_events"));
     }
 
     [Fact]
@@ -52,5 +54,17 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres) : IClassFixtur
         }
 
         return tables;
+    }
+
+    private static async Task<bool> TableExistsAsync(NpgsqlDataSource database, string schema, string table)
+    {
+        await using var command = database.CreateCommand(
+            """
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = $1 AND table_name = $2
+            """);
+        command.Parameters.Add(new NpgsqlParameter { Value = schema });
+        command.Parameters.Add(new NpgsqlParameter { Value = table });
+        return await command.ExecuteScalarAsync(Ct) is not null;
     }
 }

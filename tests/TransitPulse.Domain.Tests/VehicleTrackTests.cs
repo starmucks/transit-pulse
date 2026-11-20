@@ -155,6 +155,47 @@ public sealed class VehicleTrackTests
     }
 
     [Fact]
+    public void Snapshot_round_trip_preserves_an_empty_track()
+    {
+        var restored = VehicleTrack.Restore(_track.Capture());
+
+        Assert.Equal(PositionCheck.Accepted, restored.Check(At(0)));
+    }
+
+    [Fact]
+    public void Snapshot_round_trip_preserves_a_point_set_aside()
+    {
+        Check(0);
+        Assert.Equal(PositionCheck.ImpossibleJump, Check(1, metresNorth: 5_000));
+
+        var restored = VehicleTrack.Restore(_track.Capture());
+
+        Assert.Equal(PositionCheck.Accepted, restored.Check(At(2, metresNorth: 5_020)));
+    }
+
+    [Fact]
+    public void Snapshot_round_trip_preserves_the_last_observed_time()
+    {
+        Check(0);
+        Check(4);
+
+        var restored = VehicleTrack.Restore(_track.Capture());
+
+        Assert.Equal(PositionCheck.OutOfOrder, restored.Check(At(3, metresNorth: 20)));
+        Assert.Equal(PositionCheck.Accepted, restored.Check(At(5, metresNorth: 250)));
+    }
+
+    [Fact]
+    public void Inconsistent_snapshot_is_rejected()
+    {
+        var snapshot = new VehicleTrackSnapshot(_start, Place: null, new VehicleTrackFixSnapshot(StartLat, Lon, _start));
+
+        var error = Assert.Throws<ArgumentException>(() => VehicleTrack.Restore(snapshot));
+
+        Assert.Equal("snapshot", error.ParamName);
+    }
+
+    [Fact]
     public void Null_position_is_rejected()
     {
         Assert.Throws<ArgumentNullException>(() => _track.Check(null!));

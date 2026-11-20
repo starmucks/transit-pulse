@@ -34,4 +34,6 @@ internal sealed class CurrentTripSchedule(string feedId, TimeZoneInfo timeZone)
 
         return Volatile.Read(ref _schedule) is { } schedule ? schedule.Find(position.TripId, out trip) : TripResolution.NoSchedule;
     }
+
+    internal TripSchedule? ReadCurrent() => Volatile.Read(ref _schedule);
 }

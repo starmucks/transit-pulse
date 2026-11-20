@@ -44,6 +44,153 @@ public sealed class BunchingDetector
         _timeZone = timeZone ?? throw new ArgumentNullException(nameof(timeZone));
     }
 
+    internal BunchingDetectorSnapshot Capture()
+    {
+        var lines = new BunchingLineSnapshot[_lines.Count];
+        var lineIndex = 0;
+        foreach (var (key, line) in _lines)
+        {
+            var vehicles = new BunchingObservationSnapshot[line.Vehicles.Count];
+            var vehicleIndex = 0;
+            foreach (var observation in line.Vehicles.Values)
+            {
+                vehicles[vehicleIndex++] = new BunchingObservationSnapshot(
+                    observation.Position,
+                    observation.Trip.TripId,
+                    observation.Trip.ServiceDate,
+                    observation.AlongMetres);
+            }
+
+            Array.Sort(vehicles, static (first, second) =>
+            {
+                var feed = string.CompareOrdinal(first.Position.FeedId, second.Position.FeedId);
+                return feed != 0 ? feed : string.CompareOrdinal(first.Position.VehicleId, second.Position.VehicleId);
+            });
+
+            var episodes = new BunchingEpisodeSnapshot[line.Episodes.Count];
+            var episodeIndex = 0;
+            foreach (var (pair, episode) in line.Episodes)
+            {
+                episodes[episodeIndex++] = new BunchingEpisodeSnapshot(
+                    pair.Follower.FeedId,
+                    pair.Follower.VehicleId,
+                    pair.Leader.FeedId,
+                    pair.Leader.VehicleId,
+                    pair.FollowerTripId,
+                    pair.LeaderTripId,
+                    pair.FollowerServiceDate,
+                    pair.LeaderServiceDate,
+                    episode.StartedAt,
+                    episode.RecoveringSince,
+                    episode.Active);
+            }
+
+            Array.Sort(episodes, static (first, second) => CompareEpisodes(first, second));
+            var (patternTripId, patternServiceDate) = PatternIdentity(line);
+            lines[lineIndex++] = new BunchingLineSnapshot(
+                key.FeedId,
+                key.RouteId,
+                key.DirectionId,
+                patternTripId,
+                patternServiceDate,
+                vehicles,
+                episodes);
+        }
+
+        Array.Sort(lines, static (first, second) => CompareLines(first, second));
+        return new BunchingDetectorSnapshot(_latestAt, _lastSweepAt, lines);
+    }
+
+    internal static BunchingDetector Restore(
+        BunchingDetectorSnapshot snapshot,
+        TripSchedule? schedule,
+        TimeZoneInfo timeZone)
+    {
+        ArgumentNullException.ThrowIfNull(timeZone);
+        if (snapshot.Lines is null
+            || !ValidTime(snapshot.LatestAt, allowDefault: snapshot.Lines.Length == 0)
+            || !ValidTime(snapshot.LastSweepAt, allowDefault: true)
+            || snapshot.LastSweepAt != default && snapshot.LastSweepAt > snapshot.LatestAt)
+        {
+            throw InvalidSnapshot();
+        }
+
+        var detector = new BunchingDetector(timeZone)
+        {
+            _latestAt = snapshot.LatestAt,
+            _lastSweepAt = snapshot.LastSweepAt,
+        };
+        foreach (var savedLine in snapshot.Lines)
+        {
+            if (savedLine.Vehicles is null
+                || savedLine.Episodes is null
+                || string.IsNullOrWhiteSpace(savedLine.FeedId)
+                || string.IsNullOrWhiteSpace(savedLine.RouteId)
+                || savedLine.DirectionId is < 0 or > 1
+                || savedLine.Vehicles.Length == 0 && savedLine.Episodes.Length == 0)
+            {
+                throw InvalidSnapshot();
+            }
+
+            var patternTrip = Rebind(schedule, savedLine.PatternTripId, savedLine.PatternServiceDate);
+            var pattern = RequireLine(patternTrip, savedLine, pattern: null, requireTimetable: false).Stops!;
+            var lineKey = new LineKey(savedLine.FeedId, savedLine.RouteId, savedLine.DirectionId, pattern);
+            var line = new LineState();
+            if (!detector._lines.TryAdd(lineKey, line))
+            {
+                throw InvalidSnapshot();
+            }
+
+            foreach (var saved in savedLine.Vehicles)
+            {
+                ArgumentNullException.ThrowIfNull(saved.Position);
+                if (saved.Position.FeedId != savedLine.FeedId
+                    || !double.IsFinite(saved.AlongMetres)
+                    || saved.AlongMetres < 0
+                    || saved.Position.ObservedAt > snapshot.LatestAt)
+                {
+                    throw InvalidSnapshot();
+                }
+
+                var trip = RequireLine(
+                    Rebind(schedule, saved.TripId, saved.ServiceDate), savedLine, pattern, requireTimetable: true);
+                var vehicleKey = new VehicleKey(saved.Position.FeedId, saved.Position.VehicleId);
+                var observation = new Observation(saved.Position, trip, trip.Timetable!, saved.AlongMetres);
+                if (!line.Vehicles.TryAdd(vehicleKey, observation)
+                    || !detector._lineOfVehicle.TryAdd(vehicleKey, lineKey))
+                {
+                    throw InvalidSnapshot();
+                }
+            }
+
+            foreach (var saved in savedLine.Episodes)
+            {
+                ValidateEpisode(saved, savedLine, snapshot.LatestAt);
+                RequireLine(
+                    Rebind(schedule, saved.FollowerTripId, saved.FollowerServiceDate), savedLine, pattern, requireTimetable: false);
+                RequireLine(
+                    Rebind(schedule, saved.LeaderTripId, saved.LeaderServiceDate), savedLine, pattern, requireTimetable: false);
+                var pair = new PairKey(
+                    new VehicleKey(saved.FollowerFeedId, saved.FollowerVehicleId),
+                    new VehicleKey(saved.LeaderFeedId, saved.LeaderVehicleId),
+                    saved.FollowerTripId,
+                    saved.LeaderTripId,
+                    saved.FollowerServiceDate,
+                    saved.LeaderServiceDate);
+                if (!line.Episodes.TryAdd(pair, new EpisodeState(saved.StartedAt)
+                {
+                    RecoveringSince = saved.RecoveringSince,
+                    Active = saved.Active,
+                }))
+                {
+                    throw InvalidSnapshot();
+                }
+            }
+        }
+
+        return detector;
+    }
+
     /// <summary>Updates one on-route vehicle and reports newly confirmed episodes.</summary>
     /// <param name="position">The accepted source position.</param>
     /// <param name="trip">The scheduled trip the position resolved to.</param>
@@ -310,6 +457,144 @@ public sealed class BunchingDetector
         }
     }
 
+    private static (string TripId, DateOnly ServiceDate) PatternIdentity(LineState line)
+    {
+        string? tripId = null;
+        var serviceDate = default(DateOnly);
+
+        void Consider(string candidateId, DateOnly candidateDate)
+        {
+            var comparison = tripId is null ? -1 : string.CompareOrdinal(candidateId, tripId);
+            if (tripId is null || comparison < 0 || comparison == 0 && candidateDate < serviceDate)
+            {
+                tripId = candidateId;
+                serviceDate = candidateDate;
+            }
+        }
+
+        foreach (var observation in line.Vehicles.Values)
+        {
+            Consider(observation.Trip.TripId, observation.Trip.ServiceDate);
+        }
+
+        foreach (var pair in line.Episodes.Keys)
+        {
+            Consider(pair.FollowerTripId, pair.FollowerServiceDate);
+            Consider(pair.LeaderTripId, pair.LeaderServiceDate);
+        }
+
+        return tripId is not null
+            ? (tripId, serviceDate)
+            : throw new InvalidOperationException("A bunching line has neither vehicles nor episodes.");
+    }
+
+    private static ScheduledTrip Rebind(TripSchedule? schedule, string tripId, DateOnly serviceDate) =>
+        schedule is not null && schedule.TryFindByIdentity(tripId, serviceDate, out var trip)
+            ? trip!
+            : throw new InvalidOperationException($"Trip {tripId} on {serviceDate} is absent from the current schedule.");
+
+    private static ScheduledTrip RequireLine(
+        ScheduledTrip trip,
+        BunchingLineSnapshot line,
+        StopPattern? pattern,
+        bool requireTimetable)
+    {
+        if (trip.RouteId != line.RouteId
+            || trip.DirectionId != line.DirectionId
+            || trip.Stops is null
+            || pattern is not null && !ReferenceEquals(trip.Stops, pattern)
+            || requireTimetable && trip.Timetable is null)
+        {
+            throw new InvalidOperationException($"Trip {trip.TripId} on {trip.ServiceDate} is incompatible with its bunching line.");
+        }
+
+        return trip;
+    }
+
+    private static void ValidateEpisode(BunchingEpisodeSnapshot episode, BunchingLineSnapshot line, DateTimeOffset latestAt)
+    {
+        if (episode.FollowerFeedId != line.FeedId
+            || episode.LeaderFeedId != line.FeedId
+            || string.IsNullOrWhiteSpace(episode.FollowerVehicleId)
+            || string.IsNullOrWhiteSpace(episode.LeaderVehicleId)
+            || episode.FollowerVehicleId == episode.LeaderVehicleId
+            || string.IsNullOrWhiteSpace(episode.FollowerTripId)
+            || string.IsNullOrWhiteSpace(episode.LeaderTripId)
+            || episode.FollowerServiceDate == default
+            || episode.LeaderServiceDate == default
+            || !ValidTime(episode.StartedAt, allowDefault: false)
+            || episode.StartedAt > latestAt
+            || !episode.Active && episode.RecoveringSince is not null
+            || episode.RecoveringSince is { } recovering
+                && (!ValidTime(recovering, allowDefault: false) || recovering < episode.StartedAt || recovering > latestAt))
+        {
+            throw InvalidSnapshot();
+        }
+    }
+
+    private static bool ValidTime(DateTimeOffset value, bool allowDefault) =>
+        allowDefault && value == default || value != default && value.Offset == TimeSpan.Zero;
+
+    private static int CompareLines(BunchingLineSnapshot first, BunchingLineSnapshot second)
+    {
+        var comparison = string.CompareOrdinal(first.FeedId, second.FeedId);
+        if (comparison == 0)
+        {
+            comparison = string.CompareOrdinal(first.RouteId, second.RouteId);
+        }
+
+        if (comparison == 0)
+        {
+            comparison = first.DirectionId.CompareTo(second.DirectionId);
+        }
+
+        if (comparison == 0)
+        {
+            comparison = string.CompareOrdinal(first.PatternTripId, second.PatternTripId);
+        }
+
+        return comparison != 0 ? comparison : first.PatternServiceDate.CompareTo(second.PatternServiceDate);
+    }
+
+    private static int CompareEpisodes(BunchingEpisodeSnapshot first, BunchingEpisodeSnapshot second)
+    {
+        var comparison = string.CompareOrdinal(first.FollowerFeedId, second.FollowerFeedId);
+        if (comparison == 0)
+        {
+            comparison = string.CompareOrdinal(first.FollowerVehicleId, second.FollowerVehicleId);
+        }
+
+        if (comparison == 0)
+        {
+            comparison = string.CompareOrdinal(first.LeaderFeedId, second.LeaderFeedId);
+        }
+
+        if (comparison == 0)
+        {
+            comparison = string.CompareOrdinal(first.LeaderVehicleId, second.LeaderVehicleId);
+        }
+
+        if (comparison == 0)
+        {
+            comparison = string.CompareOrdinal(first.FollowerTripId, second.FollowerTripId);
+        }
+
+        if (comparison == 0)
+        {
+            comparison = string.CompareOrdinal(first.LeaderTripId, second.LeaderTripId);
+        }
+
+        if (comparison == 0)
+        {
+            comparison = first.FollowerServiceDate.CompareTo(second.FollowerServiceDate);
+        }
+
+        return comparison != 0 ? comparison : first.LeaderServiceDate.CompareTo(second.LeaderServiceDate);
+    }
+
+    private static ArgumentException InvalidSnapshot() =>
+        new("The bunching detector snapshot is inconsistent.", "snapshot");
+
     private static DateTimeOffset Max(DateTimeOffset first, DateTimeOffset second) => first >= second ? first : second;
 
     private sealed class LineState
@@ -457,3 +742,36 @@ public sealed class BunchingDetector
             ScheduledHeadwaySec);
     }
 }
+
+internal readonly record struct BunchingDetectorSnapshot(
+    DateTimeOffset LatestAt,
+    DateTimeOffset LastSweepAt,
+    BunchingLineSnapshot[] Lines);
+
+internal readonly record struct BunchingLineSnapshot(
+    string FeedId,
+    string RouteId,
+    int DirectionId,
+    string PatternTripId,
+    DateOnly PatternServiceDate,
+    BunchingObservationSnapshot[] Vehicles,
+    BunchingEpisodeSnapshot[] Episodes);
+
+internal readonly record struct BunchingObservationSnapshot(
+    VehiclePosition Position,
+    string TripId,
+    DateOnly ServiceDate,
+    double AlongMetres);
+
+internal readonly record struct BunchingEpisodeSnapshot(
+    string FollowerFeedId,
+    string FollowerVehicleId,
+    string LeaderFeedId,
+    string LeaderVehicleId,
+    string FollowerTripId,
+    string LeaderTripId,
+    DateOnly FollowerServiceDate,
+    DateOnly LeaderServiceDate,
+    DateTimeOffset StartedAt,
+    DateTimeOffset? RecoveringSince,
+    bool Active);
