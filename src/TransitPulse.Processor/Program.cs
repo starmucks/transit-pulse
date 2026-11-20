@@ -18,6 +18,7 @@ builder.Services.AddOptions<ProcessorKafkaOptions>()
     .BindConfiguration(ProcessorKafkaOptions.SectionName)
     .Validate(o => !string.IsNullOrWhiteSpace(o.BootstrapServers), "Kafka:BootstrapServers is required.")
     .Validate(o => o.CommitInterval > TimeSpan.Zero, "Kafka:CommitInterval must be positive.")
+    .Validate(o => o.ProcessingAttempts is >= 1 and <= 10, "Kafka:ProcessingAttempts must be within [1, 10].")
     .ValidateOnStart();
 builder.Services.AddOptions<TripScheduleOptions>()
     .BindConfiguration(TripScheduleOptions.SectionName)
@@ -34,6 +35,8 @@ builder.Services.AddSingleton(provider =>
 });
 builder.Services.AddSingleton<ICheckpointBlobStore, RedisCheckpointBlobStore>();
 builder.Services.AddSingleton<IProcessorCheckpointStore, ProcessorCheckpointStore>();
+builder.Services.AddSingleton<IPositionMessageReader, PositionMessageReader>();
+builder.Services.AddSingleton<ICommitBarrier, PassThroughCommitBarrier>();
 builder.Services.AddSingleton<ProcessorMetrics>();
 // In this order: hosted services start one after another, so the loop finds its topics and its schedule in place.
 builder.Services.AddHostedService<ProcessorTopicInitializer>();

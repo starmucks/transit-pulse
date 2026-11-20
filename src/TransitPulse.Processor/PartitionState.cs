@@ -82,14 +82,20 @@ internal sealed class PartitionState(CurrentTripSchedule schedule)
     /// <returns>The verdict and, for an accepted position, what the trip lookup found and where on the trip's line it lies.</returns>
     public ProcessedMessage Process(long offset, string? key, ReadOnlySpan<byte> value)
     {
-        // An unreadable message moves the offset too: it would fail the same way on every retry and block the partition.
-        NextOffset = offset + 1;
-        _stopEvents.Clear();
-
         if (key is null || !TryParse(value, out var position))
         {
-            return new ProcessedMessage(MessageVerdict.Unreadable, null);
+            return RejectUnreadable(offset);
         }
+
+        return ProcessParsed(offset, key, position);
+    }
+
+    internal ProcessedMessage ProcessParsed(long offset, string key, VehiclePosition position)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(position);
+        NextOffset = offset + 1;
+        _stopEvents.Clear();
 
         if (!_vehicles.TryGetValue(key, out var vehicle))
         {
@@ -104,6 +110,13 @@ internal sealed class PartitionState(CurrentTripSchedule schedule)
             PositionCheck.ImpossibleJump => new ProcessedMessage(MessageVerdict.ImpossibleJump, null),
             var check => throw new InvalidOperationException($"Unknown position check {check}."),
         };
+    }
+
+    internal ProcessedMessage RejectUnreadable(long offset)
+    {
+        NextOffset = offset + 1;
+        _stopEvents.Clear();
+        return new ProcessedMessage(MessageVerdict.Unreadable, null);
     }
 
     /// <summary>Records a successful commit.</summary>

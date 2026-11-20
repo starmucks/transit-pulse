@@ -13,6 +13,8 @@ namespace TransitPulse.Processor.Kafka;
 /// <param name="options">Broker and consumer settings.</param>
 /// <param name="schedule">Where accepted positions look up their trips.</param>
 /// <param name="checkpoints">Durable state saved after output delivery and before offset commit.</param>
+/// <param name="reader">Decodes one <c>positions.raw</c> record before the partition state sees it.</param>
+/// <param name="commitBarrier">Fails the run in the checkpoint→commit window when a test asks for a crash.</param>
 /// <param name="metrics">Counters and lag.</param>
 /// <param name="timeProvider">Clock for the commit interval and the lag.</param>
 /// <param name="logger">Log for broker errors, dropped messages and progress.</param>
@@ -20,6 +22,8 @@ internal sealed partial class PositionConsumer(
     IOptions<ProcessorKafkaOptions> options,
     CurrentTripSchedule schedule,
     IProcessorCheckpointStore checkpoints,
+    IPositionMessageReader reader,
+    ICommitBarrier commitBarrier,
     ProcessorMetrics metrics,
     TimeProvider timeProvider,
     ILogger<PositionConsumer> logger) : BackgroundService
@@ -144,7 +148,24 @@ internal sealed partial class PositionConsumer(
             _partitions.Add(partition, state);
         }
 
-        var processed = state.Process(result.Offset.Value, result.Message.Key, result.Message.Value);
+        ProcessedMessage processed;
+        try
+        {
+            var position = ReadWithAttempts(result.Message.Key, result.Message.Value);
+            processed = state.ProcessParsed(
+                result.Offset.Value,
+                result.Message.Key
+                ?? throw new InvalidOperationException("A decoded position has no Kafka key."),
+                position);
+        }
+        catch (PositionMessageException ex)
+        {
+            // Decode failures are deterministic for the same bytes; the attempts still satisfy the stage contract and
+            // leave room for a reader that may fail transiently later.
+            PublishDeadLetter(result, ex, producer, stopping);
+            processed = state.RejectUnreadable(result.Offset.Value);
+        }
+
         _bunchingEvents.Clear();
         metrics.Message(processed.Verdict, LagSeconds(result.Message.Timestamp));
         if (processed.Trip is { } found)
@@ -199,6 +220,55 @@ internal sealed partial class PositionConsumer(
         }
 
         PublishBunching(producer, stopping);
+    }
+
+    private VehiclePosition ReadWithAttempts(string? key, ReadOnlySpan<byte> value)
+    {
+        PositionMessageException? last = null;
+        for (var attempt = 1; attempt <= _options.ProcessingAttempts; attempt++)
+        {
+            try
+            {
+                return reader.Read(key, value);
+            }
+            catch (PositionMessageException ex)
+            {
+                last = ex;
+            }
+        }
+
+        if (last is null)
+        {
+            throw new InvalidOperationException("Position decoding failed without an error.");
+        }
+
+        throw last;
+    }
+
+    private void PublishDeadLetter(
+        ConsumeResult<string, byte[]> result,
+        PositionMessageException error,
+        IProducer<string, byte[]> producer,
+        CancellationToken stopping)
+    {
+        var deadLetter = new RawPositionDeadLetter(
+            result.Topic,
+            result.Partition.Value,
+            result.Offset.Value,
+            result.Message.Key,
+            result.Message.Value,
+            _options.ProcessingAttempts,
+            error.ErrorType,
+            error.Message);
+        Publish(
+            _options.DeadLetterTopic,
+            new Message<string, byte[]>
+            {
+                Key = RawPositionDeadLetterMessage.Key(deadLetter),
+                Value = RawPositionDeadLetterMessage.Value(deadLetter),
+            },
+            producer,
+            stopping);
     }
 
     private void HandlePartitionEnd(int partition, IProducer<string, byte[]> producer, CancellationToken stopping)
@@ -327,6 +397,8 @@ internal sealed partial class PositionConsumer(
         }
 
         checkpoints.Save(ProcessorCheckpoint.Capture(_partitions, _bunching, _bunchingVehicles));
+        // Crash window for ADR-0014 tests: checkpoint is durable, Kafka offsets are not yet committed.
+        commitBarrier.AfterCheckpointSaved();
 
         List<TopicPartitionOffset> offsets =
         [
@@ -356,25 +428,15 @@ internal sealed partial class PositionConsumer(
         }
     }
 
-    // Restores the whole process checkpoint only when no live partition state could be mixed with it.
-    private IEnumerable<TopicPartitionOffset> OnAssigned(List<TopicPartition> assigned)
+    // Restores checkpoint state for partitions that are not already live. A missing checkpoint after the group has
+    // committed offsets is fail-closed (ADR-0014): silent empty state would skip stop and bunching history.
+    private IEnumerable<TopicPartitionOffset> OnAssigned(IConsumer<string, byte[]> consumer, List<TopicPartition> assigned)
     {
         var partitions = assigned.Select(partition => partition.Partition.Value).ToList();
-        var owned = new HashSet<int>(_partitions.Keys);
-        owned.UnionWith(partitions);
-        if (_partitions.Count == 0 && checkpoints.Load() is { } saved)
+        var newcomers = partitions.Where(partition => !_partitions.ContainsKey(partition)).ToList();
+        if (newcomers.Count > 0)
         {
-            var restored = ProcessorCheckpoint.RestoreOwned(saved, schedule, owned);
-            foreach (var (partition, state) in restored.Partitions)
-            {
-                _partitions.Add(partition, state);
-            }
-
-            _bunching = restored.Bunching;
-            foreach (var (partition, vehicles) in restored.BunchingVehicles)
-            {
-                _bunchingVehicles.Add(partition, vehicles);
-            }
+            RestoreNewcomers(consumer, assigned, partitions, newcomers);
         }
 
         _bunching.Assign(partitions);
@@ -387,6 +449,78 @@ internal sealed partial class PositionConsumer(
                     ? new Offset(next)
                     : Offset.Unset)),
         ];
+    }
+
+    private void RestoreNewcomers(
+        IConsumer<string, byte[]> consumer,
+        List<TopicPartition> assigned,
+        List<int> ownedPartitions,
+        List<int> newcomers)
+    {
+        var saved = checkpoints.Load();
+        if (saved is { } snapshot)
+        {
+            var owned = new HashSet<int>(_partitions.Keys);
+            owned.UnionWith(ownedPartitions);
+            var restored = ProcessorCheckpoint.RestoreOwned(snapshot, schedule, owned);
+            if (_partitions.Count == 0)
+            {
+                foreach (var (partition, state) in restored.Partitions)
+                {
+                    _partitions.Add(partition, state);
+                }
+
+                _bunching = restored.Bunching;
+                foreach (var (partition, vehicles) in restored.BunchingVehicles)
+                {
+                    _bunchingVehicles.Add(partition, vehicles);
+                }
+
+                return;
+            }
+
+            // Cooperative re-assign: keep live partitions, refill only the ones that left and came back.
+            foreach (var partition in newcomers)
+            {
+                if (!restored.Partitions.TryGetValue(partition, out var state))
+                {
+                    if (HasCommittedProgress(consumer, assigned.Where(topic => topic.Partition.Value == partition)))
+                    {
+                        throw new InvalidOperationException(
+                            $"The Processor checkpoint has no state for partition {partition} after committed offsets.");
+                    }
+
+                    continue;
+                }
+
+                _partitions.Add(partition, state);
+                if (restored.BunchingVehicles.TryGetValue(partition, out var vehicles))
+                {
+                    _bunchingVehicles.Add(partition, vehicles);
+                }
+            }
+
+            return;
+        }
+
+        var newcomerTopics = assigned.Where(topic => newcomers.Contains(topic.Partition.Value)).ToList();
+        if (HasCommittedProgress(consumer, newcomerTopics))
+        {
+            throw new InvalidOperationException(
+                "The Processor checkpoint is missing after the consumer group has committed offsets.");
+        }
+    }
+
+    private static bool HasCommittedProgress(IConsumer<string, byte[]> consumer, IEnumerable<TopicPartition> partitions)
+    {
+        var list = partitions as IList<TopicPartition> ?? partitions.ToList();
+        if (list.Count == 0)
+        {
+            return false;
+        }
+
+        return consumer.Committed(list, TimeSpan.FromSeconds(10))
+            .Any(committed => !committed.Offset.IsSpecial && committed.Offset.Value >= 0);
     }
 
     // Runs on the loop's thread, inside Consume or Close. The new owner resumes from the commit made here, and without it
@@ -439,7 +573,7 @@ internal sealed partial class PositionConsumer(
         if (failed > 0)
         {
             throw new InvalidOperationException(
-                $"{failed} messages were not delivered to {_options.OutputTopic}, {_options.StopEventsTopic}, or {_options.AnomalyEventsTopic}.");
+                $"{failed} messages were not delivered to {_options.OutputTopic}, {_options.StopEventsTopic}, {_options.AnomalyEventsTopic}, or {_options.DeadLetterTopic}.");
         }
     }
 
@@ -480,7 +614,7 @@ internal sealed partial class PositionConsumer(
         PartitionAssignmentStrategy = PartitionAssignmentStrategy.CooperativeSticky,
     })
         .SetErrorHandler((_, error) => OnError(error))
-        .SetPartitionsAssignedHandler((_, assigned) => OnAssigned(assigned))
+        .SetPartitionsAssignedHandler((consumer, assigned) => OnAssigned(consumer, assigned))
         .SetPartitionsRevokedHandler((consumer, revoked) => OnRevoked(consumer, producer, revoked))
         .SetPartitionsLostHandler((_, lost) => OnLost(lost))
         .Build();
