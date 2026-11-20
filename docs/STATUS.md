@@ -9,7 +9,7 @@
   DLQ; `StopEventSink` + `0002_stop_events`; recovery-тесты на Redpanda+Redis+Postgres.
 
 ## Следующий шаг
-1. **PR #48:** дождаться CI, ревью, merge.
+1. **PR #73** (#48): дождаться CI, ревью, merge.
 2. **Задача 2.11 (#49):** replay-тест и живой lag.
 
 ## Известные проблемы
