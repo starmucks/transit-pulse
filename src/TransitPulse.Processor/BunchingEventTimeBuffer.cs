@@ -11,16 +11,148 @@ namespace TransitPulse.Processor;
 /// the detector sees only observations older than the slowest active partition. A small allowance also absorbs timestamp
 /// skew between different vehicles in one partition. A partition at its current end cannot hold the watermark back.
 /// </remarks>
-internal sealed class BunchingEventTimeBuffer(TimeZoneInfo timeZone)
+internal sealed class BunchingEventTimeBuffer
 {
     internal static readonly TimeSpan AllowedLateness = TimeSpan.FromSeconds(5);
 
-    private readonly BunchingDetector _detector = new(timeZone);
+    private readonly BunchingDetector _detector;
     private readonly Dictionary<int, PartitionProgress> _partitions = [];
     private readonly PriorityQueue<PendingObservation, (long At, long Sequence)> _pending = new();
     private long _nextGeneration;
     private long _nextSequence;
     private DateTimeOffset _processedThrough;
+
+    public BunchingEventTimeBuffer(TimeZoneInfo timeZone)
+    {
+        _detector = new BunchingDetector(timeZone);
+    }
+
+    private BunchingEventTimeBuffer(BunchingDetector detector)
+    {
+        _detector = detector;
+    }
+
+    internal BunchingEventTimeBufferSnapshot Capture()
+    {
+        var partitions = new BunchingPartitionProgressSnapshot[_partitions.Count];
+        var partitionIndex = 0;
+        foreach (var (partition, progress) in _partitions)
+        {
+            partitions[partitionIndex++] = new BunchingPartitionProgressSnapshot(
+                partition,
+                progress.Generation,
+                progress.LatestAt,
+                progress.HasObserved,
+                progress.AtEnd);
+        }
+
+        Array.Sort(partitions, static (first, second) => first.Partition.CompareTo(second.Partition));
+
+        var pending = new List<BunchingPendingObservationSnapshot>(_pending.Count);
+        foreach (var item in _pending.UnorderedItems)
+        {
+            var observation = item.Element;
+            if (!_partitions.TryGetValue(observation.Partition, out var progress)
+                || progress.Generation != observation.Generation)
+            {
+                continue;
+            }
+
+            pending.Add(new BunchingPendingObservationSnapshot(
+                observation.Partition,
+                observation.Generation,
+                observation.Position,
+                observation.Trip.TripId,
+                observation.Trip.ServiceDate,
+                observation.AlongMetres,
+                item.Priority.At,
+                item.Priority.Sequence));
+        }
+
+        pending.Sort(static (first, second) =>
+        {
+            var at = first.At.CompareTo(second.At);
+            return at != 0 ? at : first.Sequence.CompareTo(second.Sequence);
+        });
+        return new BunchingEventTimeBufferSnapshot(
+            _nextGeneration,
+            _nextSequence,
+            _processedThrough,
+            partitions,
+            [.. pending],
+            _detector.Capture());
+    }
+
+    internal static BunchingEventTimeBuffer Restore(
+        BunchingEventTimeBufferSnapshot snapshot,
+        TripSchedule? schedule,
+        TimeZoneInfo timeZone)
+    {
+        ArgumentNullException.ThrowIfNull(timeZone);
+        if (snapshot.Partitions is null
+            || snapshot.Pending is null
+            || snapshot.NextGeneration < 0
+            || snapshot.NextSequence < 0
+            || !ValidTime(snapshot.ProcessedThrough, allowDefault: true))
+        {
+            throw InvalidSnapshot();
+        }
+
+        var detector = BunchingDetector.Restore(snapshot.Detector, schedule, timeZone);
+        var buffer = new BunchingEventTimeBuffer(detector)
+        {
+            _nextGeneration = snapshot.NextGeneration,
+            _nextSequence = snapshot.NextSequence,
+            _processedThrough = snapshot.ProcessedThrough,
+        };
+        foreach (var saved in snapshot.Partitions)
+        {
+            if (saved.Partition < 0
+                || saved.Generation <= 0
+                || saved.Generation > snapshot.NextGeneration
+                || saved.HasObserved && !ValidTime(saved.LatestAt, allowDefault: false)
+                || !saved.HasObserved && saved.LatestAt != default
+                || !buffer._partitions.TryAdd(saved.Partition, new PartitionProgress(saved.Generation)
+                {
+                    LatestAt = saved.LatestAt,
+                    HasObserved = saved.HasObserved,
+                    AtEnd = saved.AtEnd,
+                }))
+            {
+                throw InvalidSnapshot();
+            }
+        }
+
+        var sequences = new HashSet<long>();
+        foreach (var saved in snapshot.Pending)
+        {
+            ArgumentNullException.ThrowIfNull(saved.Position);
+            if (!buffer._partitions.TryGetValue(saved.Partition, out var progress)
+                || progress.Generation != saved.Generation
+                || saved.At != saved.Position.ObservedAt.UtcTicks
+                || saved.Sequence < 0
+                || saved.Sequence >= snapshot.NextSequence
+                || !sequences.Add(saved.Sequence)
+                || !double.IsFinite(saved.AlongMetres)
+                || saved.AlongMetres < 0)
+            {
+                throw InvalidSnapshot();
+            }
+
+            var trip = schedule is not null && schedule.TryFindByIdentity(saved.TripId, saved.ServiceDate, out var found)
+                ? found!
+                : throw new InvalidOperationException($"Trip {saved.TripId} on {saved.ServiceDate} is absent from the current schedule.");
+            var pending = new PendingObservation(
+                saved.Partition,
+                saved.Generation,
+                saved.Position,
+                trip,
+                saved.AlongMetres);
+            buffer._pending.Enqueue(pending, (saved.At, saved.Sequence));
+        }
+
+        return buffer;
+    }
 
     /// <summary>Adds newly assigned partitions. Until each has a position or reaches its current end, observations wait.</summary>
     public void Assign(IEnumerable<int> partitions)
@@ -156,6 +288,12 @@ internal sealed class BunchingEventTimeBuffer(TimeZoneInfo timeZone)
 
     private static DateTimeOffset Max(DateTimeOffset first, DateTimeOffset second) => first >= second ? first : second;
 
+    private static bool ValidTime(DateTimeOffset value, bool allowDefault) =>
+        allowDefault && value == default || value != default && value.Offset == TimeSpan.Zero;
+
+    private static ArgumentException InvalidSnapshot() =>
+        new("The bunching event-time buffer snapshot is inconsistent.", "snapshot");
+
     private sealed class PartitionProgress(long generation)
     {
         public long Generation { get; } = generation;
@@ -174,3 +312,28 @@ internal sealed class BunchingEventTimeBuffer(TimeZoneInfo timeZone)
         ScheduledTrip Trip,
         double AlongMetres);
 }
+
+internal readonly record struct BunchingEventTimeBufferSnapshot(
+    long NextGeneration,
+    long NextSequence,
+    DateTimeOffset ProcessedThrough,
+    BunchingPartitionProgressSnapshot[] Partitions,
+    BunchingPendingObservationSnapshot[] Pending,
+    BunchingDetectorSnapshot Detector);
+
+internal readonly record struct BunchingPartitionProgressSnapshot(
+    int Partition,
+    long Generation,
+    DateTimeOffset LatestAt,
+    bool HasObserved,
+    bool AtEnd);
+
+internal readonly record struct BunchingPendingObservationSnapshot(
+    int Partition,
+    long Generation,
+    VehiclePosition Position,
+    string TripId,
+    DateOnly ServiceDate,
+    double AlongMetres,
+    long At,
+    long Sequence);

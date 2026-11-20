@@ -30,6 +30,51 @@ internal sealed class PartitionState(CurrentTripSchedule schedule)
     /// </summary>
     public IReadOnlyList<VehicleStopEvent> StopEvents => _stopEvents;
 
+    internal PartitionStateSnapshot Capture()
+    {
+        var vehicles = new PartitionVehicleSnapshot[_vehicles.Count];
+        var index = 0;
+        foreach (var (key, vehicle) in _vehicles)
+        {
+            vehicles[index++] = new PartitionVehicleSnapshot(key, vehicle.Capture());
+        }
+
+        Array.Sort(vehicles, static (first, second) => string.CompareOrdinal(first.Key, second.Key));
+        return new PartitionStateSnapshot(NextOffset, vehicles);
+    }
+
+    internal static PartitionState Restore(PartitionStateSnapshot snapshot, CurrentTripSchedule schedule)
+        => Restore(snapshot, schedule, schedule.ReadCurrent());
+
+    internal static PartitionState Restore(
+        PartitionStateSnapshot snapshot,
+        CurrentTripSchedule schedule,
+        TripSchedule? currentSchedule)
+    {
+        ArgumentNullException.ThrowIfNull(schedule);
+        if (snapshot.Vehicles is null
+            || snapshot.NextOffset is < 0
+            || snapshot.NextOffset is null && snapshot.Vehicles.Length > 0)
+        {
+            throw new ArgumentException("The partition snapshot is inconsistent.", nameof(snapshot));
+        }
+
+        var state = new PartitionState(schedule)
+        {
+            NextOffset = snapshot.NextOffset,
+        };
+        foreach (var vehicle in snapshot.Vehicles)
+        {
+            if (string.IsNullOrWhiteSpace(vehicle.Key)
+                || !state._vehicles.TryAdd(vehicle.Key, VehicleState.Restore(vehicle.State, currentSchedule)))
+            {
+                throw new ArgumentException("The partition snapshot contains an invalid or duplicate vehicle key.", nameof(snapshot));
+            }
+        }
+
+        return state;
+    }
+
     /// <summary>Judges one message and moves the partition past it, whatever the verdict.</summary>
     /// <param name="offset">The message's offset.</param>
     /// <param name="key">The message's key: identifies the vehicle within the system.</param>
@@ -157,17 +202,76 @@ internal sealed class PartitionState(CurrentTripSchedule schedule)
         private DateOnly _delayServiceDate;
         private StopTimetable? _delayTimetable;
 
-        public VehicleTrack Track { get; } = new();
+        public VehicleTrack Track { get; private init; } = new();
 
-        public RouteProgress Route { get; } = new();
+        public RouteProgress Route { get; private init; } = new();
 
-        public StopDetector Stops { get; } = new();
+        public StopDetector Stops { get; private init; } = new();
 
         public int? ObservedDelaySec { get; set; }
 
         public DateTimeOffset? DetectorPositionAt { get; private set; }
 
         public int? DetectorDelaySec { get; private set; }
+
+        public VehicleStateSnapshot Capture() => new(
+            Track.Capture(),
+            Route.Capture(),
+            Stops.Capture(),
+            _delayTripId,
+            _delayServiceDate,
+            ObservedDelaySec,
+            DetectorPositionAt,
+            DetectorDelaySec);
+
+        public static VehicleState Restore(VehicleStateSnapshot snapshot, TripSchedule? schedule)
+        {
+            StopPattern? pattern = null;
+            if (snapshot.Stops.HasPattern)
+            {
+                var stopTrip = Rebind(schedule, snapshot.Stops.TripId!, snapshot.Stops.ServiceDate);
+                pattern = stopTrip.Stops
+                    ?? throw new InvalidOperationException($"Trip {stopTrip.TripId} on {stopTrip.ServiceDate} has no stop pattern.");
+            }
+
+            StopTimetable? timetable = null;
+            if (snapshot.DelayTripId is null)
+            {
+                if (snapshot.DelayServiceDate != default
+                    || snapshot.ObservedDelaySec is not null
+                    || snapshot.DetectorPositionAt is not null
+                    || snapshot.DetectorDelaySec is not null)
+                {
+                    throw new ArgumentException("The vehicle snapshot has delay state without a trip.", nameof(snapshot));
+                }
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(snapshot.DelayTripId)
+                    || snapshot.DelayServiceDate == default
+                    || snapshot.DetectorPositionAt is { } detectorAt
+                        && (detectorAt == default || detectorAt.Offset != TimeSpan.Zero)
+                    || snapshot.DetectorDelaySec is not null && snapshot.DetectorPositionAt is null)
+                {
+                    throw new ArgumentException("The vehicle delay snapshot is inconsistent.", nameof(snapshot));
+                }
+
+                timetable = Rebind(schedule, snapshot.DelayTripId, snapshot.DelayServiceDate).Timetable;
+            }
+
+            return new VehicleState
+            {
+                Track = VehicleTrack.Restore(snapshot.Track),
+                Route = RouteProgress.Restore(snapshot.Route),
+                Stops = StopDetector.Restore(snapshot.Stops, pattern),
+                _delayTripId = snapshot.DelayTripId,
+                _delayServiceDate = snapshot.DelayServiceDate,
+                _delayTimetable = timetable,
+                ObservedDelaySec = snapshot.ObservedDelaySec,
+                DetectorPositionAt = snapshot.DetectorPositionAt,
+                DetectorDelaySec = snapshot.DetectorDelaySec,
+            };
+        }
 
         public void BeginTrip(ScheduledTrip trip)
         {
@@ -189,5 +293,24 @@ internal sealed class PartitionState(CurrentTripSchedule schedule)
             DetectorPositionAt = position.ObservedAt;
             DetectorDelaySec = position.DelaySec;
         }
+
+        private static ScheduledTrip Rebind(TripSchedule? schedule, string tripId, DateOnly serviceDate) =>
+            schedule is not null && schedule.TryFindByIdentity(tripId, serviceDate, out var trip)
+                ? trip!
+                : throw new InvalidOperationException($"Trip {tripId} on {serviceDate} is absent from the current schedule.");
     }
 }
+
+internal readonly record struct PartitionStateSnapshot(long? NextOffset, PartitionVehicleSnapshot[] Vehicles);
+
+internal readonly record struct PartitionVehicleSnapshot(string Key, VehicleStateSnapshot State);
+
+internal readonly record struct VehicleStateSnapshot(
+    VehicleTrackSnapshot Track,
+    RouteProgressSnapshot Route,
+    StopDetectorSnapshot Stops,
+    string? DelayTripId,
+    DateOnly DelayServiceDate,
+    int? ObservedDelaySec,
+    DateTimeOffset? DetectorPositionAt,
+    int? DetectorDelaySec);

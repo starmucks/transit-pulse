@@ -148,6 +148,57 @@ public sealed class StopDetectorTests
         Assert.Empty(events);
     }
 
+    [Fact]
+    public void Snapshot_round_trip_keeps_a_vehicle_standing_in_the_zone()
+    {
+        var trip = Trip(500);
+        var (detector, before) = (new StopDetector(), new List<StopEvent>());
+        Advance(detector, trip, OnRoute(440), 0, before);
+        Advance(detector, trip, OnRoute(465), 2, before);
+        Advance(detector, trip, OnRoute(475), 3, before);
+        Advance(detector, trip, OnRoute(475.5), 4, before);
+        Advance(detector, trip, OnRoute(476), 20, before);
+        Advance(detector, trip, OnRoute(485), 22, before);
+
+        var reloadedTrip = Trip(500);
+        var restored = StopDetector.Restore(detector.Capture(), reloadedTrip.Stops);
+        var after = new List<StopEvent>();
+        Advance(restored, reloadedTrip, OnRoute(535), 27, after);
+
+        Assert.Equal([(StopEventKind.Arrival, "A", 3.0)], Rounded(before));
+        Assert.Equal([(StopEventKind.Departure, "A", 26.5)], Rounded(after));
+    }
+
+    [Fact]
+    public void Snapshot_round_trip_keeps_a_pending_pass()
+    {
+        var trip = Trip(500);
+        var (detector, before) = (new StopDetector(), new List<StopEvent>());
+        Advance(detector, trip, OnRoute(440), 0, before);
+        Advance(detector, trip, OnRoute(480), 4, before);
+        Advance(detector, trip, OnRoute(520), 8, before);
+
+        var reloadedTrip = Trip(500);
+        var restored = StopDetector.Restore(detector.Capture(), reloadedTrip.Stops);
+        var after = new List<StopEvent>();
+        Advance(restored, reloadedTrip, OnRoute(560), 12, after);
+
+        Assert.Empty(before);
+        Assert.Equal([(StopEventKind.Passed, "A", 6.0)], Rounded(after));
+    }
+
+    [Fact]
+    public void Active_snapshot_requires_a_pattern()
+    {
+        var trip = Trip(500);
+        var detector = new StopDetector();
+        Advance(detector, trip, OnRoute(440), 0, []);
+
+        var error = Assert.Throws<ArgumentException>(() => StopDetector.Restore(detector.Capture(), null));
+
+        Assert.Equal("pattern", error.ParamName);
+    }
+
     // Stops named A, B, ... at the given distances along a straight line.
     private static ScheduledTrip Trip(params double[] stopMetres)
     {

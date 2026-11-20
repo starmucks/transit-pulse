@@ -1,3 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="TransitPulse.Domain.Tests" />
+    <InternalsVisibleTo Include="TransitPulse.Processor" />
+  </ItemGroup>
+
 </Project>

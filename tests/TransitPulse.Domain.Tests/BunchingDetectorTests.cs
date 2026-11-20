@@ -122,6 +122,69 @@ public sealed class BunchingDetectorTests
         Assert.Equal(2, found.Count);
     }
 
+    [Fact]
+    public void Snapshot_round_trip_keeps_confirmation_time_across_a_reloaded_schedule()
+    {
+        var fixture = new Fixture();
+        var detector = new BunchingDetector(TimeZoneInfo.Utc);
+        var found = new List<BunchingEvent>();
+        for (var seconds = 0; seconds <= 20; seconds += 5)
+        {
+            fixture.AdvancePair(detector, found, seconds, actualRatio: 0.10);
+        }
+
+        var reloaded = new Fixture();
+        var restored = BunchingDetector.Restore(detector.Capture(), reloaded.Schedule(), TimeZoneInfo.Utc);
+        for (var seconds = 25; seconds <= 30; seconds += 5)
+        {
+            reloaded.AdvancePair(restored, found, seconds, actualRatio: 0.10);
+        }
+
+        var bunching = Assert.Single(found);
+        Assert.Equal(_t0, bunching.StartedAt);
+        Assert.Equal(_t0.AddSeconds(30), bunching.ConfirmedAt);
+    }
+
+    [Fact]
+    public void Snapshot_round_trip_keeps_active_recovery_time()
+    {
+        var fixture = new Fixture();
+        var detector = new BunchingDetector(TimeZoneInfo.Utc);
+        var before = new List<BunchingEvent>();
+        for (var seconds = 0; seconds <= 30; seconds += 5)
+        {
+            fixture.AdvancePair(detector, before, seconds, actualRatio: 0.10);
+        }
+
+        fixture.AdvancePair(detector, before, 35, actualRatio: 1);
+        fixture.AdvancePair(detector, before, 45, actualRatio: 1);
+        var reloaded = new Fixture();
+        var restored = BunchingDetector.Restore(detector.Capture(), reloaded.Schedule(), TimeZoneInfo.Utc);
+        var after = new List<BunchingEvent>();
+        reloaded.AdvancePair(restored, after, 65, actualRatio: 1);
+        for (var seconds = 70; seconds <= 100; seconds += 5)
+        {
+            reloaded.AdvancePair(restored, after, seconds, actualRatio: 0.10);
+        }
+
+        Assert.Single(before);
+        var reopened = Assert.Single(after);
+        Assert.Equal(_t0.AddSeconds(70), reopened.StartedAt);
+        Assert.Equal(_t0.AddSeconds(100), reopened.ConfirmedAt);
+    }
+
+    [Fact]
+    public void Active_snapshot_cannot_restore_without_every_trip()
+    {
+        var fixture = new Fixture();
+        var detector = new BunchingDetector(TimeZoneInfo.Utc);
+        fixture.AdvancePair(detector, [], 0, actualRatio: 0.10);
+        var incomplete = new TripSchedule([_day], [fixture.Follower]);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            BunchingDetector.Restore(detector.Capture(), incomplete, TimeZoneInfo.Utc));
+    }
+
     private sealed class Fixture
     {
         private readonly RouteShape _shape = new([60.2, 60.2], [24.9, 24.918]);
@@ -143,6 +206,8 @@ public sealed class BunchingDetectorTests
         public ScheduledTrip Leader { get; }
 
         public ScheduledTrip Follower { get; }
+
+        public TripSchedule Schedule() => new([_day], [Leader, Follower]);
 
         public void AdvancePair(
             BunchingDetector detector,

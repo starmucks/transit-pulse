@@ -216,6 +216,45 @@ public sealed class RouteProgressTests
         Assert.Equal(new RouteMatch(RouteMatchStatus.OutsideWindow, 1000, 0), Rounded(afterDetour));
     }
 
+    [Fact]
+    public void Snapshot_round_trip_keeps_the_pass_of_an_ambiguous_line()
+    {
+        var progress = new RouteProgress();
+        Advance(progress, Trip(_outAndBack), 500, 0, 0);
+        Advance(progress, Trip(_outAndBack), 1000, 10, 10);
+        Advance(progress, Trip(_outAndBack), 700, 8, 20);
+
+        var restored = RouteProgress.Restore(progress.Capture());
+        var next = Advance(restored, Trip(_outAndBack), 690, 8, 21);
+
+        Assert.Equal(new RouteMatch(RouteMatchStatus.OnRoute, 1330, 12), Rounded(next));
+    }
+
+    [Fact]
+    public void Snapshot_round_trip_keeps_an_unfinished_reanchor_row()
+    {
+        var progress = new RouteProgress();
+        Advance(progress, Trip(_outAndBack), 700, 18, 0);
+        Advance(progress, Trip(_outAndBack), 650, 18, 5);
+        Advance(progress, Trip(_outAndBack), 600, 18, 10);
+        Advance(progress, Trip(_outAndBack), 580, 18, 12);
+
+        var restored = RouteProgress.Restore(progress.Capture());
+        var reanchored = Advance(restored, Trip(_outAndBack), 560, 18, 14);
+
+        Assert.Equal(new RouteMatch(RouteMatchStatus.OnRoute, 1460, 2, ReanchoredByMetres: 760), Rounded(reanchored));
+    }
+
+    [Fact]
+    public void Inconsistent_snapshot_is_rejected()
+    {
+        var snapshot = new RouteProgressSnapshot("t1", new DateOnly(2026, 11, 4), false, 100, default, 0, 0);
+
+        var error = Assert.Throws<ArgumentException>(() => RouteProgress.Restore(snapshot));
+
+        Assert.Equal("snapshot", error.ParamName);
+    }
+
     private static ScheduledTrip Trip(RouteShape? shape, string tripId = "t1") =>
         new(tripId, "1009", 0, 12 * 3600, new DateOnly(2026, 11, 4), shape);
 
