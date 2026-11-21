@@ -8,13 +8,9 @@
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
-  <!-- Archive slice → Ingestor normalize → Processor; Docker required for Redpanda / Postgres / Redis. -->
+  <!-- Archive slice → normalize → Processor; Docker required for Redpanda and Postgres. -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Diagnostics.Testing" />
-    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
-    <PackageReference Include="StackExchange.Redis" />
     <PackageReference Include="Testcontainers.PostgreSql" />
-    <PackageReference Include="Testcontainers.Redis" />
     <PackageReference Include="Testcontainers.Redpanda" />
     <PackageReference Include="xunit.v3" />
   </ItemGroup>
@@ -31,7 +27,6 @@
     <ProjectReference Include="..\..\src\TransitPulse.Infrastructure\TransitPulse.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\TransitPulse.Ingestor\TransitPulse.Ingestor.csproj" />
     <ProjectReference Include="..\..\src\TransitPulse.Processor\TransitPulse.Processor.csproj" />
-    <ProjectReference Include="..\..\src\TransitPulse.Worker\TransitPulse.Worker.csproj" />
   </ItemGroup>
 
 </Project>

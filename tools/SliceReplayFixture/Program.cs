@@ -62,8 +62,10 @@ if (kept == 0)
     throw new InvalidOperationException("No records matched the route filter; check archive path and route ids.");
 }
 
+// Processor loads today ± 1 in the feed time zone; keep those three service days only.
+var serviceDays = new DateOnly[] { new(2026, 11, 3), new(2026, 11, 4), new(2026, 11, 5) };
 var gtfsOut = Path.Combine(outputDir, "gtfs");
-GtfsSlicer.Slice(gtfsZip, gtfsOut, routes);
+GtfsSlicer.Slice(gtfsZip, gtfsOut, routes, serviceDays);
 Console.WriteLine($"GTFS slice → {gtfsOut}");
 Console.WriteLine("Done.");
 

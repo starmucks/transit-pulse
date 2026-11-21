@@ -7,7 +7,7 @@ needs from the snapshot active that morning (`2026-11-03T1433Z`).
 | Path | Content |
 |---|---|
 | `archive/hsl/2026-11-04/hsl-20261104T06Z-0.parquet` | Filtered raw HFP records (~151 k), same layout as the collector |
-| `gtfs/*.txt` | Route `1009` and every trip, stop, shape and service it references |
+| `gtfs/*.txt` | Route `1009` trips/services active on 2026-11-03…05 (Processor today ± 1) |
 | `expected-stop-events.jsonl` | Stop events the Processor must emit (one JSON object per line, sorted by `id`) |
 
 Rebuild from the author's full archive on `D:\TransitPulse`:

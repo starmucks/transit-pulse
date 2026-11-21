@@ -5,11 +5,16 @@ using Sylvan.Data.Csv;
 
 namespace SliceReplayFixture;
 
-/// <summary>Keeps only the GTFS rows needed for the chosen route ids.</summary>
+/// <summary>Keeps only the GTFS rows needed for the chosen route ids on the given service days.</summary>
 internal static class GtfsSlicer
 {
-    public static void Slice(string zipPath, string outputDirectory, HashSet<string> routeIds)
+    public static void Slice(string zipPath, string outputDirectory, HashSet<string> routeIds, IReadOnlyList<DateOnly> serviceDays)
     {
+        if (serviceDays.Count == 0)
+        {
+            throw new ArgumentException("At least one service day is required.", nameof(serviceDays));
+        }
+
         if (Directory.Exists(outputDirectory))
         {
             Directory.Delete(outputDirectory, recursive: true);
@@ -21,10 +26,16 @@ internal static class GtfsSlicer
         var routes = Keep(zip, "routes.txt", row => routeIds.Contains(row["route_id"]));
         Write(outputDirectory, "routes.txt", routes);
 
-        var trips = Keep(zip, "trips.txt", row => routeIds.Contains(row["route_id"]));
+        var tripsAll = Keep(zip, "trips.txt", row => routeIds.Contains(row["route_id"]));
+        var candidateServices = ColumnSet(tripsAll, "service_id");
+
+        var calendarAll = Keep(zip, "calendar.txt", row => candidateServices.Contains(row["service_id"]));
+        var datesAll = Keep(zip, "calendar_dates.txt", row => candidateServices.Contains(row["service_id"]));
+        var activeServices = ActiveServices(calendarAll, datesAll, serviceDays);
+
+        var trips = FilterRows(tripsAll, row => activeServices.Contains(row["service_id"]));
         Write(outputDirectory, "trips.txt", trips);
         var tripIds = ColumnSet(trips, "trip_id");
-        var serviceIds = ColumnSet(trips, "service_id");
         var shapeIds = ColumnSet(trips, "shape_id");
 
         var stopTimes = Keep(zip, "stop_times.txt", row => tripIds.Contains(row["trip_id"]));
@@ -48,17 +59,119 @@ internal static class GtfsSlicer
         var shapes = Keep(zip, "shapes.txt", row => shapeIds.Contains(row["shape_id"]));
         Write(outputDirectory, "shapes.txt", shapes);
 
-        var calendar = Keep(zip, "calendar.txt", row => serviceIds.Contains(row["service_id"]));
+        var calendar = FilterRows(calendarAll, row => activeServices.Contains(row["service_id"]));
         Write(outputDirectory, "calendar.txt", calendar);
 
-        var calendarDates = Keep(zip, "calendar_dates.txt", row => serviceIds.Contains(row["service_id"]));
+        var calendarDates = FilterRows(datesAll, row => activeServices.Contains(row["service_id"]));
         Write(outputDirectory, "calendar_dates.txt", calendarDates);
 
         Console.WriteLine(string.Create(
             CultureInfo.InvariantCulture,
             $"  routes={routes.Rows.Count} trips={tripIds.Count} stop_times={stopTimes.Rows.Count} " +
-            $"stops={stops.Rows.Count} shapes_pts={shapes.Rows.Count} services={serviceIds.Count}"));
+            $"stops={stops.Rows.Count} shapes_pts={shapes.Rows.Count} services={activeServices.Count} " +
+            $"(of {candidateServices.Count} on route)"));
     }
+
+    /// <summary>
+    /// Same rules as <c>TripScheduleReader</c>: calendar weekdays in range minus removals, plus added exceptions.
+    /// </summary>
+    private static HashSet<string> ActiveServices(CsvTable calendar, CsvTable dates, IReadOnlyList<DateOnly> days)
+    {
+        var removed = new HashSet<(string Service, DateOnly Date)>();
+        var added = new HashSet<(string Service, DateOnly Date)>();
+        foreach (var row in dates.Rows)
+        {
+            var service = row["service_id"];
+            var date = ParseGtfsDate(row["date"]);
+            // GTFS exception_type: 1 = added, 2 = removed.
+            if (row["exception_type"] == "1")
+            {
+                added.Add((service, date));
+            }
+            else if (row["exception_type"] == "2")
+            {
+                removed.Add((service, date));
+            }
+        }
+
+        var active = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var day in days)
+        {
+            // Match TripScheduleReader: ISO Monday=bit0 … Sunday=bit6.
+            var bit = day.DayOfWeek == DayOfWeek.Sunday ? 1 << 6 : 1 << ((int)day.DayOfWeek - 1);
+            foreach (var row in calendar.Rows)
+            {
+                var service = row["service_id"];
+                var start = ParseGtfsDate(row["start_date"]);
+                var end = ParseGtfsDate(row["end_date"]);
+                if (day < start || day > end || removed.Contains((service, day)))
+                {
+                    continue;
+                }
+
+                var mask = WeekdayMask(row);
+                if ((mask & bit) != 0)
+                {
+                    active.Add(service);
+                }
+            }
+
+            foreach (var (service, date) in added)
+            {
+                if (date == day)
+                {
+                    active.Add(service);
+                }
+            }
+        }
+
+        return active;
+    }
+
+    private static int WeekdayMask(Dictionary<string, string> row)
+    {
+        // Matches Postgres storage: Monday = bit 0 … Sunday = bit 6.
+        var mask = 0;
+        if (row["monday"] == "1")
+        {
+            mask |= 1 << 0;
+        }
+
+        if (row["tuesday"] == "1")
+        {
+            mask |= 1 << 1;
+        }
+
+        if (row["wednesday"] == "1")
+        {
+            mask |= 1 << 2;
+        }
+
+        if (row["thursday"] == "1")
+        {
+            mask |= 1 << 3;
+        }
+
+        if (row["friday"] == "1")
+        {
+            mask |= 1 << 4;
+        }
+
+        if (row["saturday"] == "1")
+        {
+            mask |= 1 << 5;
+        }
+
+        if (row["sunday"] == "1")
+        {
+            mask |= 1 << 6;
+        }
+
+        return mask;
+    }
+
+    private static DateOnly ParseGtfsDate(string value) =>
+        DateOnly.ParseExact(value, "yyyyMMdd", CultureInfo.InvariantCulture);
 
     private static CsvTable Keep(ZipArchive zip, string entryName, Func<Dictionary<string, string>, bool> keep)
     {

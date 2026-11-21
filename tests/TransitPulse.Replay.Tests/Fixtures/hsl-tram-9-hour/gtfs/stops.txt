@@ -1,7 +1,6 @@
 stop_id,stop_code,stop_name,stop_desc,stop_lat,stop_lon,zone_id,stop_url,location_type,parent_station,wheelchair_boarding,platform_code,vehicle_type,digistop_id
 1020453,H0301,Päärautatieasema,Kaivokatu,60.170347,24.941008,A,http://aikataulut.hsl.fi/pysakit/fi/1020453.html,0, ,1,41,0,165135
 1020454,H0302,Päärautatieasema,Kaivokatu,60.170445,24.940834,A,http://aikataulut.hsl.fi/pysakit/fi/1020454.html,0, ,1,42,0,165136
-1020456,H0342,Rautatientori,Mikonkatu,60.171183,24.945066,A,http://aikataulut.hsl.fi/pysakit/fi/1020456.html,0, ,0,15,0,336419
 1020457,H0303,Kaisaniemenkatu,Kaisaniemenkatu,60.171856,24.947655,A,http://aikataulut.hsl.fi/pysakit/fi/1020457.html,0, ,1,1,0,165137
 1020458,H0304,Kaisaniemenkatu,Kluuvitunneli,60.171630,24.947370,A,http://aikataulut.hsl.fi/pysakit/fi/1020458.html,0, ,1,2,0,165138
 1020459,H0305,Kaisaniemenpuisto,Kaisaniemenkatu,60.173555,24.949591,A,http://aikataulut.hsl.fi/pysakit/fi/1020459.html,0, ,1, ,0,165139
@@ -37,8 +36,6 @@ stop_id,stop_code,stop_name,stop_desc,stop_lat,stop_lon,zone_id,stop_url,locatio
 1173403,H0661,Jämsänkatu,Kumpulantie,60.196743,24.941738,A,http://aikataulut.hsl.fi/pysakit/fi/1173403.html,0, ,1, ,0,240784
 1174410,H0664,Pasilan asema,Pasilansilta,60.198067,24.933793,A,http://aikataulut.hsl.fi/pysakit/fi/1174410.html,0, ,1,34,0,338019
 1174411,H0665,Pasilan asema,Pasilansilta,60.197999,24.933876,A,http://aikataulut.hsl.fi/pysakit/fi/1174411.html,0, ,1,32,0,338018
-1203403,H0294,Saukonpaasi,Länsisatamankatu,60.157460,24.910930,A,http://aikataulut.hsl.fi/pysakit/fi/1203403.html,0, ,0, ,0,304105
-1203404,H0295,Saukonpaasi,Atlantinkatu,60.156980,24.911453,A,http://aikataulut.hsl.fi/pysakit/fi/1203404.html,0, ,0, ,0,304106
 1203413,H0287,Huutokonttori,Välimerenkatu,60.160237,24.920347,A,http://aikataulut.hsl.fi/pysakit/fi/1203413.html,0, ,1, ,0,313301
 1203415,H0277,Välimerenkatu,Välimerenkatu,60.158815,24.914900,A,http://aikataulut.hsl.fi/pysakit/fi/1203415.html,0, ,1, ,0,313303
 1203416,H0238,Länsiterminaali 2,Länsiterminaali T2,60.150964,24.915803,A,http://aikataulut.hsl.fi/pysakit/fi/1203416.html,0, ,1,2,0,310902

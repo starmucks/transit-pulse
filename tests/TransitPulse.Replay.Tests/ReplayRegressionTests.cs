@@ -72,7 +72,8 @@ public sealed class ReplayRegressionTests : IClassFixture<RedpandaFixture>, ICla
 
         var topics = await CreateTopicsAsync();
         var positions = await NormalizeArchiveAsync();
-        Assert.NotEmpty(positions);
+        // ~151 k raw records for route 1009; ODO / incomplete drops leave the bulk still here.
+        Assert.InRange(positions.Count, 100_000, 160_000);
         Publish(topics.Input, positions);
 
         var consumer = NewConsumer(topics, schedule);
@@ -80,8 +81,6 @@ public sealed class ReplayRegressionTests : IClassFixture<RedpandaFixture>, ICla
         try
         {
             await WaitUntilCaughtUpAsync(topics.Input, topics.GroupId, positions.Count);
-            // Stop events are produced in the same loop; give the broker a moment after the last commit.
-            await Task.Delay(TimeSpan.FromSeconds(2), Ct);
         }
         finally
         {

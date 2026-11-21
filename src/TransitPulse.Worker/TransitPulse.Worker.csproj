@@ -8,7 +8,6 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="TransitPulse.Integration.Tests" />
-    <InternalsVisibleTo Include="TransitPulse.Replay.Tests" />
   </ItemGroup>
 
   <ItemGroup>
