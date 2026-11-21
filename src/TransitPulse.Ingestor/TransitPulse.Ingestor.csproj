@@ -49,6 +49,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="TransitPulse.Ingestor.Tests" />
     <InternalsVisibleTo Include="TransitPulse.Integration.Tests" />
+    <InternalsVisibleTo Include="TransitPulse.Replay.Tests" />
+    <InternalsVisibleTo Include="SliceReplayFixture" />
   </ItemGroup>
 
   <ItemGroup>

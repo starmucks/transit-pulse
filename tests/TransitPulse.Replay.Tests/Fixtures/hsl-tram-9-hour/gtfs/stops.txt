@@ -1,0 +1,55 @@
+stop_id,stop_code,stop_name,stop_desc,stop_lat,stop_lon,zone_id,stop_url,location_type,parent_station,wheelchair_boarding,platform_code,vehicle_type,digistop_id
+1020453,H0301,Päärautatieasema,Kaivokatu,60.170347,24.941008,A,http://aikataulut.hsl.fi/pysakit/fi/1020453.html,0, ,1,41,0,165135
+1020454,H0302,Päärautatieasema,Kaivokatu,60.170445,24.940834,A,http://aikataulut.hsl.fi/pysakit/fi/1020454.html,0, ,1,42,0,165136
+1020457,H0303,Kaisaniemenkatu,Kaisaniemenkatu,60.171856,24.947655,A,http://aikataulut.hsl.fi/pysakit/fi/1020457.html,0, ,1,1,0,165137
+1020458,H0304,Kaisaniemenkatu,Kluuvitunneli,60.171630,24.947370,A,http://aikataulut.hsl.fi/pysakit/fi/1020458.html,0, ,1,2,0,165138
+1020459,H0305,Kaisaniemenpuisto,Kaisaniemenkatu,60.173555,24.949591,A,http://aikataulut.hsl.fi/pysakit/fi/1020459.html,0, ,1, ,0,165139
+1020460,H0306,Kaisaniemenpuisto,Kaisaniemenkatu,60.173313,24.949130,A,http://aikataulut.hsl.fi/pysakit/fi/1020460.html,0, ,1, ,0,165140
+1040404,H0820,Länsilinkki,Ruoholahdenranta,60.162826,24.923134,A,http://aikataulut.hsl.fi/pysakit/fi/1040404.html,0, ,0, ,0,240457
+1040405,H0821,Länsilinkki,Ruoholahdenranta,60.162687,24.923091,A,http://aikataulut.hsl.fi/pysakit/fi/1040405.html,0, ,0, ,0,240001
+1040406,H0822,Ruoholahden villat,Ruoholahdenkatu,60.165425,24.926970,A,http://aikataulut.hsl.fi/pysakit/fi/1040406.html,0, ,0, ,0,240027
+1040407,H0823,Ruoholahden villat,Ruoholahdenkatu,60.165425,24.926717,A,http://aikataulut.hsl.fi/pysakit/fi/1040407.html,0, ,0, ,0,240005
+1040408,H0824,Kampintori,Malminrinne,60.167950,24.931494,A,http://aikataulut.hsl.fi/pysakit/fi/1040408.html,0, ,0,68,0,240333
+1040409,H0825,Kampintori,Malminrinne,60.167771,24.931218,A,http://aikataulut.hsl.fi/pysakit/fi/1040409.html,0, ,0,67,0,240008
+1040410,H0232,Simonkatu,Simonkatu,60.168809,24.935728,A,http://aikataulut.hsl.fi/pysakit/fi/1040410.html,0, ,2, ,0,232860
+1040411,H0231,Simonkatu,Simonkatu,60.168737,24.935247,A,http://aikataulut.hsl.fi/pysakit/fi/1040411.html,0, ,1, ,0,232180
+1111428,H0251,Hakaniemi,Siltasaarenkatu,60.179203,24.950240,A,http://aikataulut.hsl.fi/pysakit/fi/1111428.html,0, ,1,13,0,232649
+1111429,H0252,Hakaniemi,Siltasaarenkatu,60.179115,24.950047,A,http://aikataulut.hsl.fi/pysakit/fi/1111429.html,0, ,1,12,0,232613
+1111431,H0253,Kallion virastotalo,Siltasaarenkatu,60.180698,24.949798,A,http://aikataulut.hsl.fi/pysakit/fi/1111431.html,0, ,2,31,0,166285
+1111432,H0254,Kallion virastotalo,Siltasaarenkatu,60.180459,24.949653,A,http://aikataulut.hsl.fi/pysakit/fi/1111432.html,0, ,1,32,0,232157
+1112433,H0255,Karhupuisto,Viides linja,60.183773,24.952316,A,http://aikataulut.hsl.fi/pysakit/fi/1112433.html,0, ,1, ,0,165760
+1112434,H0256,Karhupuisto,Viides linja,60.183500,24.952730,A,http://aikataulut.hsl.fi/pysakit/fi/1112434.html,0, ,1, ,0,165761
+1113480,H0257,Kaarlenkatu,Kaarlenkatu,60.186015,24.951522,A,http://aikataulut.hsl.fi/pysakit/fi/1113480.html,0, ,1, ,0,165767
+1121404,H0652,Fleminginkatu,Fleminginkatu,60.188931,24.952874,A,http://aikataulut.hsl.fi/pysakit/fi/1121404.html,0, ,1, ,0,232271
+1121406,H0250,Helsinginkatu,Helsinginkatu,60.186982,24.951973,A,http://aikataulut.hsl.fi/pysakit/fi/1121406.html,0, ,1, ,0,232361
+1122400,H0654,Sturenkatu,Aleksis Kiven katu,60.190853,24.948703,A,http://aikataulut.hsl.fi/pysakit/fi/1122400.html,0, ,1, ,0,240673
+1171401,H0623,Ilmalantori,Ilmalankuja,60.206640,24.920232,A,http://aikataulut.hsl.fi/pysakit/fi/1171401.html,0, ,0, ,0,458920
+1171402,H0622,Ilmalantori,Ilmalantori,60.207510,24.919982,A,http://aikataulut.hsl.fi/pysakit/fi/1171402.html,0, ,0, ,0,418018
+1171409,H0610,Esterinportti,Pasilankatu,60.198491,24.928021,A,http://aikataulut.hsl.fi/pysakit/fi/1171409.html,0, ,1, ,0,165804
+1171410,H0609,Esterinportti,Pasilankatu,60.198270,24.927932,A,http://aikataulut.hsl.fi/pysakit/fi/1171410.html,0, ,1, ,0,165805
+1171411,H0625,Eevanmäki,Pasilankatu,60.201814,24.926487,A,http://aikataulut.hsl.fi/pysakit/fi/1171411.html,0, ,0, ,0,416920
+1171412,H0624,Eevanmäki,Pasilankatu,60.201531,24.926406,A,http://aikataulut.hsl.fi/pysakit/fi/1171412.html,0, ,0, ,0,416821
+1171413,H0627,Uutiskatu,Radiokatu,60.203400,24.919226,A,http://aikataulut.hsl.fi/pysakit/fi/1171413.html,0, ,0, ,0,416721
+1171414,H0626,Uutiskatu,Radiokatu,60.203357,24.919070,A,http://aikataulut.hsl.fi/pysakit/fi/1171414.html,0, ,0, ,0,417419
+1173401,H0663,Asemapäällikönkatu,Ratamestarinkatu,60.198451,24.940386,A,http://aikataulut.hsl.fi/pysakit/fi/1173401.html,0, ,1, ,0,232015
+1173402,H0662,Asemapäällikönkatu,Resiinakuja,60.198055,24.940233,A,http://aikataulut.hsl.fi/pysakit/fi/1173402.html,0, ,1, ,0,232146
+1173403,H0661,Jämsänkatu,Kumpulantie,60.196743,24.941738,A,http://aikataulut.hsl.fi/pysakit/fi/1173403.html,0, ,1, ,0,240784
+1174410,H0664,Pasilan asema,Pasilansilta,60.198067,24.933793,A,http://aikataulut.hsl.fi/pysakit/fi/1174410.html,0, ,1,34,0,338019
+1174411,H0665,Pasilan asema,Pasilansilta,60.197999,24.933876,A,http://aikataulut.hsl.fi/pysakit/fi/1174411.html,0, ,1,32,0,338018
+1203413,H0287,Huutokonttori,Välimerenkatu,60.160237,24.920347,A,http://aikataulut.hsl.fi/pysakit/fi/1203413.html,0, ,1, ,0,313301
+1203415,H0277,Välimerenkatu,Välimerenkatu,60.158815,24.914900,A,http://aikataulut.hsl.fi/pysakit/fi/1203415.html,0, ,1, ,0,313303
+1203416,H0238,Länsiterminaali 2,Länsiterminaali T2,60.150964,24.915803,A,http://aikataulut.hsl.fi/pysakit/fi/1203416.html,0, ,1,2,0,310902
+1203418,H0239,Länsiterminaali 2,Tyynenmerenkatu,60.151137,24.916254,A,http://aikataulut.hsl.fi/pysakit/fi/1203418.html,0, ,1,1,0,310904
+1203420,H0288,Välimerenkatu,Välimerenkatu,60.158870,24.915398,A,http://aikataulut.hsl.fi/pysakit/fi/1203420.html,0, ,1, ,0,313202
+1203422,H0286,Huutokonttori,Välimerenkatu,60.160175,24.920707,A,http://aikataulut.hsl.fi/pysakit/fi/1203422.html,0, ,1, ,0,313203
+1203423,H0343,Kanariankatu,Atlantinkatu,60.153471,24.910007,A,http://aikataulut.hsl.fi/pysakit/fi/1203423.html,0, ,1, ,0,360117
+1203424,H0344,Kanariankatu,Atlantinkatu,60.153056,24.910058,A,http://aikataulut.hsl.fi/pysakit/fi/1203424.html,0, ,1, ,0,360118
+1203425,H0833,Saukonkatu,Atlantinkatu,60.156686,24.911533,A,http://aikataulut.hsl.fi/pysakit/fi/1203425.html,0, ,1, ,0,347317
+1203426,H0832,Saukonkatu,Atlantinkatu,60.156448,24.910922,A,http://aikataulut.hsl.fi/pysakit/fi/1203426.html,0, ,1, ,0,347318
+1220402,H0660,Jämsänkatu,Kumpulantie,60.196657,24.943025,A,http://aikataulut.hsl.fi/pysakit/fi/1220402.html,0, ,1, ,0,232155
+1220428,H0658,Pasilan konepaja,Traverssikuja,60.194330,24.945010,A,http://aikataulut.hsl.fi/pysakit/fi/1220428.html,0, ,1, ,0,232240
+1220429,H0659,Pasilan konepaja,Traverssikuja,60.194381,24.945327,A,http://aikataulut.hsl.fi/pysakit/fi/1220429.html,0, ,1, ,0,232816
+1220430,H0656,Kotkankatu,Viipurinkatu,60.192893,24.943849,A,http://aikataulut.hsl.fi/pysakit/fi/1220430.html,0, ,1, ,0,232802
+1220431,H0657,Kotkankatu,Aleksis Kiven katu,60.193060,24.943706,A,http://aikataulut.hsl.fi/pysakit/fi/1220431.html,0, ,1, ,0,232490
+1220433,H0655,Sturenkatu,Aleksis Kiven katu,60.191080,24.948400,A,http://aikataulut.hsl.fi/pysakit/fi/1220433.html,0, ,1, ,0,232062
+1220435,H0653,Fleminginkatu,Fleminginkatu,60.188992,24.953046,A,http://aikataulut.hsl.fi/pysakit/fi/1220435.html,0, ,1, ,0,232181

@@ -2,15 +2,15 @@
 
 > Обновляется в конце каждой сессии. Не длиннее одного экрана.
 
-**Обновлено:** 2026-11-20 · **Этап:** 2 «Обработка потока» ([stage-2.md](stages/stage-2.md)) · 2.10 на `feature/48-processor-recovery`
+**Обновлено:** 2026-11-20 · **Этап:** 2 «Обработка потока» ([stage-2.md](stages/stage-2.md)) · дальше 2.11 (#49)
 
 ## Сделано (сессия 2026-11-20)
-- **2.10 + ревью:** Redis-checkpoint (ADR-0014); fail-closed без checkpoint; crash before/after Redis;
-  DLQ; `StopEventSink` + `0002_stop_events`; recovery-тесты на Redpanda+Redis+Postgres.
+- **2.10 (#48) влито** как PR #73: Redis-checkpoint (ADR-0014), fail-closed без checkpoint,
+  `RestoreOwned` фильтрует чужие партиции при ребалансе, DLQ, `StopEventSink` + `0002_stop_events`,
+  recovery-тесты (crash before/after Redis).
 
 ## Следующий шаг
-1. **PR #73** (#48): дождаться CI, ревью, merge.
-2. **Задача 2.11 (#49):** replay-тест и живой lag.
+1. **Задача 2.11 (#49):** `TransitPulse.Replay.Tests` на эталонном срезе архива; живой `full` ≥ 1 ч и lag в `docs/benchmarks.md`.
 
 ## Известные проблемы
 - Сеть хостера теряет пакеты (обойдено для сборщика, не устранено).
