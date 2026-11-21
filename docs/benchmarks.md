@@ -210,7 +210,33 @@ the first and last samples. One process on a development PC, with Redpanda in Do
 | Dropped as impossible jumps | 6 of 260 465 |
 
 The time counts from the moment the Ingestor handed the message to its Kafka client, so it includes that client's batching
-(20 ms) and leaves out the source and the Ingestor's own work before that. A run over a weekday peak is task 2.11.
+(20 ms) and leaves out the source and the Ingestor's own work before that.
+
+### Live Processor lag ≥ 1 h (task 2.11)
+
+**When:** Saturday 2026-11-21 19:45–20:50 UTC (21:45–22:50 Europe/Helsinki), Release AppHost on the development PC
+(Docker Desktop / WSL2), Ingestor `full` + Processor + Worker. Fresh Redpanda and Redis volumes (previous group offsets
+without a checkpoint fail-closed per ADR-0014). Not a weekday peak — Helsinki evening Saturday; input is lower than the
+morning weekday hour used elsewhere in this file.
+
+**How:** `dotnet-counters collect` on `TransitPulse.Processor` for 65 minutes (`lag_time` percentiles every 5 s);
+once a minute, `rpk group describe transitpulse-processor` for end−committed lag on `positions.raw` and the Processor
+working set. Steady-state numbers drop the first ~10 minutes of warm-up.
+
+| | Result |
+|---|---:|
+| Accepted positions (median of 5 s rates) | **~500 /s** (max ~940 /s) |
+| `lag_time` p50 (median of samples) | **28 ms** |
+| `lag_time` p95 (median / p95 / max of samples) | **41 / 81 / 167 ms** |
+| Kafka group lag (messages, steady) | min 13, p50 ~1 400, p95 ~2 500 (≈ one 5 s commit window at this rate; not growing) |
+| CPU | **~9.5 %** of one core (p95 11 %) |
+| Working set | **231–271 MiB** (peak) |
+
+- Stage target: `lag_time` p95 &lt; 1 s and lag not climbing. Met on this window.
+- Group lag stays on the order of `Kafka:CommitInterval` (5 s): the metric `transitpulse.processor.lag` was ~0 on
+  partitions while offsets still showed up to a few thousand uncommitted messages — same check the stage asks for.
+- A weekday morning peak (≥ ~1 200 positions/s) is still the harder case; confirm there if stage acceptance requires that
+  window specifically.
 
 ### Archive copy during the morning peak, 2026-11-05
 
