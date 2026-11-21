@@ -28,6 +28,12 @@ __pycache__/
 # Local data: raw archives, training sets, models in progress
 /data/
 
+# Live lag sampling outputs (large; regenerate locally)
+/tools/live-lag-sample/*.csv
+/tools/live-lag-sample/*.jsonl
+/tools/live-lag-sample/*.out
+/tools/live-lag-sample/*.err
+
 # Secrets: never committed, only *.example templates are
 .env
 *.local.json

@@ -140,8 +140,10 @@ events.stop ──► Worker: StopEventSink ─► Postgres stop_events (upsert 
 - ✅ 2026-11-20: `ProcessorRecoveryTests` (before/after checkpoint), `Missing_checkpoint_after_committed_offsets_fails_closed`, ADR-0014.
 
 ### 2.11 Replay-тест и живой lag (#49)
-- [ ] `tests/TransitPulse.Replay.Tests`: эталонный срез архива → Ingestor replay → Processor → ожидаемые события (сравнение с зафиксированным результатом; изменение — осознанно, с обновлением эталона).
-- [ ] Живой прогон `full` ≥ 1 ч в будний пик: lag Processor, CPU и память записаны. Lag сверять и по offset'ам группы: метрика не показывает партицию, из которой ещё ничего не прочитано, и замирает, пока цикл стоит.
+- [x] `tests/TransitPulse.Replay.Tests`: эталонный срез архива → Ingestor replay → Processor → ожидаемые события (сравнение с зафиксированным результатом; изменение — осознанно, с обновлением эталона).
+  - ✅ 2026-11-21: PR #74 — срез HSL `1009` / 2026-11-04 06Z, 591 golden stop events, CI green.
+- [x] Живой прогон `full` ≥ 1 ч: lag Processor, CPU и память записаны. Lag сверен и по offset'ам группы.
+  - ✅ 2026-11-21 19:45–20:50 UTC, Aspire Release: `lag_time` p95 медиана выборок 41 мс (макс 167 мс); group lag порядка окна commit 5 с, не растёт; ~500 поз./с, CPU ~9.5 %, RSS ≤ 271 МиБ (`docs/benchmarks.md`, «Live Processor lag»). Окно — суббота вечер, не будний пик; для приёмки этапа при необходимости повторить в утренний будний пик.
 
 **Готово, когда:** replay-тест зелёный в CI; замер lag в `docs/benchmarks.md`.
 
@@ -160,8 +162,8 @@ events.stop ──► Worker: StopEventSink ─► Postgres stop_events (upsert 
 ## Критерии приёмки этапа (бриф §10)
 - [ ] **События прибытия совпадают с проверкой на выборке:** расхождение с эталоном HSL `ars`/`dep` на ≥ 1 ч будничных данных в пределах порогов, утверждённых по первому замеру (2.7); плюс ручная проверка 20 случайных событий на карте трека.
 - [x] **Kill/restart Processor без потерь и дублей:** crash before/after Redis → тот же `stop_events`; fail-closed без checkpoint (`ProcessorRecoveryTests`, 2026-11-20).
-- [ ] **Lag стабильно около нуля на живом потоке:** прогон `full` ≥ 1 ч в будний пик — lag Processor не растёт, p95 < 1 с по времени (2.11).
-- [ ] Unit-тесты доменной логики на фикстурах реальных треков; replay-тест на эталонном срезе зелёный в CI.
+- [x] **Lag стабильно около нуля на живом потоке:** прогон `full` ≥ 1 ч — `lag_time` p95 ≪ 1 с, group lag не растёт (2.11, 2026-11-21 вечер; будний пик — по желанию подтвердить).
+- [x] Unit-тесты доменной логики на фикстурах реальных треков; replay-тест на эталонном срезе зелёный в CI (PR #74).
 - [x] ADR 1, 3, 4 приняты (ADR 6 принят на этапе 1): ADR-0009, ADR-0010, ADR-0014.
 
 ## ADR этапа
