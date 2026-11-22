@@ -4,19 +4,20 @@ Real-time public transport monitoring on open data from Helsinki (HSL), Bergen (
 
 ## Status
 
-Early development. Stage 1 "Data collection" is done: live data from the three cities has been collected 24/7 since October 2026 and normalized into one position model. Next is stage 2 — stream processing (map matching, arrivals, delays). Progress is tracked in [milestones](https://github.com/starmucks/transit-pulse/milestones) and [docs/progress.md](docs/progress.md).
+Early development. Stages 1–2 are done: live data from the three cities has been collected 24/7 since October 2026, and Helsinki positions are turned into stop events, delays and bunching anomalies. Next is stage 3 — storage, API and a live map (first demo). Progress is tracked in [milestones](https://github.com/starmucks/transit-pulse/milestones) and [docs/progress.md](docs/progress.md).
 
 ## What works today
 
-- **Ingestor** (.NET 10, Native AOT) receives ten feeds: vehicle positions of the three cities, official arrival predictions, service alerts and weather. Every response is archived as received, in hourly Parquet + zstd files, so normalization can be re-run after a fix.
+- **Ingestor** (.NET 10, Native AOT) receives ten feeds: vehicle positions of the three cities, official arrival predictions, service alerts and weather. Every response is archived as received, in hourly Parquet + zstd files, so normalization can be re-run after a fix. A separate `hsl-stop` MQTT feed archives HSL’s own arrival/departure events as ground truth.
 - Three adapters turn MQTT JSON, incremental SIRI XML and GTFS-Realtime protobuf into one `VehiclePosition` and publish it to the Kafka topic `positions.raw`, keyed by vehicle.
-- Duplicate and stale positions are dropped and counted by reason; failing feeds restart with backoff; a feed that goes silent raises a health-check warning.
-- **Replay** plays the archive back through the same pipeline at ×1…×50 or as fast as possible; a 30-minute live run and its replay produced identical per-feed counts.
-- Measured weekday peak: HSL ~1,540 MQTT messages/s, ~1,240 published positions/s across the three cities. Method and tables: [docs/benchmarks.md](docs/benchmarks.md).
+- **Worker** imports GTFS schedule snapshots into Postgres (versioned partitions) and upserts stop events from `events.stop` into `stop_events`.
+- **Processor** (Helsinki) matches each position to its scheduled trip and route shape, detects stop arrivals/departures/passes, enriches delay, and emits bunching anomalies. State is checkpointed in Redis before Kafka offsets are committed; a kill/restart leaves the same `stop_events`. Unprocessable records go to a DLQ.
+- **Replay** plays the archive back through the same pipeline at ×1…×50 or as fast as possible; a CI regression compares a tram-9 hour slice to golden stop events.
+- Measured weekday peak: HSL ~1,540 MQTT messages/s, ~1,240 published positions/s across the three cities. Stop detection vs HSL ground truth and live Processor lag are in [docs/benchmarks.md](docs/benchmarks.md).
 
 ## What it will do
 
-- A live map of every vehicle, highlighting the late ones.
+- A live map of every vehicle, highlighting the late ones (stage 3).
 - Arrival predictions from a model trained on collected trip history, compared openly against the operators' own predictions.
 - Plain-language explanations of delays, built only from real data (weather, incidents, service alerts).
 - Telegram notifications for the lines and stops you care about.
@@ -55,7 +56,7 @@ dotnet run --project src/TransitPulse.AppHost
 
 The Postgres password is written into the data volume on first start. To change it later, also remove the volume: `docker volume rm transit-pulse-postgres` (this deletes local data).
 
-The AppHost also runs the Ingestor in `full` mode: it archives raw data to `data/archive/` and publishes positions to Redpanda (visible in Redpanda Console, topic `positions.raw`).
+The AppHost also runs the Ingestor in `full` mode (archives to `data/archive/`, publishes to `positions.raw`), the **Processor** (enriched positions, stop events, anomalies) and the **Worker** (GTFS import and `StopEventSink`). Topics are visible in Redpanda Console.
 
 ### Ingestor modes and archive tools
 

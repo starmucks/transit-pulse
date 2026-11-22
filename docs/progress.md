@@ -42,3 +42,23 @@ Short notes per stage or week: what was done, what was learned about the system,
 - No collection on 2026-10-21 10:24–19:15 UTC (server move); no schedule snapshots before 20–21.10.
 - A local `full` run shared the server's `ET-Client-Name` and both hit Entur's rate limit; local runs now use their own client name.
 - The stage took 2.5 weeks instead of 1.5.
+
+## Stage 2 — Stream processing (2026-11-02 … 2026-11-22)
+
+**Done**
+- GTFS static pipeline: streaming reader and snapshot sanity check, versioned import into Postgres via binary `COPY` and partition attach, Worker on a daily schedule ([ADR-0008](adr/0008-store-gtfs-snapshots-as-partitions-with-plain-sql-migrations.md)).
+- Processor skeleton: consumer group on `positions.raw`, plausibility filter, topics for enriched positions, stop events, anomalies and DLQ; one process-wide loop keyed by vehicle ([ADR-0009](adr/0009-build-a-modular-monolith-with-four-deployable-units.md), [ADR-0010](adr/0010-key-positions-by-vehicle-and-process-them-in-one-loop.md)).
+- Trip lookup (≥ 95 % of HSL positions with a trip id), map matching with a forward-only re-anchor window ([ADR-0011](adr/0011-match-positions-to-the-route-in-a-window-and-re-anchor-only-forward.md)), stop arrival/departure/passed detection compared to HSL `hsl-stop` ground truth, schedule delay enrichment, bunching episodes ([ADR-0013](adr/0013-detect-bunching-in-one-process-from-scheduled-headways.md)).
+- Recovery: Redis state checkpoint before offset commit, fail-closed without a checkpoint, DLQ after N failures, idempotent `StopEventSink` into Postgres ([ADR-0014](adr/0014-checkpoint-processor-state-before-committing-offsets.md)); kill/restart integration tests green.
+- Replay regression on an HSL tram-9 hour slice in CI; live Processor lag ≥ 1 h recorded; stage-1 leftovers (#36/#50) and a 20-event map spot-check for acceptance.
+
+**Learned**
+- HSL stop events are a usable automatic ground truth (weekday peak hour: calls found ≥ 97 %, class match ≥ 95 %, absolute p95 time ≤ 10 s), but trains stay a known weak spot — platforms sit tens of metres off the GTFS shape.
+- One Processor thread clears the C2 budget locally (~100k msg/s with trip lookup and matching vs a 12k target); bunching still forces a singleton until route-keyed repartitioning.
+- At-least-once plus deterministic event ids and upsert sinks is enough for “no loss, no duplicates after restart” without Kafka transactions.
+- Collection can look healthy while throughput collapses; `health.sh` now fails on broker reconnect storms and on hours that fall below 70 % of the same weekday hour a week ago.
+
+**Problems**
+- Host network packet loss still affects the collector (worked around, not fixed).
+- Live lag acceptance used a Saturday evening window; a weekday morning peak re-check remains optional.
+- Local Processor fail-closes if Redpanda has committed offsets but Redis has no matching checkpoint (reset the volume or the group).

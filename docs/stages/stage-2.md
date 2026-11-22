@@ -1,6 +1,6 @@
 # Этап 2. Обработка потока
 
-> **Статус:** утверждена автором 2026-11-02 · **Срок:** 2 недели (бриф: недели 2–3) · **Бриф:** §10 «Этап 2», §6.3–6.4 · **Milestone:** `Stage 2 — Stream processing`
+> **Статус:** закрыт 2026-11-22 (утверждена автором 2026-11-02) · **Срок:** 2 недели (бриф: недели 2–3; факт — ~3 недели) · **Бриф:** §10 «Этап 2», §6.3–6.4 · **Milestone:** `Stage 2 — Stream processing`
 
 ## Цель
 Превратить поток позиций `positions.raw` в факты о движении: где машина на маршруте, когда она прибыла на остановку и уехала, насколько опаздывает, не слиплась ли с соседней. Без потерь и без дублей на выходе при рестарте Processor.
@@ -170,11 +170,19 @@ events.stop ──► Worker: StopEventSink ─► Postgres stop_events (upsert 
 - [x] Unit-тесты доменной логики на фикстурах реальных треков; replay-тест на эталонном срезе зелёный в CI (PR #74).
 - [x] ADR 1, 3, 4 приняты (ADR 6 принят на этапе 1): ADR-0009, ADR-0010, ADR-0014.
 
+## Итог этапа
+- Задачи #36, #39–#50, #56, #58 закрыты (PR #52–#77). Срок чуть дольше плана (~3 недели вместо 2): приёмка детекции и слипания ждала замеров на полном часе, recovery и replay — интеграционных тестов с Testcontainers.
+- Перенесено / по желанию позже: повтор live lag в **будний утренний пик** (замер 2.11 — суббота вечер; для «пикового» C3).
+- Известные ограничения остаются в STATUS: привязка поездов и двусторонних улиц (ADR-0011), Processor singleton до route-keyed repartitioning (ADR-0013).
+- Processor и Worker крутятся локально в Aspire; сбор на сервере не останавливался. Этап 3 — хранение, API и живая карта (первое демо).
+
 ## ADR этапа
 - ADR-0009 (ADR 1 брифа) — Modular monolith with four deployable units (Worker появился в 2.3; ADR — в 2.4 вместе с Processor, решение автора 2026-11-02).
 - ADR-0010 (ADR 3 брифа) — Key positions by vehicle and process them in one loop (задача 2.4).
 - ADR-0014 (ADR 4 брифа) — Checkpoint Processor state before committing offsets; at-least-once + idempotent `StopEventSink` (задача 2.10).
 - ADR-0008 — Store GTFS snapshots as partitions, with plain SQL migrations (задача 2.3).
+- ADR-0011 — Match positions to the route in a window and re-anchor only forward (задача 2.6).
+- ADR-0013 — Detect bunching with process-wide state (задача 2.9).
 
 ## Решения, принятые в этой спецификации (утверждены 2026-11-02)
 1. **Processor этапа 2 — только Хельсинки**, импортёр расписаний — сразу для трёх городов (только разбор и загрузка). Так по брифу (этап 4), а общий импортёр проверяется на разных снимках с первого дня.
