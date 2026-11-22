@@ -117,16 +117,36 @@ public sealed class PositionConsumerTests(RedpandaFixture redpanda) : IClassFixt
         return received;
     }
 
-    /// <summary>The offsets the group has committed for the topic's partitions, summed: how many messages it finished.</summary>
+    /// <summary>
+    /// Offsets the group has committed for the topic's partitions, summed. Uses AdminClient so a poll does not join
+    /// the live group (that rebalance flaked CI with "Broker: Not coordinator").
+    /// </summary>
     private long CommittedTotal(string input)
     {
-        using var client = new ConsumerBuilder<string, byte[]>(new ConsumerConfig
+        var groupId = $"{input}-group";
+        using var admin = new AdminClientBuilder(new AdminClientConfig
         {
             BootstrapServers = redpanda.BootstrapServers,
-            GroupId = $"{input}-group",
         }).Build();
-        var partitions = Enumerable.Range(0, 3).Select(partition => new TopicPartition(input, partition));
-        return client.Committed(partitions, TimeSpan.FromSeconds(10)).Where(offset => offset.Offset.Value >= 0).Sum(offset => offset.Offset.Value);
+        var partitions = Enumerable.Range(0, 3)
+            .Select(partition => new TopicPartition(input, new Partition(partition)))
+            .ToList();
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                var results = admin.ListConsumerGroupOffsetsAsync(
+                    [new ConsumerGroupTopicPartitions(groupId, partitions)]).GetAwaiter().GetResult();
+                return results
+                    .SelectMany(result => result.Partitions)
+                    .Where(partition => !partition.Error.IsError && partition.Offset.Value >= 0)
+                    .Sum(partition => partition.Offset.Value);
+            }
+            catch (KafkaException) when (attempt < 9)
+            {
+                Thread.Sleep(200);
+            }
+        }
     }
 
     [Fact]

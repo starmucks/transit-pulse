@@ -182,32 +182,50 @@ public sealed class ReplayRegressionTests : IClassFixture<RedpandaFixture>, ICla
 
     private async Task WaitUntilCaughtUpAsync(string input, string groupId, int published)
     {
+        // AdminClient reads offsets without joining the Processor's group. A second Consumer with the same
+        // GroupId (the old Committed() poll) rebalances Redpanda and flaked CI with "Broker: Not coordinator".
+        using var admin = new AdminClientBuilder(new AdminClientConfig
+        {
+            BootstrapServers = _redpanda.BootstrapServers,
+        }).Build();
+        var partitions = Enumerable.Range(0, 3)
+            .Select(partition => new TopicPartition(input, new Partition(partition)))
+            .ToList();
+
         var deadline = DateTime.UtcNow.AddMinutes(10);
+        long last = 0;
         while (DateTime.UtcNow < deadline)
         {
-            if (CommittedTotal(input, groupId) >= published)
+            try
             {
-                return;
+                last = await CommittedTotalAsync(admin, groupId, partitions);
+                if (last >= published)
+                {
+                    return;
+                }
+            }
+            catch (KafkaException)
+            {
+                // Transient coordinator blips while the Processor group is still settling
+                // (includes ListConsumerGroupOffsetsException).
             }
 
             await Task.Delay(500, Ct);
         }
 
         throw new TimeoutException(
-            $"Processor committed {CommittedTotal(input, groupId)} of {published} positions within 10 minutes.");
+            $"Processor committed {last} of {published} positions within 10 minutes.");
     }
 
-    private long CommittedTotal(string input, string groupId)
+    private static async Task<long> CommittedTotalAsync(
+        IAdminClient admin, string groupId, IReadOnlyList<TopicPartition> partitions)
     {
-        using var client = new ConsumerBuilder<string, byte[]>(new ConsumerConfig
-        {
-            BootstrapServers = _redpanda.BootstrapServers,
-            GroupId = groupId,
-        }).Build();
-        var partitions = Enumerable.Range(0, 3).Select(partition => new TopicPartition(input, new Partition(partition)));
-        return client.Committed(partitions, TimeSpan.FromSeconds(10))
-            .Where(offset => offset.Offset.Value >= 0)
-            .Sum(offset => offset.Offset.Value);
+        var results = await admin.ListConsumerGroupOffsetsAsync(
+            [new ConsumerGroupTopicPartitions(groupId, partitions.ToList())]);
+        return results
+            .SelectMany(result => result.Partitions)
+            .Where(partition => !partition.Error.IsError && partition.Offset.Value >= 0)
+            .Sum(partition => partition.Offset.Value);
     }
 
     private List<GoldenStopEvent> ReadStopEvents(string topic)
