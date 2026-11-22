@@ -715,7 +715,8 @@ Stage 2 acceptance also asks for a **manual check of 20 random events on a map t
 track fixtures (same weekday peak hour 2026-11-04 06Z as above) were sampled with seed `20261122` via
 `tools/map-spot-check/build_spot_check.py`: one stratified draw across `bus`, `tram`, `loop`, `detour`, `terminal` and
 `train`, then filled to 20 from the remaining `ars` / `dep` / `pas` HSL reference events. Each panel plots the GTFS
-shape, a ±45 s GPS window, the stop and the nearest vehicle fix at the event time on OpenStreetMap.
+shape, a ±45 s GPS window, the stop and the nearest vehicle fix at the event time in one MapLibre map with an event
+list (OpenFreeMap tiles; a 20-panel grid hits the browser WebGL context limit).
 
 | Check | Result |
 |---|---|

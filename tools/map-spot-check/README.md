@@ -1,8 +1,12 @@
 # Stop-event map spot-check
 
-Builds a Leaflet page of **20 random** HSL stop events (`ars` / `dep` / `pas`) from the Domain track
+Builds a **MapLibre GL** page of **20 random** HSL stop events (`ars` / `dep` / `pas`) from the Domain track
 fixtures (`tests/TransitPulse.Domain.Tests/Fixtures/tracks`, archive hour 2026-11-04 06Z) so a reviewer can see the
-GPS track, the GTFS stop and the vehicle position at the event time on OpenStreetMap.
+GPS track, the GTFS stop and the vehicle position at the event time. Tiles come from
+[OpenFreeMap](https://openfreemap.org/) (OSM-based, no API key) — the same MapLibre stack planned for stage 3.
+
+One shared map plus an event list (↑/↓ or `j`/`k`): browsers limit concurrent WebGL contexts, so twenty MapLibre
+canvases blank out.
 
 ```powershell
 python tools/map-spot-check/build_spot_check.py
