@@ -34,6 +34,10 @@ __pycache__/
 /tools/live-lag-sample/*.out
 /tools/live-lag-sample/*.err
 
+# Map spot-check generated page (rebuild with build_spot_check.py)
+/tools/map-spot-check/spot-check.html
+/tools/map-spot-check/spot-check-summary.json
+
 # Secrets: never committed, only *.example templates are
 .env
 *.local.json
