@@ -106,9 +106,7 @@ internal static partial class ArchivePositionProfile
                 var local = TimeZoneInfo.ConvertTime(hour, zone);
                 var weekend = local.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ? 1 : 0;
                 var (positions, dropped) = hours.GetValueOrDefault(hour);
-                var slot = slots[weekend, local.Hour] ??= new ArchiveProfile.SlotStats();
-                slot.Add(positions / 3600.0);
-                slot.AddDuplicates(dropped);
+                (slots[weekend, local.Hour] ??= new ArchiveProfile.SlotStats()).AddDuplicateSample(positions / 3600.0, dropped);
             }
 
             await output.WriteLineAsync($"{feed} positions ({zone.Id} local time, UTC {from:yyyy-MM-dd} to {to:yyyy-MM-dd})");

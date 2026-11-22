@@ -114,9 +114,7 @@ internal static class ArchiveProfile
                 var local = TimeZoneInfo.ConvertTime(hour, zone);
                 var weekend = local.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ? 1 : 0;
                 var (records, bytes) = hours.GetValueOrDefault(hour);
-                var slot = slots[weekend, local.Hour] ??= new SlotStats();
-                slot.Add(records / 3600.0);
-                slot.AddBytes(bytes);
+                (slots[weekend, local.Hour] ??= new SlotStats()).AddBytesSample(records / 3600.0, bytes);
             }
 
             await output.WriteLineAsync($"{feed} ({zone.Id} local time, UTC {from:yyyy-MM-dd} to {to:yyyy-MM-dd})");
@@ -180,15 +178,25 @@ internal static class ArchiveProfile
         /// <summary>Duplicate positions summed across samples of this slot (<see cref="ArchivePositionProfile"/>).</summary>
         public long DuplicateCount { get; private set; }
 
-        public void Add(double rate)
+        /// <summary>One sample for the archive flow profile: rate plus archived bytes.</summary>
+        public void AddBytesSample(double rate, long bytes)
+        {
+            AddRate(rate);
+            ByteSum += bytes;
+        }
+
+        /// <summary>One sample for the position profile: rate plus duplicate positions.</summary>
+        public void AddDuplicateSample(double rate, long duplicates)
+        {
+            AddRate(rate);
+            DuplicateCount += duplicates;
+        }
+
+        private void AddRate(double rate)
         {
             Count++;
             RateSum += rate;
             RateMax = Math.Max(RateMax, rate);
         }
-
-        public void AddBytes(long bytes) => ByteSum += bytes;
-
-        public void AddDuplicates(long duplicates) => DuplicateCount += duplicates;
     }
 }

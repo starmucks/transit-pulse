@@ -10,12 +10,20 @@ namespace TransitPulse.Ingestor.Tests.Feeds;
 internal static class ContractExpectations
 {
     /// <summary>True when the line is a drop expectation; <paramref name="reason"/> is the metric reason after <c>null</c>.</summary>
+    /// <exception cref="FormatException">The line is bare <c>null</c> or <c>null</c> without a non-empty reason.</exception>
     public static bool IsDrop(string line, out string reason)
     {
         const string Prefix = "null ";
-        if (line.StartsWith(Prefix, StringComparison.Ordinal) && line.Length > Prefix.Length)
+        if (line.Equals("null", StringComparison.Ordinal)
+            || (line.StartsWith("null", StringComparison.Ordinal)
+                && (line.Length == 4 || line[4] == ' ')))
         {
-            reason = line[Prefix.Length..];
+            reason = line.Length > Prefix.Length ? line[Prefix.Length..] : "";
+            if (string.IsNullOrWhiteSpace(reason))
+            {
+                throw new FormatException($"Contract drop must be 'null <reason>', got '{line}'.");
+            }
+
             return true;
         }
 
