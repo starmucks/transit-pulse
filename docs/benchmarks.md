@@ -709,6 +709,23 @@ directly; it uses the same hour and 120 s boundary allowance as the event table.
   This hour passes all four. Train quality is a known limitation rather than hidden by the overall bounds; per-mode
   route/stop tolerances are future work, not part of task 2.7.
 
+### Stop events on the map
+
+Stage 2 acceptance also asks for a **manual check of 20 random events on a map track**. On 2026-11-22 the Domain
+track fixtures (same weekday peak hour 2026-11-04 06Z as above) were sampled with seed `20261122` via
+`tools/map-spot-check/build_spot_check.py`: one stratified draw across `bus`, `tram`, `loop`, `detour`, `terminal` and
+`train`, then filled to 20 from the remaining `ars` / `dep` / `pas` HSL reference events. Each panel plots the GTFS
+shape, a ±45 s GPS window, the stop and the nearest vehicle fix at the event time on OpenStreetMap.
+
+| Check | Result |
+|---|---|
+| Arrivals (`ars`) in the sample (6) | Vehicle within 1–18 m of the stop; markers sit on the stop / platform |
+| Departures / passes on bus, tram, loop, detour, terminal (13) | Vehicle on the same street or track past the stop (35–99 m); expected once the vehicle has left HSL's stop zone |
+| Train departure in the sample (1) | 402 m from the stop at `dep` (163 m already at `ars`) — same long-platform / off-shape train limit recorded above; not a phantom call |
+
+**Verdict:** 19 of 20 events look geographically correct on the track; the train outlier matches the known 2.7
+limitation rather than a detector bug. Re-run: `python tools/map-spot-check/build_spot_check.py`.
+
 ## Schedule delay against HSL
 
 Task 2.8 recomputes delay at each detected arrival as `actual arrival − scheduled arrival`, positive when late. The
