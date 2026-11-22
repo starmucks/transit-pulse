@@ -20,7 +20,7 @@
 - **Adapters clean values per vehicle:** a source value `VehiclePosition` would reject (NaN speed, missing time)
   becomes `null` or skips that one vehicle; throwing from `Normalize` drops the whole message (a snapshot of hundreds).
   A skipped vehicle is reported to `IPositionDrops` with a `PositionMetrics` reason; contract tests expect one drop
-  per `null` line.
+  per `null <reason>` line and check the reason.
 - **Feed silence limits** (`MaxSilence`) are set from measured gaps in the archive, not from the poll interval alone;
   feeds whose unchanged responses are skipped (alerts, weather) have none.
 - **SIRI XML only through `XmlReader`** (responses reach several MB; no `XDocument`/`XmlDocument`).

@@ -1,5 +1,3 @@
-using System.Globalization;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
 using TransitPulse.Ingestor.Archive;
 using TransitPulse.Ingestor.Feeds.Hsl;
 using TransitPulse.Ingestor.Feeds.Http;
@@ -25,20 +23,22 @@ if (args is ["--stats", var statsInput])
 
 if (args is ["--profile", var profileInput, var profileFrom, var profileTo])
 {
-    return await ArchiveProfile.RunAsync(
-        profileInput,
-        DateOnly.ParseExact(profileFrom, "yyyy-MM-dd", CultureInfo.InvariantCulture),
-        DateOnly.ParseExact(profileTo, "yyyy-MM-dd", CultureInfo.InvariantCulture),
-        Console.Out);
+    if (!ArchiveProfile.TryParseDateRange(profileFrom, profileTo, out var from, out var to, Console.Error))
+    {
+        return ArchiveProfile.UsageExitCode;
+    }
+
+    return await ArchiveProfile.RunAsync(profileInput, from, to, Console.Out);
 }
 
 if (args is ["--profile-positions", var positionsInput, var positionsFrom, var positionsTo])
 {
-    return await ArchivePositionProfile.RunAsync(
-        positionsInput,
-        DateOnly.ParseExact(positionsFrom, "yyyy-MM-dd", CultureInfo.InvariantCulture),
-        DateOnly.ParseExact(positionsTo, "yyyy-MM-dd", CultureInfo.InvariantCulture),
-        Console.Out);
+    if (!ArchiveProfile.TryParseDateRange(positionsFrom, positionsTo, out var from, out var to, Console.Error))
+    {
+        return ArchiveProfile.UsageExitCode;
+    }
+
+    return await ArchivePositionProfile.RunAsync(positionsInput, from, to, Console.Out);
 }
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -68,8 +68,7 @@ if (mode != IngestorMode.Archive)
 builder.Services.AddHostedService<IngestionPipeline>();
 
 // Run in process, not served over HTTP: the collector has no web server, and memory is its tightest limit.
-builder.Services.AddHealthChecks().AddCheck<FeedSilenceHealthCheck>(FeedSilenceHealthCheck.Name);
-builder.Services.AddSingleton<IHealthCheckPublisher, FeedSilenceLog>();
+builder.Services.AddFeedSilenceMonitoring();
 
 // Covers the pipeline's drain budget plus closing every open hour on a slow CPU; an unclosed file loses its unflushed
 // records. The service manager's stop timeout must be longer than this.

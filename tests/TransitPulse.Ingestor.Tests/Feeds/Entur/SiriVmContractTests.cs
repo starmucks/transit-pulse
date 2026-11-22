@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Text;
-using TransitPulse.Domain;
 using TransitPulse.Ingestor.Feeds.Entur;
 using TransitPulse.Ingestor.Pipeline;
 using TransitPulse.Ingestor.Tests.Normalization;
@@ -19,7 +17,7 @@ public sealed class SiriVmContractTests
     {
         var payload = File.ReadAllBytes(Path.Combine(_directory, $"{name}.xml"));
         var lines = File.ReadAllLines(Path.Combine(_directory, $"{name}.expected.jsonl"));
-        var expected = lines.Where(line => line != "null").Select(line => PositionMessage.Parse(Encoding.UTF8.GetBytes(line)));
+        var expected = ContractExpectations.Positions(lines);
         var record = new RawRecord(
             SiriVmPositionNormalizer.RawFeedId, DateTimeOffset.Parse(receivedAt, CultureInfo.InvariantCulture), payload, Topic: null);
 
@@ -29,7 +27,7 @@ public sealed class SiriVmContractTests
         // One line per record: a record added to the fixture without an expectation fails here.
         Assert.Equal(lines.Length, SiriVmReader.Read(new MemoryStream(payload)).Count());
         Assert.Equal(expected, positions);
-        // Every record without a position is counted with a reason: nothing is dropped silently.
-        Assert.Equal(lines.Count(line => line == "null"), drops.Reasons.Count);
+        // Every record without a position is counted with its reviewed reason: nothing is dropped silently.
+        Assert.Equal(ContractExpectations.DropReasons(lines), drops.Reasons);
     }
 }

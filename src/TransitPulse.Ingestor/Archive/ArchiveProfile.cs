@@ -24,6 +24,32 @@ internal static class ArchiveProfile
         ("mbta", "America/New_York", "Eastern Standard Time"),
     ];
 
+    /// <summary>UTC day format accepted by <c>--profile</c> and <c>--profile-positions</c>.</summary>
+    public const string DateFormat = "yyyy-MM-dd";
+
+    /// <summary>Exit code when the CLI date arguments are missing, malformed or an empty range.</summary>
+    public const int UsageExitCode = 2;
+
+    /// <summary>
+    /// Parses the exclusive UTC day range for the profile commands. On failure writes a short usage line and returns
+    /// false so the process can exit with <see cref="UsageExitCode"/> instead of throwing.
+    /// </summary>
+    public static bool TryParseDateRange(string fromText, string toText, out DateOnly from, out DateOnly to, TextWriter errors)
+    {
+        from = default;
+        to = default;
+        if (!DateOnly.TryParseExact(fromText, DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out from)
+            || !DateOnly.TryParseExact(toText, DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out to)
+            || to <= from)
+        {
+            errors.WriteLine(
+                $"Usage: TransitPulse.Ingestor --profile|--profile-positions <archive> <from:{DateFormat}> <to:{DateFormat}> (UTC, to exclusive and after from)");
+            return false;
+        }
+
+        return true;
+    }
+
     /// <summary>Prints the profile of every feed with archive files in the range.</summary>
     /// <param name="archiveDirectory">Archive root in the <c>feed/date/name.parquet</c> layout.</param>
     /// <param name="from">First UTC day of the range.</param>
@@ -88,7 +114,9 @@ internal static class ArchiveProfile
                 var local = TimeZoneInfo.ConvertTime(hour, zone);
                 var weekend = local.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ? 1 : 0;
                 var (records, bytes) = hours.GetValueOrDefault(hour);
-                (slots[weekend, local.Hour] ??= new SlotStats()).Add(records / 3600.0, bytes);
+                var slot = slots[weekend, local.Hour] ??= new SlotStats();
+                slot.Add(records / 3600.0);
+                slot.AddBytes(bytes);
             }
 
             await output.WriteLineAsync($"{feed} ({zone.Id} local time, UTC {from:yyyy-MM-dd} to {to:yyyy-MM-dd})");
@@ -110,7 +138,7 @@ internal static class ArchiveProfile
     private static string Format(SlotStats? slot) => slot is null
         ? $"{0,4} {"-",9} {"-",9} {"-",8}"
         : string.Create(CultureInfo.InvariantCulture,
-            $"{slot.Count,4} {slot.RateSum / slot.Count,9:F2} {slot.RateMax,9:F2} {slot.Extra / 1048576.0 / slot.Count,8:F1}");
+            $"{slot.Count,4} {slot.RateSum / slot.Count,9:F2} {slot.RateMax,9:F2} {slot.ByteSum / 1048576.0 / slot.Count,8:F1}");
 
     // Names are "{feed}-{yyyyMMdd}T{HH}Z-{n}.parquet"; the hour is the UTC hour the records were received in.
     private static bool TryParseHour(string path, out DateTimeOffset hour)
@@ -137,7 +165,7 @@ internal static class ArchiveProfile
         return TimeZoneInfo.Utc;
     }
 
-    // One hour of the day for one day type: a sample per day with its rate, plus a second amount summed (bytes here).
+    // One hour of the day for one day type: a sample per day with its rate; profiles add either bytes or duplicates.
     internal sealed class SlotStats
     {
         public int Count { get; private set; }
@@ -146,14 +174,21 @@ internal static class ArchiveProfile
 
         public double RateMax { get; private set; }
 
-        public long Extra { get; private set; }
+        /// <summary>Archived bytes summed across samples of this slot (<see cref="ArchiveProfile"/>).</summary>
+        public long ByteSum { get; private set; }
 
-        public void Add(double rate, long extra)
+        /// <summary>Duplicate positions summed across samples of this slot (<see cref="ArchivePositionProfile"/>).</summary>
+        public long DuplicateCount { get; private set; }
+
+        public void Add(double rate)
         {
             Count++;
             RateSum += rate;
             RateMax = Math.Max(RateMax, rate);
-            Extra += extra;
         }
+
+        public void AddBytes(long bytes) => ByteSum += bytes;
+
+        public void AddDuplicates(long duplicates) => DuplicateCount += duplicates;
     }
 }

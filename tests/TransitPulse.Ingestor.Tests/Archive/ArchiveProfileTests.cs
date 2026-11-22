@@ -71,6 +71,35 @@ public sealed class ArchiveProfileTests : IDisposable
         Assert.Equal(TimeSpan.FromHours(summerOffset), zone.GetUtcOffset(new DateTimeOffset(2026, 7, 15, 12, 0, 0, TimeSpan.Zero)));
     }
 
+    [Theory]
+    [InlineData("not-a-date", "2026-10-27")]
+    [InlineData("2026-10-26", "26/10/2026")]
+    [InlineData("2026-10-26", "2026-10-26")]
+    [InlineData("2026-10-27", "2026-10-26")]
+    public void Invalid_or_empty_date_range_prints_usage_and_is_rejected(string from, string to)
+    {
+        var errors = new StringWriter();
+
+        var ok = ArchiveProfile.TryParseDateRange(from, to, out _, out _, errors);
+
+        Assert.False(ok);
+        Assert.Contains("Usage:", errors.ToString(), StringComparison.Ordinal);
+        Assert.Equal(2, ArchiveProfile.UsageExitCode);
+    }
+
+    [Fact]
+    public void Valid_exclusive_date_range_is_accepted()
+    {
+        var errors = new StringWriter();
+
+        var ok = ArchiveProfile.TryParseDateRange("2026-10-26", "2026-10-27", out var from, out var to, errors);
+
+        Assert.True(ok);
+        Assert.Equal(new DateOnly(2026, 10, 26), from);
+        Assert.Equal(new DateOnly(2026, 10, 27), to);
+        Assert.Empty(errors.ToString());
+    }
+
     private async Task WriteAsync(string name, int records)
     {
         var dash = name.LastIndexOf('-');
