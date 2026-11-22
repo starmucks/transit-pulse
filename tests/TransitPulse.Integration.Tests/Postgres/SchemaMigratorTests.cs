@@ -17,11 +17,13 @@ public sealed class SchemaMigratorTests(PostgresFixture postgres) : IClassFixtur
 
         Assert.Contains("0001_gtfs_schema", first);
         Assert.Contains("0002_stop_events", first);
+        Assert.Contains("0003_warm_storage", first);
         Assert.Empty(second);
         Assert.Equal(
             ["calendar", "calendar_dates", "routes", "shapes", "stop_times", "stops", "trips"],
             await PartitionedTablesAsync(database, "gtfs"));
         Assert.True(await TableExistsAsync(database, "public", "stop_events"));
+        Assert.True(await TableExistsAsync(database, "public", "vehicle_positions"));
     }
 
     [Fact]
