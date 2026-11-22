@@ -106,7 +106,7 @@ internal static partial class ArchivePositionProfile
                 var local = TimeZoneInfo.ConvertTime(hour, zone);
                 var weekend = local.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ? 1 : 0;
                 var (positions, dropped) = hours.GetValueOrDefault(hour);
-                (slots[weekend, local.Hour] ??= new ArchiveProfile.SlotStats()).Add(positions / 3600.0, dropped);
+                (slots[weekend, local.Hour] ??= new ArchiveProfile.SlotStats()).AddDuplicateSample(positions / 3600.0, dropped);
             }
 
             await output.WriteLineAsync($"{feed} positions ({zone.Id} local time, UTC {from:yyyy-MM-dd} to {to:yyyy-MM-dd})");
@@ -129,7 +129,9 @@ internal static partial class ArchivePositionProfile
         }
 
         var published = slot.RateSum * 3600;
-        var share = published + slot.Extra > 0 ? (100.0 * slot.Extra / (published + slot.Extra)).ToString("F1", CultureInfo.InvariantCulture) : "-";
+        var share = published + slot.DuplicateCount > 0
+            ? (100.0 * slot.DuplicateCount / (published + slot.DuplicateCount)).ToString("F1", CultureInfo.InvariantCulture)
+            : "-";
         return string.Create(CultureInfo.InvariantCulture,
             $"{slot.Count,4} {slot.RateSum / slot.Count,9:F2} {slot.RateMax,9:F2} {share,6}");
     }

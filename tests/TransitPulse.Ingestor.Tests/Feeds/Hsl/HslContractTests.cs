@@ -38,13 +38,21 @@ public sealed class HslContractTests
             DateTimeOffset.Parse((string)message["receivedAt"]!, CultureInfo.InvariantCulture),
             Encoding.UTF8.GetBytes((string)message["payload"]!),
             (string)message["topic"]!);
-        VehiclePosition? expected = _expected[line] == "null" ? null : PositionMessage.Parse(Encoding.UTF8.GetBytes(_expected[line]));
+        var drop = ContractExpectations.IsDrop(_expected[line], out var reason);
+        VehiclePosition? expected = drop ? null : PositionMessage.Parse(Encoding.UTF8.GetBytes(_expected[line]));
 
         var drops = new DropLog();
         var positions = new HslPositionNormalizer().Normalize(record, drops);
 
         Assert.Equal(expected, Assert.Single(positions.DefaultIfEmpty()));
         // A message without a position is counted with a reason: nothing is dropped silently.
-        Assert.Equal(expected is null ? 1 : 0, drops.Reasons.Count);
+        if (drop)
+        {
+            Assert.Equal([reason], drops.Reasons);
+        }
+        else
+        {
+            Assert.Empty(drops.Reasons);
+        }
     }
 }

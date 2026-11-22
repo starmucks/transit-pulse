@@ -71,6 +71,44 @@ public sealed class ArchiveProfileTests : IDisposable
         Assert.Equal(TimeSpan.FromHours(summerOffset), zone.GetUtcOffset(new DateTimeOffset(2026, 7, 15, 12, 0, 0, TimeSpan.Zero)));
     }
 
+    [Theory]
+    [InlineData("--profile", "not-a-date", "2026-10-27")]
+    [InlineData("--profile", "2026-10-26", "26/10/2026")]
+    [InlineData("--profile", "2026-10-26", "2026-10-26")]
+    [InlineData("--profile", "2026-10-27", "2026-10-26")]
+    [InlineData("--profile-positions", "2026-10-26", "2026-10-26")]
+    public async Task Profile_cli_rejects_invalid_or_empty_date_range_with_usage_exit_code(
+        string command, string from, string to)
+    {
+        var output = new StringWriter();
+        var errors = new StringWriter();
+
+        var exitCode = await ArchiveProfileCli.TryRunAsync([command, _dir.FullName, from, to], output, errors, Ct);
+
+        Assert.Equal(ArchiveProfile.UsageExitCode, exitCode);
+        Assert.Contains("Usage:", errors.ToString(), StringComparison.Ordinal);
+        Assert.Empty(output.ToString());
+    }
+
+    [Fact]
+    public void Valid_exclusive_date_range_is_accepted()
+    {
+        var errors = new StringWriter();
+
+        var ok = ArchiveProfile.TryParseDateRange("2026-10-26", "2026-10-27", out var from, out var to, errors);
+
+        Assert.True(ok);
+        Assert.Equal(new DateOnly(2026, 10, 26), from);
+        Assert.Equal(new DateOnly(2026, 10, 27), to);
+        Assert.Empty(errors.ToString());
+    }
+
+    [Fact]
+    public async Task Non_profile_args_are_ignored_by_the_cli_dispatcher()
+    {
+        Assert.Null(await ArchiveProfileCli.TryRunAsync(["--stats", _dir.FullName], new StringWriter(), new StringWriter(), Ct));
+    }
+
     private async Task WriteAsync(string name, int records)
     {
         var dash = name.LastIndexOf('-');

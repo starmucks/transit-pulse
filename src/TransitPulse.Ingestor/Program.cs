@@ -1,8 +1,4 @@
-using System.Globalization;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
 using TransitPulse.Ingestor.Archive;
-using TransitPulse.Ingestor.Feeds.Hsl;
-using TransitPulse.Ingestor.Feeds.Http;
 using TransitPulse.Ingestor.Normalization;
 using TransitPulse.Ingestor.Pipeline;
 using TransitPulse.Ingestor.Replay;
@@ -23,57 +19,13 @@ if (args is ["--stats", var statsInput])
     return await ArchiveStats.RunAsync(statsInput, Console.Out);
 }
 
-if (args is ["--profile", var profileInput, var profileFrom, var profileTo])
+if (await ArchiveProfileCli.TryRunAsync(args, Console.Out, Console.Error) is { } profileExit)
 {
-    return await ArchiveProfile.RunAsync(
-        profileInput,
-        DateOnly.ParseExact(profileFrom, "yyyy-MM-dd", CultureInfo.InvariantCulture),
-        DateOnly.ParseExact(profileTo, "yyyy-MM-dd", CultureInfo.InvariantCulture),
-        Console.Out);
-}
-
-if (args is ["--profile-positions", var positionsInput, var positionsFrom, var positionsTo])
-{
-    return await ArchivePositionProfile.RunAsync(
-        positionsInput,
-        DateOnly.ParseExact(positionsFrom, "yyyy-MM-dd", CultureInfo.InvariantCulture),
-        DateOnly.ParseExact(positionsTo, "yyyy-MM-dd", CultureInfo.InvariantCulture),
-        Console.Out);
+    return profileExit;
 }
 
 var builder = Host.CreateApplicationBuilder(args);
-
-builder.AddServiceDefaults();
-
-var mode = RawSinkRegistration.ReadMode(builder.Configuration);
-builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddRawSink(builder.Configuration);
-if (mode == IngestorMode.Replay)
-{
-    builder.Services.AddReplay();
-}
-else
-{
-    builder.Services.AddHslMqttFeeds(builder.Configuration);
-    builder.Services.AddHttpFeeds(builder.Configuration);
-}
-
-builder.Services.AddSingleton<FeedMetrics>();
-if (mode != IngestorMode.Archive)
-{
-    // Before the pipeline: hosted services stop in reverse order, so the totals come after the last record is published.
-    builder.Services.AddHostedService<RunSummary>();
-}
-
-builder.Services.AddHostedService<IngestionPipeline>();
-
-// Run in process, not served over HTTP: the collector has no web server, and memory is its tightest limit.
-builder.Services.AddHealthChecks().AddCheck<FeedSilenceHealthCheck>(FeedSilenceHealthCheck.Name);
-builder.Services.AddSingleton<IHealthCheckPublisher, FeedSilenceLog>();
-
-// Covers the pipeline's drain budget plus closing every open hour on a slow CPU; an unclosed file loses its unflushed
-// records. The service manager's stop timeout must be longer than this.
-builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = IngestionPipeline.DrainTimeout + TimeSpan.FromSeconds(80));
+var mode = IngestorHost.Configure(builder);
 
 using var host = builder.Build();
 

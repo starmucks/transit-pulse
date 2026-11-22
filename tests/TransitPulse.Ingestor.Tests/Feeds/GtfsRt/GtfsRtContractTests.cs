@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Text;
-using TransitPulse.Domain;
 using TransitPulse.Ingestor.Feeds.GtfsRt;
 using TransitPulse.Ingestor.Pipeline;
 using TransitPulse.Ingestor.Tests.Normalization;
@@ -18,7 +16,7 @@ public sealed class GtfsRtContractTests
     {
         var payload = File.ReadAllBytes(Path.Combine(_directory, "vp.pb"));
         var lines = File.ReadAllLines(Path.Combine(_directory, "vp.expected.jsonl"));
-        var expected = lines.Where(line => line != "null").Select(line => PositionMessage.Parse(Encoding.UTF8.GetBytes(line)));
+        var expected = ContractExpectations.Positions(lines);
         var record = new RawRecord(
             "mbta-vp", DateTimeOffset.Parse("2026-10-26T00:00:03.443Z", CultureInfo.InvariantCulture), payload, Topic: null);
 
@@ -28,7 +26,7 @@ public sealed class GtfsRtContractTests
         // One line per entity: an entity added to the fixture without an expectation fails here.
         Assert.Equal(lines.Length, Rt.FeedMessage.Parser.ParseFrom(payload).Entity.Count);
         Assert.Equal(expected, positions);
-        // Every vehicle without a position is counted with a reason: nothing is dropped silently.
-        Assert.Equal(lines.Count(line => line == "null"), drops.Reasons.Count);
+        // Every vehicle without a position is counted with its reviewed reason: nothing is dropped silently.
+        Assert.Equal(ContractExpectations.DropReasons(lines), drops.Reasons);
     }
 }
