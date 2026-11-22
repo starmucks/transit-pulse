@@ -7,5 +7,10 @@
 - **The schedule read (`RunsOfDays`) changes only with a measurement on a real snapshot.** `MATERIALIZED` keeps its plan
   from flipping after `ANALYZE` (a 30 s timeout was measured); on the test slice every plan is instant, so tests cannot
   catch a slow one (`docs/benchmarks.md`, "Trip lookup").
-- **`stop_events` is a plain table until stage 3.** Upsert by the deterministic event id (`StopEventStore`); hypertable
-  conversion comes with Timescale retention work, not with the Worker sink.
+- **`stop_events` is a Timescale hypertable** (partitioned by `at`, primary key `(id, at)`). Timescale forbids
+  `UNIQUE (id)` without the time column, so `StopEventStore` takes `pg_advisory_xact_lock(hashtextextended(id))`,
+  deletes any prior row for that id in a ±2 day window, then inserts. Kafka `events.stop` retention is 24 h, so
+  repeats land in uncompressed chunks (compress after 7 days); do not expect delete+insert against compressed history.
+  Nullable `delay_sec` feeds `punctuality_by_route_day`; the sink may leave it null until events carry delay.
+- **`vehicle_positions` is the warm thinned series** (hypertable by `observed_at`, 14-day retention, compress after 2 days).
+  The Worker position sink (stage 3.2) writes it; Redis GEO stays the hot layer for the live map.

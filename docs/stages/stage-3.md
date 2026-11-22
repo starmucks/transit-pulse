@@ -31,12 +31,13 @@ API (+ статика web/) ──► локально Aspire / Vite; позже
 Порядок: тёплое хранение и GEO → API и SignalR → фронт → замер/README локально. Публичный деплой (3.9) — после локального демо.
 
 ### 3.1 Схема тёплого хранения (Timescale) (#79)
-- [ ] Hypertable прореженных позиций: `(feed_id, vehicle_id, observed_at, …)` + нужные индексы для bbox/линии и истории короткого окна.
-- [ ] Политика сжатия и retention по брифу §5.1 / §6.5 (ориентир: прореживание 1 точка / 10 с на машину; окно тёплого ряда — согласовать с диском).
-- [ ] `stop_events` → hypertable (миграция 0002 уже оставила это на этап 3); continuous aggregate пунктуальности по `(feed, route, day)` — минимум для страницы линии.
-- [ ] SQL-миграции тем же `SchemaMigrator` (ADR-0008); без EF-миграций схемы.
+- [x] Hypertable прореженных позиций: `(feed_id, vehicle_id, observed_at, …)` + индекс по `(feed_id, route_id, observed_at)`.
+- [x] Политика сжатия и retention: позиции — compress 2 дн / retention 14 дн; события — 7 / 90 дн.
+- [x] `stop_events` → hypertable PK `(id, at)` + `delay_sec`; CAGG `punctuality_by_route_day`; `StopEventStore` — delete+insert в окне ±2 дн.
+- [x] SQL-миграции `0003_warm_storage.sql` через `SchemaMigrator` (ADR-0008).
 
 **Готово, когда:** миграции поднимаются на пустой Timescale в Testcontainers; сжатие/retention видны в каталоге Timescale; aggregate отвечает на простой запрос пунктуальности по фикстурным `stop_events`.
+- ✅ 2026-11-22: `WarmStorageTests` + `SchemaMigratorTests` + `StopEventStoreTests` зелёные на `timescaledb-ha:pg17.11-ts2.30.2`.
 
 ### 3.2 Приёмник позиций: Timescale + Redis GEO (#80)
 - [ ] Worker: consumer `positions.enriched` → прореживание (не чаще 1 точки / 10 с на машину, либо последняя в окне) → `COPY`/батч в hypertable + `GEOADD` (и связанные поля: route, bearing, delay…) в Redis с TTL.
