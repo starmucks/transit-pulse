@@ -778,3 +778,22 @@ A second replay of the established 04.11 06:00–07:00 UTC hour ran the exact in
 `BunchingDetector`. It processed 5 579 194 raw records in 140.2 s: **39 800 raw records/s**, 3.32 times the 12 000/s replay
 target, and emitted the same 202 episodes as the ordered baseline. This excludes Kafka network and broker waits; task
 2.11 still measures the complete live service and lag.
+
+## Warm thinned positions (stage 3.2)
+
+Volume of the Timescale warm layer after thinning to one point / 10 s per vehicle (ADR-0015).
+
+**Data / source:** Brief-derived estimate from the HSL Parquet measurement in `PROJECT_BRIEF` section 5.1 (evening rate), not a
+new live disk sample. Live Aspire confirmation (>= 10 min Helsinki -> rows in `vehicle_positions` and Redis GEO) is a
+manual acceptance check for issue #80.
+
+**How (estimate):** full stream ~1.4 GB/day Parquet+zstd at the measured evening tempo; thinning to 1/10 s is about
+one tenth of the points -> **~0.14 GB/day** warm series before Timescale compression. Row count order of magnitude:
+~1 000 vehicles x 6 points/min x 1 440 min ~ **8-9 M rows/day** if the fleet stayed online all day (real fleet duty
+cycles are lower).
+
+| Layer | Figure | Kind |
+|---|---|---|
+| Cold Parquet (full HSL) | ~1.4 GB/day | Measured (brief section 5.1) |
+| Warm Timescale (1/10 s) | ~0.14 GB/day | Brief-derived estimate |
+| Hot Redis GEO | one member + hash / active vehicle; hash TTL 120 s | Design (ADR-0015) |

@@ -40,12 +40,13 @@ API (+ статика web/) ──► локально Aspire / Vite; позже
 - ✅ 2026-11-22: `WarmStorageTests` + `SchemaMigratorTests` + `StopEventStoreTests` зелёные на `timescaledb-ha:pg17.11-ts2.30.2`.
 
 ### 3.2 Приёмник позиций: Timescale + Redis GEO (#80)
-- [ ] Worker: consumer `positions.enriched` → прореживание (не чаще 1 точки / 10 с на машину, либо последняя в окне) → `COPY`/батч в hypertable + `GEOADD` (и связанные поля: route, bearing, delay…) в Redis с TTL.
-- [ ] Идемпотентность / безопасный повтор at-least-once (как у `StopEventSink`): повтор не раздувает ряд и не ломает GEO.
-- [ ] Метрики: записано, пропущено прореживанием, ошибки Redis/Postgres, lag консьюмера.
-- [ ] ADR многоуровневого хранения и прореживания (бриф ADR 5) — Accepted в этой или соседней задаче.
+- [x] Worker: consumer `positions.enriched` → прореживание (не чаще 1 точки / 10 с на машину, либо последняя в окне) → `COPY`/батч в hypertable + `GEOADD` (и связанные поля: route, bearing, delay…) в Redis с TTL.
+- [x] Идемпотентность / безопасный повтор at-least-once (как у `StopEventSink`): повтор не раздувает ряд и не ломает GEO.
+- [x] Метрики: записано, пропущено прореживанием, ошибки Redis/Postgres, lag консьюмера.
+- [x] ADR многоуровневого хранения и прореживания (бриф ADR 5) — Accepted в этой или соседней задаче.
 
 **Готово, когда:** интеграционный тест пишет прореженный ряд и GEO из фикстурного потока; на живом Aspire после ≥ 10 мин у Хельсинки есть точки в Redis и строки в hypertable; объём/сутки оценён и записан в `docs/benchmarks.md`.
+- ✅ 2026-11-23: `PositionSink` + ADR-0015 + `PositionSinkTests` / store tests; оценка объёма в `docs/benchmarks.md`. Live Aspire ≥ 10 мин — ручная приёмка в PR.
 
 ### 3.3 Каркас API (#81)
 - [ ] Проект `TransitPulse.Api` (Minimal APIs, OpenAPI, ServiceDefaults), подключение в AppHost.
@@ -111,7 +112,7 @@ API (+ статика web/) ──► локально Aspire / Vite; позже
 
 ## ADR этапа
 
-- Бриф ADR 5 → новый файл: многоуровневое хранение и прореживание позиций (горячий Redis GEO, тёплый Timescale, холодный Parquet) — с задачей 3.2 (#80).
+- Бриф ADR 5 → [ADR-0015](../adr/0015-store-thinned-positions-in-redis-geo-and-timescale.md): многоуровневое хранение и прореживание позиций (горячий Redis GEO, тёплый Timescale, холодный Parquet) — задача 3.2 (#80).
 - Бриф ADR 7 → новый файл: SignalR, дельты по видимой области / линии, не broadcast — с задачей 3.5 (#83).
 - При необходимости уточняющий ADR на форму деплоя демо — только когда снимем отложение с 3.9.
 

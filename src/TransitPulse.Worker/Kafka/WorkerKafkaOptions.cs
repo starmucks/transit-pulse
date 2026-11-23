@@ -17,9 +17,15 @@ internal sealed class WorkerKafkaOptions
     /// <summary>Topic to read stop events from.</summary>
     public string StopEventsTopic { get; set; } = Topics.EventsStop.Name;
 
+    /// <summary>Consumer group for the enriched-position sink (must differ from <see cref="GroupId"/>).</summary>
+    public string PositionsGroupId { get; set; } = "transitpulse-worker-positions";
+
+    /// <summary>Topic to read enriched positions from.</summary>
+    public string PositionsTopic { get; set; } = Topics.PositionsEnriched.Name;
+
     /// <summary>
     /// How often offsets are committed after successful upserts. Each commit waits for the last write, so a shorter
-    /// interval costs throughput.
+    /// interval costs throughput. Shared by both sinks.
     /// </summary>
     public TimeSpan CommitInterval { get; set; } = TimeSpan.FromSeconds(5);
 }

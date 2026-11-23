@@ -3,6 +3,7 @@
   <ItemGroup>
     <PackageReference Include="Confluent.Kafka" />
     <PackageReference Include="Npgsql" />
+    <PackageReference Include="StackExchange.Redis" />
     <PackageReference Include="Sylvan.Data.Csv" />
   </ItemGroup>
 
