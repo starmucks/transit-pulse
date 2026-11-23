@@ -13,4 +13,6 @@
   repeats land in uncompressed chunks (compress after 7 days); do not expect delete+insert against compressed history.
   Nullable `delay_sec` feeds `punctuality_by_route_day`; the sink may leave it null until events carry delay.
 - **`vehicle_positions` is the warm thinned series** (hypertable by `observed_at`, 14-day retention, compress after 2 days).
-  The Worker position sink (stage 3.2) writes it; Redis GEO stays the hot layer for the live map.
+  `VehiclePositionStore` batch-inserts with `ON CONFLICT DO NOTHING` on `(feed_id, vehicle_id, observed_at)`.
+  `VehicleGeoStore` keeps the hot map layer: GEO `transitpulse:geo:{feedId}` plus hash `transitpulse:vehicle:{feedId}:{vehicleId}`
+  (TTL 120 s). Thinning and write order are ADR-0015.
