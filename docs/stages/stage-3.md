@@ -46,7 +46,7 @@ API (+ статика web/) ──► локально Aspire / Vite; позже
 - [x] ADR многоуровневого хранения и прореживания (бриф ADR 5) — Accepted в этой или соседней задаче.
 
 **Готово, когда:** интеграционный тест пишет прореженный ряд и GEO из фикстурного потока; на живом Aspire после ≥ 10 мин у Хельсинки есть точки в Redis и строки в hypertable; объём/сутки оценён и записан в `docs/benchmarks.md`.
-- ✅ 2026-11-23: `PositionSink` + ADR-0015 + `PositionSinkTests` / store tests; оценка объёма в `docs/benchmarks.md`. Live Aspire ≥ 10 мин — ручная приёмка в PR.
+- ✅ 2026-11-23: `PositionSink` + ADR-0015 + `PositionSinkTests` / store tests; оценка объёма в `docs/benchmarks.md`. Live Aspire ≥ 10 мин: 37 998 rows / 632 GEO (HSL), см. PR #92.
 
 ### 3.3 Каркас API (#81)
 - [ ] Проект `TransitPulse.Api` (Minimal APIs, OpenAPI, ServiceDefaults), подключение в AppHost.
