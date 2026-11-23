@@ -98,7 +98,9 @@ public sealed class PositionSinkTests :
             Ct);
 
         var realGeo = new VehicleGeoStore(_redisConnection!, TimeSpan.FromSeconds(120));
-        var faultingGeo = new FaultingGeoStore(realGeo, failuresBeforeSuccess: 3);
+        // Gate failures instead of a fixed count: CommitInterval/retry are 200 ms, so a count of 3
+        // often succeeds inside the old fixed delay and races the "still uncommitted" assert.
+        var faultingGeo = new FaultingGeoStore(realGeo);
         var sink = StartSink(database, topic, groupId, new VehiclePositionStore(database), faultingGeo);
         try
         {
@@ -109,16 +111,17 @@ public sealed class PositionSinkTests :
             Publish(topic, [one]);
 
             await WaitUntilAsync(async () => await CountPositionsAsync(database) >= 1, TimeSpan.FromSeconds(20));
-            await Task.Delay(800, Ct);
+            await WaitUntilAsync(() => Task.FromResult(faultingGeo.Attempts >= 2), TimeSpan.FromSeconds(10));
             Assert.Equal(0, await CommittedTotalAsync(groupId, topic));
             Assert.Null(await _redisConnection!.GetDatabase().GeoPositionAsync(VehicleGeoStore.GeoKey("hsl"), "40/415"));
 
+            faultingGeo.AllowSuccess();
             await WaitUntilAsync(
                 async () => await _redisConnection!.GetDatabase()
                     .GeoPositionAsync(VehicleGeoStore.GeoKey("hsl"), "40/415") is not null,
                 TimeSpan.FromSeconds(20));
             await WaitUntilAsync(async () => await CommittedTotalAsync(groupId, topic) >= 1, TimeSpan.FromSeconds(20));
-            Assert.True(faultingGeo.Attempts >= 4);
+            Assert.True(faultingGeo.Attempts >= 3);
         }
         finally
         {
@@ -257,16 +260,20 @@ public sealed class PositionSinkTests :
         return (int)(await command.ExecuteScalarAsync(Ct))!;
     }
 
-    private sealed class FaultingGeoStore(IVehicleGeoStore inner, int failuresBeforeSuccess) : IVehicleGeoStore
+    private sealed class FaultingGeoStore(IVehicleGeoStore inner) : IVehicleGeoStore
     {
+        private volatile bool _fail = true;
+
         public int Attempts { get; private set; }
+
+        public void AllowSuccess() => _fail = false;
 
         public async Task UpsertManyAsync(
             IReadOnlyList<EnrichedPosition> positions,
             CancellationToken cancellationToken)
         {
             Attempts++;
-            if (Attempts <= failuresBeforeSuccess)
+            if (_fail)
             {
                 throw new InvalidOperationException($"forced redis failure #{Attempts}");
             }
