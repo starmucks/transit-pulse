@@ -55,34 +55,14 @@ public sealed class PositionSinkTests :
         var database = await _postgres.CreateDatabaseAsync();
         await SchemaMigrator.MigrateAsync(database, Ct);
         var topic = $"positions-sink-{Guid.NewGuid():N}";
+        var groupId = $"{topic}-group";
         await KafkaTopicCreator.EnsureAsync(
             _redpanda.BootstrapServers,
             [new TopicDefinition(topic, 3, TimeSpan.FromHours(1))],
             Ct);
 
-        var store = new VehiclePositionStore(database);
-        var metrics = new PositionSinkMetrics(_services.GetRequiredService<System.Diagnostics.Metrics.IMeterFactory>());
-        var sink = new PositionSink(
-            Options.Create(new WorkerKafkaOptions
-            {
-                BootstrapServers = _redpanda.BootstrapServers,
-                PositionsGroupId = $"{topic}-group",
-                PositionsTopic = topic,
-                CommitInterval = TimeSpan.FromMilliseconds(200),
-            }),
-            Options.Create(new PositionSinkOptions
-            {
-                ThinningInterval = TimeSpan.FromSeconds(10),
-                GeoAttributeTtl = TimeSpan.FromSeconds(120),
-            }),
-            database,
-            _redisConnection!,
-            store,
-            TimeProvider.System,
-            metrics,
-            NullLogger<PositionSink>.Instance);
-
-        await sink.StartAsync(Ct);
+        var geo = new VehicleGeoStore(_redisConnection!, TimeSpan.FromSeconds(120));
+        var sink = StartSink(database, topic, groupId, new VehiclePositionStore(database), geo);
         try
         {
             Publish(topic, DenseStream("40/415"));
@@ -94,15 +74,88 @@ public sealed class PositionSinkTests :
             Assert.Equal(3, await CountVehicleAsync(database, "40/415"));
             Assert.Equal(3, await CountVehicleAsync(database, "40/416"));
 
-            var geo = _redisConnection!.GetDatabase();
-            Assert.NotNull(await geo.GeoPositionAsync(VehicleGeoStore.GeoKey("hsl"), "40/415"));
-            Assert.NotNull(await geo.GeoPositionAsync(VehicleGeoStore.GeoKey("hsl"), "40/416"));
-            Assert.True(await geo.KeyExistsAsync(VehicleGeoStore.AttributeKey("hsl", "40/415")));
+            var db = _redisConnection!.GetDatabase();
+            Assert.NotNull(await db.GeoPositionAsync(VehicleGeoStore.GeoKey("hsl"), "40/415"));
+            Assert.NotNull(await db.GeoPositionAsync(VehicleGeoStore.GeoKey("hsl"), "40/416"));
+            Assert.True(await db.KeyExistsAsync(VehicleGeoStore.AttributeKey("hsl", "40/415")));
         }
         finally
         {
             await sink.StopAsync(Ct);
         }
+    }
+
+    [Fact]
+    public async Task Failed_redis_flush_does_not_commit_offsets_until_retry_succeeds()
+    {
+        var database = await _postgres.CreateDatabaseAsync();
+        await SchemaMigrator.MigrateAsync(database, Ct);
+        var topic = $"positions-fail-{Guid.NewGuid():N}";
+        var groupId = $"{topic}-group";
+        await KafkaTopicCreator.EnsureAsync(
+            _redpanda.BootstrapServers,
+            [new TopicDefinition(topic, 3, TimeSpan.FromHours(1))],
+            Ct);
+
+        var realGeo = new VehicleGeoStore(_redisConnection!, TimeSpan.FromSeconds(120));
+        var faultingGeo = new FaultingGeoStore(realGeo, failuresBeforeSuccess: 3);
+        var sink = StartSink(database, topic, groupId, new VehiclePositionStore(database), faultingGeo);
+        try
+        {
+            var one = new EnrichedPosition(
+                new VehiclePosition("hsl", "40/415", "1009_trip", "1009", 60.17, 24.94, 8f, 180f, 0, null, _t0),
+                null,
+                0);
+            Publish(topic, [one]);
+
+            await WaitUntilAsync(async () => await CountPositionsAsync(database) >= 1, TimeSpan.FromSeconds(20));
+            await Task.Delay(800, Ct);
+            Assert.Equal(0, await CommittedTotalAsync(groupId, topic));
+            Assert.Null(await _redisConnection!.GetDatabase().GeoPositionAsync(VehicleGeoStore.GeoKey("hsl"), "40/415"));
+
+            await WaitUntilAsync(
+                async () => await _redisConnection!.GetDatabase()
+                    .GeoPositionAsync(VehicleGeoStore.GeoKey("hsl"), "40/415") is not null,
+                TimeSpan.FromSeconds(20));
+            await WaitUntilAsync(async () => await CommittedTotalAsync(groupId, topic) >= 1, TimeSpan.FromSeconds(20));
+            Assert.True(faultingGeo.Attempts >= 4);
+        }
+        finally
+        {
+            await sink.StopAsync(Ct);
+        }
+    }
+
+    private PositionSink StartSink(
+        Npgsql.NpgsqlDataSource database,
+        string topic,
+        string groupId,
+        IVehiclePositionStore positions,
+        IVehicleGeoStore geo)
+    {
+        var metrics = new PositionSinkMetrics(_services.GetRequiredService<System.Diagnostics.Metrics.IMeterFactory>());
+        var sink = new PositionSink(
+            Options.Create(new WorkerKafkaOptions
+            {
+                BootstrapServers = _redpanda.BootstrapServers,
+                GroupId = "transitpulse-worker-stop-events",
+                PositionsGroupId = groupId,
+                PositionsTopic = topic,
+                CommitInterval = TimeSpan.FromMilliseconds(200),
+            }),
+            Options.Create(new PositionSinkOptions
+            {
+                ThinningInterval = TimeSpan.FromSeconds(10),
+                GeoAttributeTtl = TimeSpan.FromSeconds(120),
+            }),
+            database,
+            positions,
+            geo,
+            TimeProvider.System,
+            metrics,
+            NullLogger<PositionSink>.Instance);
+        sink.StartAsync(Ct).GetAwaiter().GetResult();
+        return sink;
     }
 
     /// <summary>Three keepers at 0/10/20 s plus fillers every second in between (22 messages).</summary>
@@ -147,6 +200,33 @@ public sealed class PositionSinkTests :
         producer.Flush(TimeSpan.FromSeconds(10));
     }
 
+    private async Task<long> CommittedTotalAsync(string groupId, string topic)
+    {
+        using var admin = new AdminClientBuilder(new AdminClientConfig
+        {
+            BootstrapServers = _redpanda.BootstrapServers,
+        }).Build();
+        var partitions = Enumerable.Range(0, 3)
+            .Select(partition => new TopicPartition(topic, new Partition(partition)))
+            .ToList();
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                var results = await admin.ListConsumerGroupOffsetsAsync(
+                    [new ConsumerGroupTopicPartitions(groupId, partitions)]);
+                return results
+                    .SelectMany(result => result.Partitions)
+                    .Where(partition => !partition.Error.IsError && partition.Offset.Value >= 0)
+                    .Sum(partition => partition.Offset.Value);
+            }
+            catch (KafkaException) when (attempt < 9)
+            {
+                await Task.Delay(200, Ct);
+            }
+        }
+    }
+
     private static async Task WaitUntilAsync(Func<Task<bool>> ready, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
@@ -175,5 +255,23 @@ public sealed class PositionSinkTests :
             "SELECT count(*)::int FROM public.vehicle_positions WHERE vehicle_id = $1");
         command.Parameters.Add(new Npgsql.NpgsqlParameter { Value = vehicleId });
         return (int)(await command.ExecuteScalarAsync(Ct))!;
+    }
+
+    private sealed class FaultingGeoStore(IVehicleGeoStore inner, int failuresBeforeSuccess) : IVehicleGeoStore
+    {
+        public int Attempts { get; private set; }
+
+        public async Task UpsertManyAsync(
+            IReadOnlyList<EnrichedPosition> positions,
+            CancellationToken cancellationToken)
+        {
+            Attempts++;
+            if (Attempts <= failuresBeforeSuccess)
+            {
+                throw new InvalidOperationException($"forced redis failure #{Attempts}");
+            }
+
+            await inner.UpsertManyAsync(positions, cancellationToken);
+        }
     }
 }

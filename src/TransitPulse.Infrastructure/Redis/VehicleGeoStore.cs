@@ -4,10 +4,17 @@ using TransitPulse.Domain;
 
 namespace TransitPulse.Infrastructure.Redis;
 
+/// <summary>Writes the hot map layer for thinned positions.</summary>
+public interface IVehicleGeoStore
+{
+    /// <summary>Upserts GEO members and attribute hashes for each position.</summary>
+    Task UpsertManyAsync(IReadOnlyList<EnrichedPosition> positions, CancellationToken cancellationToken);
+}
+
 /// <summary>
 /// Hot map layer: Redis GEO per feed plus a short-lived attribute hash per vehicle (ADR-0015).
 /// </summary>
-public sealed class VehicleGeoStore
+public sealed class VehicleGeoStore : IVehicleGeoStore
 {
     /// <summary>Default hash TTL when the caller does not pass one.</summary>
     public static readonly TimeSpan DefaultAttributeTtl = TimeSpan.FromSeconds(120);

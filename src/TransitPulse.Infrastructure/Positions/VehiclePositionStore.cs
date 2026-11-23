@@ -4,11 +4,18 @@ using TransitPulse.Domain;
 
 namespace TransitPulse.Infrastructure.Positions;
 
+/// <summary>Writes thinned enriched positions into Timescale.</summary>
+public interface IVehiclePositionStore
+{
+    /// <summary>Inserts each position; returns how many rows were newly written (conflicts count as zero).</summary>
+    Task<int> InsertManyAsync(IReadOnlyList<EnrichedPosition> positions, CancellationToken cancellationToken);
+}
+
 /// <summary>
 /// Batch-inserts thinned enriched positions into <c>public.vehicle_positions</c>. Repeats of the same primary key are
 /// ignored so at-least-once Kafka delivery does not bloat the series (ADR-0015).
 /// </summary>
-public sealed class VehiclePositionStore(NpgsqlDataSource dataSource)
+public sealed class VehiclePositionStore(NpgsqlDataSource dataSource) : IVehiclePositionStore
 {
     /// <summary>
     /// Inserts each position; returns how many rows were newly written (conflicts count as zero).

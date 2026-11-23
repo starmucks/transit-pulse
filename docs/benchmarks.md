@@ -783,18 +783,17 @@ target, and emitted the same 202 episodes as the ordered baseline. This excludes
 
 Volume of the Timescale warm layer after thinning to one point / 10 s per vehicle (ADR-0015).
 
-**Data / source:** Brief-derived estimate from the HSL Parquet measurement in `PROJECT_BRIEF` §5.1 (evening rate), not a
-new live disk sample. Live Aspire confirmation (? 10 min Helsinki > rows in `vehicle_positions` and Redis GEO) is a
+**Data / source:** Brief-derived estimate from the HSL Parquet measurement in `PROJECT_BRIEF` section 5.1 (evening rate), not a
+new live disk sample. Live Aspire confirmation (>= 10 min Helsinki -> rows in `vehicle_positions` and Redis GEO) is a
 manual acceptance check for issue #80.
 
-**How (estimate):** full stream ? 1.4 GB/day Parquet+zstd at the measured evening tempo; thinning to 1/10 s is about
-one tenth of the points > **~0.14 GB/day** warm series before Timescale compression. Row count order of magnitude:
-~1 000 vehicles ? 6 points/min ? 1 440 min ? **8–9 M rows/day** if the fleet stayed online all day (real fleet duty
+**How (estimate):** full stream ~1.4 GB/day Parquet+zstd at the measured evening tempo; thinning to 1/10 s is about
+one tenth of the points -> **~0.14 GB/day** warm series before Timescale compression. Row count order of magnitude:
+~1 000 vehicles x 6 points/min x 1 440 min ~ **8-9 M rows/day** if the fleet stayed online all day (real fleet duty
 cycles are lower).
 
 | Layer | Figure | Kind |
 |---|---|---|
-| Cold Parquet (full HSL) | ~1.4 GB/day | Measured (brief §5.1) |
+| Cold Parquet (full HSL) | ~1.4 GB/day | Measured (brief section 5.1) |
 | Warm Timescale (1/10 s) | ~0.14 GB/day | Brief-derived estimate |
 | Hot Redis GEO | one member + hash / active vehicle; hash TTL 120 s | Design (ADR-0015) |
-

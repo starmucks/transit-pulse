@@ -1,6 +1,9 @@
+using Microsoft.Extensions.Options;
 using Npgsql;
+using StackExchange.Redis;
 using TransitPulse.Infrastructure.Gtfs;
 using TransitPulse.Infrastructure.Positions;
+using TransitPulse.Infrastructure.Redis;
 using TransitPulse.Infrastructure.StopEvents;
 using TransitPulse.Worker;
 using TransitPulse.Worker.Gtfs;
@@ -25,6 +28,9 @@ builder.Services.AddOptions<WorkerKafkaOptions>()
     .Validate(o => !string.IsNullOrWhiteSpace(o.BootstrapServers), "Kafka:BootstrapServers is required.")
     .Validate(o => !string.IsNullOrWhiteSpace(o.PositionsGroupId), "Kafka:PositionsGroupId is required.")
     .Validate(o => !string.IsNullOrWhiteSpace(o.PositionsTopic), "Kafka:PositionsTopic is required.")
+    .Validate(
+        o => !string.Equals(o.GroupId, o.PositionsGroupId, StringComparison.Ordinal),
+        "Kafka:PositionsGroupId must differ from Kafka:GroupId.")
     .Validate(o => o.CommitInterval > TimeSpan.Zero, "Kafka:CommitInterval must be positive.")
     .ValidateOnStart();
 builder.Services.AddOptions<PositionSinkOptions>()
@@ -34,7 +40,10 @@ builder.Services.AddOptions<PositionSinkOptions>()
     .ValidateOnStart();
 builder.Services.AddSingleton(provider => new GtfsImporter(provider.GetRequiredService<NpgsqlDataSource>()));
 builder.Services.AddSingleton<StopEventStore>();
-builder.Services.AddSingleton<VehiclePositionStore>();
+builder.Services.AddSingleton<IVehiclePositionStore, VehiclePositionStore>();
+builder.Services.AddSingleton<IVehicleGeoStore>(provider => new VehicleGeoStore(
+    provider.GetRequiredService<IConnectionMultiplexer>(),
+    provider.GetRequiredService<IOptions<PositionSinkOptions>>().Value.GeoAttributeTtl));
 builder.Services.AddSingleton<PositionSinkMetrics>();
 builder.Services.AddHostedService<GtfsImportService>();
 builder.Services.AddHostedService<StopEventSink>();

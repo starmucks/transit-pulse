@@ -2,7 +2,6 @@ using System.Text.Json;
 using Confluent.Kafka;
 using Microsoft.Extensions.Options;
 using Npgsql;
-using StackExchange.Redis;
 using TransitPulse.Domain;
 using TransitPulse.Infrastructure.Database;
 using TransitPulse.Infrastructure.Kafka;
@@ -14,19 +13,20 @@ namespace TransitPulse.Worker.Kafka;
 /// <summary>
 /// Reads <c>positions.enriched</c>, thins to about one point / 10 s per vehicle, writes Timescale and Redis GEO, then
 /// commits offsets (ADR-0015). Delivery stays at-least-once: a crash repeats points; the primary key and GEO member
-/// overwrite collapse duplicates.
+/// overwrite collapse duplicates. A failed flush pauses further consumes until the buffer is written.
 /// </summary>
 internal sealed partial class PositionSink(
     IOptions<WorkerKafkaOptions> kafkaOptions,
     IOptions<PositionSinkOptions> sinkOptions,
     NpgsqlDataSource dataSource,
-    IConnectionMultiplexer redis,
-    VehiclePositionStore positionStore,
+    IVehiclePositionStore positionStore,
+    IVehicleGeoStore geoStore,
     TimeProvider timeProvider,
     PositionSinkMetrics metrics,
     ILogger<PositionSink> logger) : BackgroundService
 {
     private static readonly TimeSpan _pollTimeout = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan _flushRetryDelay = TimeSpan.FromMilliseconds(200);
 
     private readonly WorkerKafkaOptions _kafka = kafkaOptions.Value;
     private readonly PositionSinkOptions _sink = sinkOptions.Value;
@@ -46,7 +46,6 @@ internal sealed partial class PositionSink(
             stopping);
 
         var thinner = new PositionThinner(_sink.ThinningInterval);
-        var geoStore = new VehicleGeoStore(redis, _sink.GeoAttributeTtl);
 
         using var consumer = BuildConsumer();
         consumer.Subscribe(_kafka.PositionsTopic);
@@ -56,53 +55,63 @@ internal sealed partial class PositionSink(
             var nextCommit = timeProvider.GetUtcNow() + _kafka.CommitInterval;
             var pending = new List<TopicPartitionOffset>();
             var buffer = new List<EnrichedPosition>();
+            var flushBlocked = false;
             while (!stopping.IsCancellationRequested)
             {
-                var result = TryConsume(consumer);
-                if (result is { IsPartitionEOF: false })
+                // Do not grow the buffer while a prior flush is still failing (backpressure).
+                if (!flushBlocked)
                 {
-                    RecordLag(result);
-                    try
+                    var result = TryConsume(consumer);
+                    if (result is { IsPartitionEOF: false })
                     {
-                        var enriched = EnrichedPositionMessage.Parse(result.Message.Value);
-                        // Record as soon as we buffer so later points in the same commit window are thinned;
-                        // a failed flush keeps the buffer and these records for retry.
-                        if (thinner.ShouldKeep(
-                                enriched.Position.FeedId,
-                                enriched.Position.VehicleId,
-                                enriched.Position.ObservedAt))
+                        RecordLag(result);
+                        try
                         {
-                            buffer.Add(enriched);
-                            thinner.Record(
-                                enriched.Position.FeedId,
-                                enriched.Position.VehicleId,
-                                enriched.Position.ObservedAt);
+                            var enriched = EnrichedPositionMessage.Parse(result.Message.Value);
+                            // Record as soon as we buffer so later points in the same commit window are thinned;
+                            // a failed flush keeps the buffer and these records for retry.
+                            if (thinner.ShouldKeep(
+                                    enriched.Position.FeedId,
+                                    enriched.Position.VehicleId,
+                                    enriched.Position.ObservedAt))
+                            {
+                                buffer.Add(enriched);
+                                thinner.Record(
+                                    enriched.Position.FeedId,
+                                    enriched.Position.VehicleId,
+                                    enriched.Position.ObservedAt);
+                            }
+                            else
+                            {
+                                metrics.Thinned();
+                            }
                         }
-                        else
+                        catch (Exception ex) when (ex is JsonException or ArgumentException)
                         {
-                            metrics.Thinned();
+                            LogPoison(result.TopicPartitionOffset.ToString(), ex.GetType().Name, ex.Message);
                         }
-                    }
-                    catch (Exception ex) when (ex is JsonException or ArgumentException)
-                    {
-                        LogPoison(result.TopicPartitionOffset.ToString(), ex.GetType().Name, ex.Message);
-                    }
 
-                    pending.Add(new TopicPartitionOffset(result.TopicPartition, result.Offset + 1));
+                        pending.Add(new TopicPartitionOffset(result.TopicPartition, result.Offset + 1));
+                    }
                 }
 
-                if (timeProvider.GetUtcNow() >= nextCommit)
+                if (flushBlocked || timeProvider.GetUtcNow() >= nextCommit)
                 {
-                    if (await TryFlushAsync(geoStore, buffer, stopping))
+                    if (await TryFlushAsync(buffer, stopping))
                     {
                         Commit(consumer, pending);
+                        flushBlocked = false;
+                        nextCommit = timeProvider.GetUtcNow() + _kafka.CommitInterval;
                     }
-
-                    nextCommit = timeProvider.GetUtcNow() + _kafka.CommitInterval;
+                    else
+                    {
+                        flushBlocked = true;
+                        await Task.Delay(_flushRetryDelay, stopping);
+                    }
                 }
             }
 
-            if (await TryFlushAsync(geoStore, buffer, stopping))
+            if (await TryFlushAsync(buffer, stopping))
             {
                 Commit(consumer, pending);
             }
@@ -113,22 +122,19 @@ internal sealed partial class PositionSink(
         }
     }
 
-    private async Task<bool> TryFlushAsync(
-        VehicleGeoStore geoStore,
-        List<EnrichedPosition> buffer,
-        CancellationToken stopping)
+    private async Task<bool> TryFlushAsync(List<EnrichedPosition> buffer, CancellationToken stopping)
     {
         if (buffer.Count == 0)
         {
             return true;
         }
 
+        var flushed = buffer.Count;
         try
         {
-            var written = await positionStore.InsertManyAsync(buffer, stopping);
-            metrics.Written(written);
+            await positionStore.InsertManyAsync(buffer, stopping);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             metrics.PostgresError();
             LogFlushFailed("postgres", ex.GetType().Name, ex.Message);
@@ -139,13 +145,14 @@ internal sealed partial class PositionSink(
         {
             await geoStore.UpsertManyAsync(buffer, stopping);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             metrics.RedisError();
             LogFlushFailed("redis", ex.GetType().Name, ex.Message);
             return false;
         }
 
+        metrics.Written(flushed);
         buffer.Clear();
         return true;
     }
