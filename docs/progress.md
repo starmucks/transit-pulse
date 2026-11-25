@@ -62,3 +62,9 @@ Short notes per stage or week: what was done, what was learned about the system,
 - Host network packet loss still affects the collector (worked around, not fixed).
 - Live lag acceptance used a Saturday evening window; a weekday morning peak re-check remains optional.
 - Local Processor fail-closes if Redpanda has committed offsets but Redis has no matching checkpoint (reset the volume or the group).
+
+## Stage 3 — Storage, API, map (from 2026-11-22)
+
+**Decisions (2026-11-25)**
+- [ADR-0016](adr/0016-run-the-public-demo-on-demand-with-archive-replay.md): end always-on archive VPS after the paid period; public demo is a pay-per-use compose session with **archive replay by default** (live feeds optional); full Parquet history and ML stay on the PC; C8 does not require 24/7 uptime.
+- Collector incident 25.11 ~06Z onward (same hoster network class as 22.11) excluded from C5; pull brought the PC archive up through 25.11 18Z.

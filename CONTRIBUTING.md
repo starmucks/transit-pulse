@@ -20,7 +20,9 @@ constraints live in `PROJECT_BRIEF.md`; current work lives in `docs/STATUS.md`; 
 
 ## Safety and operations
 
-- Data collection must never stop as a side effect of development work. The raw archive is the source of truth.
+- While phase A runs, data collection must never stop as a side effect of development work. Ending phase A is an
+  explicit author decision ([ADR-0016](docs/adr/0016-run-the-public-demo-on-demand-with-archive-replay.md)); the local
+  raw archive remains the source of truth for ML and golden replay.
 - Never merge to `main`, push tags, deploy to or modify production, delete production data, or spend money without the
   author's explicit approval for that action.
 - Anything that increases VPS or external-service cost needs an explicit justification and the author's approval.
