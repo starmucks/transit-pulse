@@ -14,6 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\TransitPulse.Api\TransitPulse.Api.csproj" />
     <ProjectReference Include="..\TransitPulse.Ingestor\TransitPulse.Ingestor.csproj" />
     <ProjectReference Include="..\TransitPulse.Processor\TransitPulse.Processor.csproj" />
     <ProjectReference Include="..\TransitPulse.Worker\TransitPulse.Worker.csproj" />
