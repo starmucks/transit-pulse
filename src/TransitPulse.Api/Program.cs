@@ -12,7 +12,7 @@ builder.Services.AddHybridCache();
 builder.Services.AddOpenApi();
 // Aspire client integrations register checks; this ensures MapHealthChecks has a builder even without them.
 builder.Services.AddHealthChecks();
-builder.Services.AddSingleton<GtfsCatalogueReader>();
+builder.Services.AddSingleton<IGtfsCatalogueReader, GtfsCatalogueReader>();
 builder.Services.AddSingleton<GtfsCatalogueCache>();
 
 var app = builder.Build();

@@ -99,7 +99,7 @@ public sealed class GtfsCatalogueReaderTests(PostgresFixture postgres) : IClassF
     }
 
     [Fact]
-    public async Task Fixed_snapshot_shapes_survive_after_a_newer_import()
+    public async Task Dropped_snapshot_id_returns_null_after_a_newer_import()
     {
         var database = await ImportTram9Async();
         var reader = new GtfsCatalogueReader(database);

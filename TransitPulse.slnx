@@ -10,6 +10,7 @@
     <Project Path="src/TransitPulse.Worker/TransitPulse.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/TransitPulse.Api.Tests/TransitPulse.Api.Tests.csproj" />
     <Project Path="tests/TransitPulse.Domain.Tests/TransitPulse.Domain.Tests.csproj" />
     <Project Path="tests/TransitPulse.Infrastructure.Tests/TransitPulse.Infrastructure.Tests.csproj" />
     <Project Path="tests/TransitPulse.Ingestor.Tests/TransitPulse.Ingestor.Tests.csproj" />

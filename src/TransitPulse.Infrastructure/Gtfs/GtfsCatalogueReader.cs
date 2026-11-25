@@ -24,7 +24,7 @@ public sealed record RouteShapesResult(bool RouteFound, IReadOnlyList<GtfsRouteS
 /// between choosing a snapshot and reading its rows. Prefer the overloads that take a fixed
 /// <c>snapshotId</c> when the caller (e.g. HybridCache) has already pinned one.
 /// </remarks>
-public sealed class GtfsCatalogueReader(NpgsqlDataSource dataSource)
+public sealed class GtfsCatalogueReader(NpgsqlDataSource dataSource) : IGtfsCatalogueReader
 {
     private const string RoutesOfSnapshot =
         """
