@@ -84,4 +84,11 @@ builder.AddProject<Projects.TransitPulse_Worker>("worker")
     .WaitFor(redpanda)
     .WaitFor(redis);
 
+builder.AddProject<Projects.TransitPulse_Api>("api")
+    .WithReference(database)
+    .WithReference(redis)
+    .WithHttpHealthCheck("/health")
+    .WaitFor(database)
+    .WaitFor(redis);
+
 await builder.Build().RunAsync();

@@ -55,7 +55,7 @@ API (+ статика web/) ──► локально Aspire / Vite; позже
 - [x] `HybridCache` там, где справочник стабилен (маршруты/остановки), L2 = Redis.
 
 **Готово, когда:** локально в Aspire `GET` маршрутов/остановок Хельсинки отвечает по импортированному снимку; OpenAPI открывается; unit/интеграционные тесты на чтение справочника зелёные.
-- ✅ 2026-11-25: `GtfsCatalogueReader` + HybridCache; `GtfsCatalogueReaderTests` 5/5; live Aspire — `/health`, `/openapi/v1.json`, `GET …/hsl/routes` (460), `…/stops` (8405), `…/routes/1009/shapes`.
+- ✅ 2026-11-25: `GtfsCatalogueReader` (fixed snapshot id for cache) + HybridCache + API DTOs; `GtfsCatalogueReaderTests` 7/7, `GtfsCatalogueCacheTests`; live Aspire — `/health`, `/openapi/v1.json`, `GET …/hsl/routes` (460), `…/stops` (8405), `…/routes/1009/shapes`.
 
 ### 3.4 Прибытия и пунктуальность (REST) (#82)
 - [ ] Остановка → ближайшие/следующие прибытия (из `stop_events` + текущих позиций / расписания — зафиксировать в задаче один понятный контракт для демо).
