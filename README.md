@@ -4,7 +4,7 @@ Real-time public transport monitoring on open data from Helsinki (HSL), Bergen (
 
 ## Status
 
-Early development. Stages 1–2 are done: live data from the three cities has been collected 24/7 since October 2026, and Helsinki positions are turned into stop events, delays and bunching anomalies. Next is stage 3 — storage, API and a live map (first demo). Progress is tracked in [milestones](https://github.com/starmucks/transit-pulse/milestones) and [docs/progress.md](docs/progress.md).
+Early development. Stages 1–2 are done: live data from the three cities has been collected since October 2026 (always-on archive VPS, phase A), and Helsinki positions are turned into stop events, delays and bunching anomalies. Stage 3 is storage, API and a live map (first demo locally; public compose is on-demand with archive replay — [ADR-0016](docs/adr/0016-run-the-public-demo-on-demand-with-archive-replay.md)). Progress is tracked in [milestones](https://github.com/starmucks/transit-pulse/milestones) and [docs/progress.md](docs/progress.md).
 
 ## What works today
 

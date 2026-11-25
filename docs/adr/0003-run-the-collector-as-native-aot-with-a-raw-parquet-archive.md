@@ -5,7 +5,10 @@
 
 ## Context
 
-History for the arrival model (goal C5) must accumulate 24/7 from the first days of the project, before normalization exists. During development (phase A, brief §5.1) only the collector runs on the server: 1 vCPU, 1 GB RAM, 10 GB NVMe. Everything else runs locally.
+History for the arrival model (goal C5) must accumulate from the first days of the project, before normalization exists.
+During phase A (brief §5.1) only the collector runs on the server around the clock. Ending that always-on host after
+enough local history is [ADR-0016](0016-run-the-public-demo-on-demand-with-archive-replay.md); this ADR still describes
+how the collector is built and run while phase A is active.
 
 Measured in stage 1 (task 1.1): HSL delivers ~1 200 messages/s in the daytime; Parquet with zstd compresses the raw stream ~19×, about 1.2–2 GB per day for HSL alone. An idle Native AOT build of the Ingestor uses ~19 MB RSS. The linux-x64 binary is ~13 MB.
 
