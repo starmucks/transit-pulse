@@ -21,11 +21,12 @@ public sealed class MapDeltaCalculatorTests
             Vehicle("c", 24.93, 60.12),
         };
 
-        var delta = MapDeltaCalculator.Diff(previous, current);
+        var delta = MapDeltaCalculator.Diff(previous, current, generation: 7);
 
         Assert.Equal(["c"], delta.Added.Select(v => v.VehicleId));
         Assert.Equal(["b"], delta.Updated.Select(v => v.VehicleId));
         Assert.Equal(["a"], delta.Removed);
+        Assert.Equal(7L, delta.Generation);
     }
 
     [Fact]
@@ -34,11 +35,12 @@ public sealed class MapDeltaCalculatorTests
         var vehicle = Vehicle("a", 24.9, 60.1);
         var previous = new Dictionary<string, MapVehicle>(StringComparer.Ordinal) { ["a"] = vehicle };
 
-        var delta = MapDeltaCalculator.Diff(previous, [vehicle]);
+        var delta = MapDeltaCalculator.Diff(previous, [vehicle], generation: 1);
 
         Assert.Empty(delta.Added);
         Assert.Empty(delta.Updated);
         Assert.Empty(delta.Removed);
+        Assert.Equal(1L, delta.Generation);
     }
 
     private static MapVehicle Vehicle(string id, double lon, double lat) =>

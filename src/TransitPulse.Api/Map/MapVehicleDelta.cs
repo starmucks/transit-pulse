@@ -6,10 +6,15 @@ namespace TransitPulse.Api.Map;
 /// <param name="Added">Vehicles that entered the subscription since the last tick.</param>
 /// <param name="Updated">Vehicles still present whose snapshot changed.</param>
 /// <param name="Removed">Vehicle ids that left the subscription (or lost their attribute hash).</param>
+/// <param name="Generation">
+/// Subscription generation this frame belongs to. Clients ignore frames whose generation does not match
+/// the value returned by the last successful <c>Subscribe</c> (closes the SendAsync TOCTOU after pan/zoom).
+/// </param>
 public sealed record MapVehicleDelta(
     IReadOnlyList<MapVehicle> Added,
     IReadOnlyList<MapVehicle> Updated,
-    IReadOnlyList<string> Removed);
+    IReadOnlyList<string> Removed,
+    long Generation);
 
 /// <summary>Computes added/updated/removed against the last frame sent to a connection.</summary>
 public static class MapDeltaCalculator
@@ -20,7 +25,8 @@ public static class MapDeltaCalculator
     /// </summary>
     public static MapVehicleDelta Diff(
         IReadOnlyDictionary<string, MapVehicle> previous,
-        IReadOnlyList<MapVehicle> current)
+        IReadOnlyList<MapVehicle> current,
+        long generation)
     {
         var currentMap = new Dictionary<string, MapVehicle>(current.Count, StringComparer.Ordinal);
         foreach (var vehicle in current)
@@ -43,6 +49,6 @@ public static class MapDeltaCalculator
         }
 
         var removed = previous.Keys.Where(id => !currentMap.ContainsKey(id)).ToArray();
-        return new MapVehicleDelta(added, updated, removed);
+        return new MapVehicleDelta(added, updated, removed, generation);
     }
 }

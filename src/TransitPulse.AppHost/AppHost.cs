@@ -84,11 +84,17 @@ builder.AddProject<Projects.TransitPulse_Worker>("worker")
     .WaitFor(redpanda)
     .WaitFor(redis);
 
-builder.AddProject<Projects.TransitPulse_Api>("api")
+var api = builder.AddProject<Projects.TransitPulse_Api>("api")
     .WithReference(database)
     .WithReference(redis)
     .WithHttpHealthCheck("/health")
     .WaitFor(database)
     .WaitFor(redis);
+
+// Live map (stage 3.6): Vite proxies /api and /hubs to the API. Static dist/ is for Caddy later.
+var webRoot = Path.GetFullPath(Path.Combine(builder.AppHostDirectory, "..", "..", "web"));
+builder.AddViteApp("web", webRoot)
+    .WithReference(api)
+    .WaitFor(api);
 
 await builder.Build().RunAsync();

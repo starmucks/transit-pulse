@@ -52,11 +52,7 @@ public sealed class WarmStorageTests(PostgresFixture postgres) : IClassFixture<P
             await insert.ExecuteNonQueryAsync(Ct);
         }
 
-        await using (var refresh = database.CreateCommand(
-            "CALL refresh_continuous_aggregate('public.punctuality_by_route_day', NULL, NULL)"))
-        {
-            await refresh.ExecuteNonQueryAsync(Ct);
-        }
+        await ContinuousAggregateRefresh.RefreshPunctualityByRouteDayAsync(database, Ct);
 
         await using var query = database.CreateCommand(
             """

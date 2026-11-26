@@ -17,5 +17,7 @@
 - **SignalR map (3.5 / ADR-0017).** Hub at `/hubs/vehicles`: `Subscribe(feedId, west?, south?, east?, north?, routeId?)`
   (one subscription per connection; bbox and/or route). A 1 Hz ticker reads Redis GEO + hashes and pushes
   `vehicleDelta` `{ added, updated, removed }` to that connection only — never city-wide broadcast. Max bbox span
-  0.5°; max 500 vehicles/frame. Redis backplane is registered even for a single API process.
+  0.5°; max 500 vehicles/frame. Redis backplane is registered even for a single API process. Each `Subscribe`
+  bumps a per-connection generation so an in-flight tick cannot overwrite the cleared last-sent snapshot.
+  The `web/` Vite app (stage 3.6) proxies this hub in Aspire and re-subscribes on pan/zoom and reconnect.
 - **Paths.** Versioned under `/api/v1/feeds/{feedId}/…`. OpenAPI document at `/openapi/v1.json`. Health at `/health`.

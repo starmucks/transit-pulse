@@ -23,11 +23,11 @@ public sealed partial class MapDeltaTicker(
         using var timer = new PeriodicTimer(_period, time);
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            foreach (var (subscription, lastSent) in registry.Snapshot())
+            foreach (var (subscription, lastSent, generation) in registry.Snapshot())
             {
                 try
                 {
-                    await TickOneAsync(subscription, lastSent, stoppingToken);
+                    await TickOneAsync(subscription, lastSent, generation, stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -45,6 +45,7 @@ public sealed partial class MapDeltaTicker(
     private async Task TickOneAsync(
         MapSubscription subscription,
         IReadOnlyDictionary<string, MapVehicle> lastSent,
+        long generation,
         CancellationToken cancellationToken)
     {
         var current = await viewport.ListInBoxAsync(
@@ -59,17 +60,45 @@ public sealed partial class MapDeltaTicker(
             metrics.Truncated();
         }
 
-        var delta = MapDeltaCalculator.Diff(lastSent, current);
+        var delta = MapDeltaCalculator.Diff(lastSent, current, generation);
         if (delta.Added.Count == 0 && delta.Updated.Count == 0 && delta.Removed.Count == 0)
         {
-            registry.ReplaceLastSent(subscription.ConnectionId, current);
+            // Still CAS last-sent so a mid-tick Subscribe is not overwritten with the old viewport.
+            registry.ReplaceLastSent(subscription.ConnectionId, generation, current);
+            return;
+        }
+
+        // CAS first: a concurrent Subscribe must not be rolled back by writing a stale Entry.
+        if (!registry.ReplaceLastSent(subscription.ConnectionId, generation, current))
+        {
+            return;
+        }
+
+        // Tests inject Subscribe here to cover the CAS-ok → IsCurrent-false window.
+        AfterSuccessfulCasForTests?.Invoke();
+
+        // Subscribe may have landed after CAS; do not push a delta for the superseded viewport.
+        if (!registry.IsCurrent(subscription.ConnectionId, generation))
+        {
             return;
         }
 
         await hub.Clients.Client(subscription.ConnectionId).SendAsync(ClientMethod, delta, cancellationToken);
         metrics.DeltaPublished(delta.Added.Count, delta.Updated.Count, delta.Removed.Count);
-        registry.ReplaceLastSent(subscription.ConnectionId, current);
     }
+
+    /// <summary>
+    /// Runs one tick for tests. Production uses <see cref="ExecuteAsync"/> with a periodic timer.
+    /// </summary>
+    internal Task TickOnceForTestsAsync(
+        MapSubscription subscription,
+        IReadOnlyDictionary<string, MapVehicle> lastSent,
+        long generation,
+        CancellationToken cancellationToken) =>
+        TickOneAsync(subscription, lastSent, generation, cancellationToken);
+
+    /// <summary>Test hook: runs after a successful <see cref="MapSubscriptionRegistry.ReplaceLastSent"/>.</summary>
+    internal Action? AfterSuccessfulCasForTests { get; set; }
 
     [LoggerMessage(EventId = 1, Level = LogLevel.Warning, Message = "Map tick failed for connection {ConnectionId}")]
     private static partial void LogTickFailed(ILogger logger, Exception exception, string connectionId);

@@ -34,4 +34,6 @@ subscriptions query a fixed Helsinki covering bbox then filter `route_id`.
   live markers).
 - GEO members can outlive hashes (ADR-0015); the ticker treats a missing hash as removal.
 - Front-end (stage 3.6) must call `Subscribe` on pan/zoom and handle reconnect by re-subscribing.
+- Each delta carries the subscription `generation`; `Subscribe` returns that generation so the client can drop
+  in-flight frames from a superseded viewport (TOCTOU between server send and client clear-on-pan).
 - Metrics for subscriber count, delta size, and truncations are required so a too-wide viewport is visible in ops.

@@ -8,9 +8,10 @@ public sealed class VehicleMapHub(MapSubscriptionRegistry registry, MapDeltaMetr
 {
     /// <summary>
     /// Replaces the connection's subscription. Requires <paramref name="feedId"/> and a bbox and/or
-    /// <paramref name="routeId"/>.
+    /// <paramref name="routeId"/>. Returns the subscription generation clients must match on
+    /// <c>vehicleDelta</c> frames.
     /// </summary>
-    public void Subscribe(string feedId, double? west, double? south, double? east, double? north, string? routeId)
+    public long Subscribe(string feedId, double? west, double? south, double? east, double? north, string? routeId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(feedId);
 
@@ -39,6 +40,8 @@ public sealed class VehicleMapHub(MapSubscriptionRegistry registry, MapDeltaMetr
         {
             metrics.SubscriptionAdded();
         }
+
+        return registry.GetGeneration(Context.ConnectionId);
     }
 
     /// <summary>Clears the connection's subscription without disconnecting.</summary>

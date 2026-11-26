@@ -2,16 +2,16 @@
 
 > Обновляется в конце каждой сессии. Не длиннее одного экрана.
 
-**Обновлено:** 2026-11-26 · **Этап:** 3 · следующая задача **3.6 (#84)**
+**Обновлено:** 2026-11-26 · **Этап:** 3 · следующая задача **3.7 (#85)** (после коммита/PR 3.6)
 
 ## Сделано (сессия 2026-11-26)
-- **3.4 (#82)** смержен (#95).
-- **3.5 (#83):** SignalR `/hubs/vehicles` — дельты по bbox/route из Redis GEO; Redis backplane; [ADR-0017](adr/0017-stream-map-vehicles-as-viewport-deltas.md).
-- Лимиты: span ≤ 0.5°, ≤ 500 машин/кадр; тесты: diff, viewport reader, два клиента с разными bbox.
+- **3.4 (#82)** / **3.5 (#83)** смержены (#95, #96).
+- **3.6 (#84):** `web/` MapLibre v5 + SignalR; Aspire `AddViteApp`; CAS/`IsCurrent` + `generation` в delta; легенда задержки; живой HSL (~214). PR **#97**.
 
 ## Следующий шаг
-1. **3.6 (#84)** — фронт: живая карта MapLibre + SignalR.
-2. 3.9 (#87) — после локального демо; провайдер pay-per-use по ADR-0016.
+1. Зелёный CI / merge PR **#97** (3.6).
+2. **3.7 (#85)** — остановка → прибытия; страница линии + пунктуальность.
+3. 3.9 (#87) — после локального демо; провайдер pay-per-use по ADR-0016.
 
 ## Известные проблемы
 - Сеть хостера сборщика теряет пакеты (инцидент 25.11 ~06Z→…; как 22.11).
@@ -21,8 +21,9 @@
 - До route-keyed repartitioning (ADR-0013) Processor — singleton для слипания.
 - Привязка (ADR-0011): двусторонние улицы, скачки вперёд, поезда вне маршрута.
 - `PublishAot` выключает EventSource.
-- Локальный Processor: старые committed offsets без Redis-checkpoint → fail-closed (сброс volume/группы).
-- Aspire AppHost: для user-secrets нужен Development / launch profile `https`; `--no-launch-profile` легко оставить Dashboard без полного старта.
+- Локальный Processor: старые Kafka offsets / schedule mismatch → fail-closed; cold start: новая group + `Kafka:AutoOffsetReset=Latest` (или сброс checkpoint+группы).
+- Aspire AppHost: для user-secrets нужен Development / launch profile `https`.
+- MapLibre **v6** под Vite — пустая карта; в `web/` зафиксирован **v5**.
 
 ## Открытые вопросы
 - Конкретный pay-per-use провайдер/домен для 3.9 — когда снимем отложение.
