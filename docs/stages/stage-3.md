@@ -58,11 +58,12 @@ API (+ статика web/) ──► локально Aspire / Vite; позже
 - ✅ 2026-11-25: `GtfsCatalogueReader` (fixed snapshot id for cache) + HybridCache + API DTOs; `GtfsCatalogueReaderTests` 7/7, `GtfsCatalogueCacheTests`; live Aspire — `/health`, `/openapi/v1.json`, `GET …/hsl/routes` (460), `…/stops` (8405), `…/routes/1009/shapes`.
 
 ### 3.4 Прибытия и пунктуальность (REST) (#82)
-- [ ] Остановка → ближайшие/следующие прибытия (из `stop_events` + текущих позиций / расписания — зафиксировать в задаче один понятный контракт для демо).
-- [ ] Линия → сводка пунктуальности за день/окно из continuous aggregate.
-- [ ] Контракты ответов стабильны для фронта; ошибки и пустые окна — явные.
+- [x] Остановка → недавние **фактические** события из `stop_events` (не ETA/расписание; default lookback 60 мин).
+- [x] Линия → сводка пунктуальности за UTC-день из `punctuality_by_route_day`.
+- [x] Контракты ответов стабильны для фронта; неизвестный id → 404; пустое окно → 200 `[]` / нули.
 
 **Готово, когда:** по реальной остановке и линии HSL в Aspire ответы согласованы с данными в Postgres на выборке; тесты на пустую остановку и неизвестный id.
+- ✅ 2026-11-26: `StopEventReader` + `PunctualityReader`, index `stop_events_feed_stop_at`; `RealtimeEndpoints`; unit + Postgres tests; Aspire — stop `1113131` events for 2026-11-23, route `1009` punctuality arrivals=50 (`delay_sec` still null from sink → on-time 0).
 
 ### 3.5 SignalR: дельты по видимой области (#83)
 - [ ] Hub: подписка на bbox и/или `routeId`; тик ~1 с; в кадре — только машины в подписке (добавление/обновление/удаление).

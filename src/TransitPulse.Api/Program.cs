@@ -1,5 +1,6 @@
 using TransitPulse.Api;
 using TransitPulse.Infrastructure.Gtfs;
+using TransitPulse.Infrastructure.StopEvents;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,14 +13,18 @@ builder.Services.AddHybridCache();
 builder.Services.AddOpenApi();
 // Aspire client integrations register checks; this ensures MapHealthChecks has a builder even without them.
 builder.Services.AddHealthChecks();
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IGtfsCatalogueReader, GtfsCatalogueReader>();
 builder.Services.AddSingleton<GtfsCatalogueCache>();
+builder.Services.AddSingleton<IStopEventReader, StopEventReader>();
+builder.Services.AddSingleton<IPunctualityReader, PunctualityReader>();
 
 var app = builder.Build();
 
 app.MapOpenApi();
 app.MapHealthChecks("/health");
 app.MapCatalogueEndpoints();
+app.MapRealtimeEndpoints();
 
 await app.RunAsync();
 
