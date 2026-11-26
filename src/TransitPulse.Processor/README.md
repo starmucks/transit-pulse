@@ -5,6 +5,9 @@
   the automatic commit.
 - **Missing checkpoint after committed offsets fails closed.** A cold assign with Kafka commits but no Redis checkpoint
   (or no state for a returning partition) stops the process; it must not resume with empty in-memory state.
+- **Local cold start against a retained backlog:** use a fresh `Kafka:GroupId` and `Kafka:AutoOffsetReset=Latest` (default
+  remains `Earliest`). Replaying old `positions.raw` against a newer GTFS schedule can fail closed when restoring trip
+  state that no longer exists.
 - **A commit stores the next offset to read:** the last processed offset + 1 (`PartitionState.NextOffset`).
 - **A message the broker never accepted stops the process** (`ThrowIfFailed`). Skipping it and committing further would
   lose it; a restart repeats everything since the last commit. An unreadable message is the opposite: after

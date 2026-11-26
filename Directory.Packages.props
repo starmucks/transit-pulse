@@ -4,6 +4,7 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup Label="Aspire hosting">
+    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.6.5" />
     <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.6.5" />
     <PackageVersion Include="Aspire.Hosting.Redis" Version="13.6.5" />
     <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.15" />

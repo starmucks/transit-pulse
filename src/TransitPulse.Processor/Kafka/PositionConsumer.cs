@@ -610,8 +610,8 @@ internal sealed partial class PositionConsumer(
         GroupId = _options.GroupId,
         // Committed by CommitProcessed: the automatic commit does not know what has been delivered.
         EnableAutoCommit = false,
-        // A partition with no commit is read from its start: positions published before the first start are not lost.
-        AutoOffsetReset = AutoOffsetReset.Earliest,
+        // Default Earliest keeps history; Latest skips a retained backlog (local cold start vs a newer GTFS schedule).
+        AutoOffsetReset = ParseAutoOffsetReset(_options.AutoOffsetReset),
         // Empty or caught-up partitions must not hold the event-time watermark back.
         EnablePartitionEof = true,
         // Only the partitions changing owner stop: the others keep their state through a rebalance.
@@ -645,6 +645,14 @@ internal sealed partial class PositionConsumer(
         // Transient errors (broker down, connection reset) are retried by the client itself.
         LogBrokerError(error.Code, error.Reason);
     }
+
+    private static AutoOffsetReset ParseAutoOffsetReset(string value) =>
+        value switch
+        {
+            "Latest" => AutoOffsetReset.Latest,
+            "Earliest" => AutoOffsetReset.Earliest,
+            _ => throw new InvalidOperationException($"Kafka:AutoOffsetReset '{value}' is not Earliest or Latest."),
+        };
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Since the start: {Accepted} accepted, {OutOfOrder} out of order, {Jumps} impossible jumps, {Unreadable} unreadable; trips found for {TripsFound} of {TripLookups}; on the trip's line {OnRoute} of {RouteMatches}; stop events: {Arrivals} arrivals, {Departures} departures, {Passes} passes; {Bunching} bunching episodes")]
     private partial void LogProgress(

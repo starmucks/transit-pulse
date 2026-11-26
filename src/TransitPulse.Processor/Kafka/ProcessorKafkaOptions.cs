@@ -37,4 +37,10 @@ internal sealed class ProcessorKafkaOptions
     /// commit waits for every published message to be delivered, so a shorter interval costs throughput.
     /// </summary>
     public TimeSpan CommitInterval { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Where to start when a partition has no committed offset. Default <c>Earliest</c> keeps history;
+    /// <c>Latest</c> is for a local cold start that must not replay a retained backlog against a newer GTFS schedule.
+    /// </summary>
+    public string AutoOffsetReset { get; set; } = "Earliest";
 }

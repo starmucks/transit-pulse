@@ -56,7 +56,7 @@ dotnet run --project src/TransitPulse.AppHost
 
 The Postgres password is written into the data volume on first start. To change it later, also remove the volume: `docker volume rm transit-pulse-postgres` (this deletes local data).
 
-The AppHost also runs the Ingestor in `full` mode (archives to `data/archive/`, publishes to `positions.raw`), the **Processor** (enriched positions, stop events, anomalies) and the **Worker** (GTFS import and `StopEventSink`). Topics are visible in Redpanda Console.
+The AppHost also runs the Ingestor in `full` mode (archives to `data/archive/`, publishes to `positions.raw`), the **Processor** (enriched positions, stop events, anomalies), the **Worker** (GTFS import and `StopEventSink`), the **API**, and the Vite **web** live map (MapLibre + SignalR). Topics are visible in Redpanda Console. Frontend details: [web/README.md](web/README.md).
 
 ### Ingestor modes and archive tools
 

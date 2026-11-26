@@ -19,6 +19,9 @@ builder.Services.AddOptions<ProcessorKafkaOptions>()
     .Validate(o => !string.IsNullOrWhiteSpace(o.BootstrapServers), "Kafka:BootstrapServers is required.")
     .Validate(o => o.CommitInterval > TimeSpan.Zero, "Kafka:CommitInterval must be positive.")
     .Validate(o => o.ProcessingAttempts is >= 1 and <= 10, "Kafka:ProcessingAttempts must be within [1, 10].")
+    .Validate(
+        o => o.AutoOffsetReset is "Earliest" or "Latest",
+        "Kafka:AutoOffsetReset must be Earliest or Latest.")
     .ValidateOnStart();
 builder.Services.AddOptions<TripScheduleOptions>()
     .BindConfiguration(TripScheduleOptions.SectionName)
