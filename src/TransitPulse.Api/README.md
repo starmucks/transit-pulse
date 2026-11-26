@@ -1,7 +1,7 @@
 # TransitPulse.Api development notes
 
-- **Fourth deployable unit** (ADR-0009): REST catalogue and observed realtime reads for the live map. No SignalR or AI
-  here — those are later stage-3 tasks.
+- **Fourth deployable unit** (ADR-0009): REST catalogue, observed stop/punctuality reads, and SignalR map deltas. No AI
+  here — later stage-3 tasks.
 - **Read-only GTFS.** `GtfsCatalogueReader` locks `gtfs.routes` / `stops` / `trips` / `shapes` in ACCESS SHARE, then
   chooses the active snapshot, then reads (same rule as `TripScheduleReader`, ADR-0008). Never cache a `snapshot_id`
   across requests without putting it in the cache key.
@@ -14,4 +14,8 @@
   404; known stop with nothing in the window → 200 `[]`.
 - **Route punctuality.** `GET …/routes/{routeId}/punctuality` reads `punctuality_by_route_day` for one UTC `day`
   (default today). Unknown route → 404; known route with no aggregate row → 200 with zero counts.
+- **SignalR map (3.5 / ADR-0017).** Hub at `/hubs/vehicles`: `Subscribe(feedId, west?, south?, east?, north?, routeId?)`
+  (one subscription per connection; bbox and/or route). A 1 Hz ticker reads Redis GEO + hashes and pushes
+  `vehicleDelta` `{ added, updated, removed }` to that connection only — never city-wide broadcast. Max bbox span
+  0.5°; max 500 vehicles/frame. Redis backplane is registered even for a single API process.
 - **Paths.** Versioned under `/api/v1/feeds/{feedId}/…`. OpenAPI document at `/openapi/v1.json`. Health at `/health`.

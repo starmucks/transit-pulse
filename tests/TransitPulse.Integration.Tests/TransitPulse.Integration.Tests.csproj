@@ -10,6 +10,8 @@
 
   <!-- Tests against real infrastructure in Docker (Testcontainers); Docker must be running. -->
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.Testing" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="StackExchange.Redis" />
@@ -29,6 +31,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\TransitPulse.Api\TransitPulse.Api.csproj" />
     <ProjectReference Include="..\..\src\TransitPulse.Infrastructure\TransitPulse.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\TransitPulse.Ingestor\TransitPulse.Ingestor.csproj" />
     <ProjectReference Include="..\..\src\TransitPulse.Processor\TransitPulse.Processor.csproj" />

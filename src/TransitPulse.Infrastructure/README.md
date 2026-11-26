@@ -19,4 +19,5 @@
 - **`vehicle_positions` is the warm thinned series** (hypertable by `observed_at`, 14-day retention, compress after 2 days).
   `VehiclePositionStore` batch-inserts with `ON CONFLICT DO NOTHING` on `(feed_id, vehicle_id, observed_at)`.
   `VehicleGeoStore` keeps the hot map layer: GEO `transitpulse:geo:{feedId}` plus hash `transitpulse:vehicle:{feedId}:{vehicleId}`
-  (TTL 120 s). Thinning and write order are ADR-0015.
+  (TTL 120 s). Thinning and write order are ADR-0015. `VehicleViewportReader` GEOSEARCHes a bbox, joins hashes, and
+  drops members without a live hash (SignalR map tick, ADR-0017).
