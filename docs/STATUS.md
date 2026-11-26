@@ -9,7 +9,7 @@
 - **3.6 (#84):** `web/` MapLibre v5 + SignalR; Aspire `AddViteApp`; generation-guard `ReplaceLastSent`; живой HSL на карте (~214 в viewport). Ветка `feature/84-live-map` на `main`.
 
 ## Следующий шаг
-1. Коммит/PR **3.6 (#84)** (ещё uncommitted).
+1. Довести PR **#97** (3.6): CAS на `ReplaceLastSent`, зелёный CI.
 2. **3.7 (#85)** — остановка → прибытия; страница линии + пунктуальность.
 3. 3.9 (#87) — после локального демо; провайдер pay-per-use по ADR-0016.
 

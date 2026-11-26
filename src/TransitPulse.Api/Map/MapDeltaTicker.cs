@@ -63,13 +63,19 @@ public sealed partial class MapDeltaTicker(
         var delta = MapDeltaCalculator.Diff(lastSent, current);
         if (delta.Added.Count == 0 && delta.Updated.Count == 0 && delta.Removed.Count == 0)
         {
-            // Still publish the generation-guarded last-sent so a mid-tick Subscribe is not overwritten.
+            // Still CAS last-sent so a mid-tick Subscribe is not overwritten with the old viewport.
             registry.ReplaceLastSent(subscription.ConnectionId, generation, current);
             return;
         }
 
-        // Skip the hub write when Subscribe already superseded this tick's viewport.
+        // CAS first: a concurrent Subscribe must not be rolled back by writing a stale Entry.
         if (!registry.ReplaceLastSent(subscription.ConnectionId, generation, current))
+        {
+            return;
+        }
+
+        // Subscribe may have landed after CAS; do not push a delta for the superseded viewport.
+        if (!registry.IsCurrent(subscription.ConnectionId, generation))
         {
             return;
         }

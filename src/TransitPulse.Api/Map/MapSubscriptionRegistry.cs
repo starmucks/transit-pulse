@@ -35,14 +35,21 @@ public sealed class MapSubscriptionRegistry
     public bool Set(MapSubscription subscription)
     {
         ArgumentNullException.ThrowIfNull(subscription);
-        var isNew = !_entries.ContainsKey(subscription.ConnectionId);
-        var generation = isNew
-            ? 1L
-            : _entries[subscription.ConnectionId].Generation + 1;
-        _entries[subscription.ConnectionId] = new Entry(
-            subscription,
-            new Dictionary<string, MapVehicle>(StringComparer.Ordinal),
-            generation);
+        var isNew = false;
+        _entries.AddOrUpdate(
+            subscription.ConnectionId,
+            _ =>
+            {
+                isNew = true;
+                return new Entry(
+                    subscription,
+                    new Dictionary<string, MapVehicle>(StringComparer.Ordinal),
+                    Generation: 1);
+            },
+            (_, existing) => new Entry(
+                subscription,
+                new Dictionary<string, MapVehicle>(StringComparer.Ordinal),
+                existing.Generation + 1));
         return isNew;
     }
 
@@ -69,8 +76,16 @@ public sealed class MapSubscriptionRegistry
     }
 
     /// <summary>
+    /// True when <paramref name="connectionId"/> still holds <paramref name="generation"/> (Subscribe has not
+    /// replaced the viewport since the ticker snapped it).
+    /// </summary>
+    public bool IsCurrent(string connectionId, long generation) =>
+        _entries.TryGetValue(connectionId, out var entry) && entry.Generation == generation;
+
+    /// <summary>
     /// Stores the vehicles just sent so the next tick can diff. No-op when the subscription was replaced
-    /// (generation bumped) after the ticker took its snapshot.
+    /// (generation bumped) after the ticker took its snapshot. Uses compare-and-swap so a concurrent
+    /// <see cref="Set"/> cannot be overwritten with a stale entry.
     /// </summary>
     /// <returns><see langword="true"/> when last-sent was updated.</returns>
     public bool ReplaceLastSent(
@@ -78,25 +93,27 @@ public sealed class MapSubscriptionRegistry
         long generation,
         IReadOnlyList<MapVehicle> vehicles)
     {
-        if (!_entries.TryGetValue(connectionId, out var entry) || entry.Generation != generation)
-        {
-            return false;
-        }
-
         var map = new Dictionary<string, MapVehicle>(vehicles.Count, StringComparer.Ordinal);
         foreach (var vehicle in vehicles)
         {
             map[vehicle.VehicleId] = vehicle;
         }
 
-        // Re-check after building the map: Subscribe may have raced in.
-        if (!_entries.TryGetValue(connectionId, out entry) || entry.Generation != generation)
+        while (_entries.TryGetValue(connectionId, out var entry))
         {
-            return false;
+            if (entry.Generation != generation)
+            {
+                return false;
+            }
+
+            var updated = entry with { LastSent = map };
+            if (_entries.TryUpdate(connectionId, updated, entry))
+            {
+                return true;
+            }
         }
 
-        _entries[connectionId] = entry with { LastSent = map };
-        return true;
+        return false;
     }
 
     /// <summary>Test/ops helper: current last-sent snapshot, or empty when unknown.</summary>
@@ -104,6 +121,10 @@ public sealed class MapSubscriptionRegistry
         _entries.TryGetValue(connectionId, out var entry)
             ? entry.LastSent
             : new Dictionary<string, MapVehicle>(StringComparer.Ordinal);
+
+    /// <summary>Test helper: current generation, or 0 when unknown.</summary>
+    public long GetGeneration(string connectionId) =>
+        _entries.TryGetValue(connectionId, out var entry) ? entry.Generation : 0;
 
     private sealed record Entry(
         MapSubscription Subscription,
