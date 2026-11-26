@@ -33,7 +33,16 @@ jobs:
 
       - run: dotnet build TransitPulse.slnx -c Release --no-restore
 
-      - run: dotnet test --solution TransitPulse.slnx -c Release --no-build
+      # Replay.Tests has SIGSEGV'd (exit 139, "Zero tests ran") when its Testcontainers
+      # host starts in parallel with Integration.Tests; run it alone after the rest.
+      - name: Test (except Replay)
+        run: |
+          set -euo pipefail
+          mapfile -t projects < <(dotnet sln TransitPulse.slnx list | grep '\.Tests\.csproj$' | grep -v 'Replay\.Tests')
+          printf '%s\n' "${projects[@]}" | xargs -n1 -P8 -I{} dotnet test {} -c Release --no-build
+
+      - name: Test Replay (isolated)
+        run: dotnet test tests/TransitPulse.Replay.Tests -c Release --no-build
 
       - run: dotnet format TransitPulse.slnx --verify-no-changes --no-restore
 
