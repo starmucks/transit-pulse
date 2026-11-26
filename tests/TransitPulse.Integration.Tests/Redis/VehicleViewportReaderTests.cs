@@ -42,6 +42,7 @@ public sealed class VehicleViewportReaderTests(RedisFixture redis) : IClassFixtu
 
         Assert.Equal(["inside"], vehicles.Select(v => v.VehicleId));
         Assert.Equal("1009", vehicles[0].RouteId);
+        Assert.NotNull(vehicles[0].RedisWrittenAt);
     }
 
     [Fact]

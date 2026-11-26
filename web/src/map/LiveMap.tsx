@@ -291,11 +291,32 @@ export function LiveMap({ feedId = 'hsl' }: LiveMapProps) {
         <aside className="latency-bench" aria-label="Source to map latency">
           <p className="map-legend-title">Source → map</p>
           <p className="latency-bench-line">
-            n={latencyStats.count}
+            total n={latencyStats.total.count}
             {' · '}
-            p50={formatLatencyMs(latencyStats.p50Ms)}
+            p50={formatLatencyMs(latencyStats.total.p50Ms)}
             {' · '}
-            p95={formatLatencyMs(latencyStats.p95Ms)}
+            p95={formatLatencyMs(latencyStats.total.p95Ms)}
+          </p>
+          <p className="latency-bench-line">
+            to Redis n={latencyStats.toRedis.count}
+            {' · '}
+            p50={formatLatencyMs(latencyStats.toRedis.p50Ms)}
+            {' · '}
+            p95={formatLatencyMs(latencyStats.toRedis.p95Ms)}
+          </p>
+          <p className="latency-bench-line">
+            Redis→send n={latencyStats.redisToSend.count}
+            {' · '}
+            p50={formatLatencyMs(latencyStats.redisToSend.p50Ms)}
+            {' · '}
+            p95={formatLatencyMs(latencyStats.redisToSend.p95Ms)}
+          </p>
+          <p className="latency-bench-line">
+            send→browser n={latencyStats.sendToBrowser.count}
+            {' · '}
+            p50={formatLatencyMs(latencyStats.sendToBrowser.p50Ms)}
+            {' · '}
+            p95={formatLatencyMs(latencyStats.sendToBrowser.p95Ms)}
           </p>
         </aside>
       ) : null}

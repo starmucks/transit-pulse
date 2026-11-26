@@ -9,6 +9,9 @@ namespace TransitPulse.Infrastructure.Redis;
 /// <param name="TripId">GTFS trip id, when present.</param>
 /// <param name="DelaySec">Schedule delay in seconds, when present.</param>
 /// <param name="ObservedAt">Last observed time from the attribute hash.</param>
+/// <param name="RedisWrittenAt">
+/// When the Worker last wrote this hash (C3 segment ages). Null when the field is missing (stale hash).
+/// </param>
 public sealed record MapVehicle(
     string VehicleId,
     double Lon,
@@ -17,4 +20,5 @@ public sealed record MapVehicle(
     string? RouteId,
     string? TripId,
     int? DelaySec,
-    DateTimeOffset ObservedAt);
+    DateTimeOffset ObservedAt,
+    DateTimeOffset? RedisWrittenAt = null);

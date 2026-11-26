@@ -68,7 +68,8 @@ builder.AddProject<Projects.TransitPulse_Processor>("processor")
     .WithReference(database)
     .WithReference(redis)
     .WithEnvironment("Kafka__BootstrapServers", redpanda.GetEndpoint("kafka").Property(EndpointProperty.HostAndPort))
-    // Local Aspire demos: skip the cold backlog so Redis GEO/attrs refill within seconds (stage 3.6/3.8).
+    // Local Aspire demos: new group + Latest so the map is not fed a multi-hour backlog (C3 / ADR-0018).
+    .WithEnvironment("Kafka__GroupId", "transitpulse-processor-aspire")
     .WithEnvironment("Kafka__AutoOffsetReset", "Latest")
     .WaitFor(redpanda)
     .WaitFor(database)
@@ -82,6 +83,9 @@ builder.AddProject<Projects.TransitPulse_Worker>("worker")
     .WithReference(redis)
     .WithEnvironment("GtfsImport__SnapshotDirectory", gtfsSnapshots)
     .WithEnvironment("Kafka__BootstrapServers", redpanda.GetEndpoint("kafka").Property(EndpointProperty.HostAndPort))
+    // Local Aspire demos: new group + Latest so Redis attrs stay fresh for C3 (ADR-0018).
+    .WithEnvironment("Kafka__PositionsGroupId", "transitpulse-worker-positions-aspire")
+    .WithEnvironment("Kafka__PositionsAutoOffsetReset", "Latest")
     .WaitFor(database)
     .WaitFor(redpanda)
     .WaitFor(redis);

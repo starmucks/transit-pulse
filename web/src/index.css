@@ -290,10 +290,14 @@ body,
 }
 
 .latency-bench-line {
-  margin: 0;
-  font-size: 0.8rem;
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
+}
+
+.latency-bench-line:first-of-type {
+  margin-top: 0.25rem;
 }
 
 .punctuality-grid {

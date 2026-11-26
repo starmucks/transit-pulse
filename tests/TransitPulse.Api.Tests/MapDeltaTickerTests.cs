@@ -86,6 +86,7 @@ public sealed class MapDeltaTickerTests
         Assert.Equal(MapDeltaTicker.ClientMethod, frame.Method);
         var delta = Assert.IsType<MapVehicleDelta>(frame.Arg);
         Assert.Equal(generation, delta.Generation);
+        Assert.Equal(_at, delta.SentAt);
         Assert.Equal(["v1"], delta.Added.Select(v => v.VehicleId));
         Assert.Contains("v1", registry.GetLastSent("c1").Keys);
     }

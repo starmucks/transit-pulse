@@ -3,7 +3,7 @@ using TransitPulse.Infrastructure.Redis;
 
 namespace TransitPulse.Api.Map;
 
-/// <summary>Pushes ~1 Hz viewport deltas to each subscribed SignalR connection (ADR-0017).</summary>
+/// <summary>Pushes viewport deltas to each subscribed SignalR connection (ADR-0017 / ADR-0018).</summary>
 public sealed partial class MapDeltaTicker(
     MapSubscriptionRegistry registry,
     IVehicleViewportReader viewport,
@@ -15,7 +15,8 @@ public sealed partial class MapDeltaTicker(
     /// <summary>SignalR client method name for a delta frame.</summary>
     public const string ClientMethod = "vehicleDelta";
 
-    private static readonly TimeSpan _period = TimeSpan.FromSeconds(1);
+    /// <summary>Map tick period; 250 ms keeps SignalR from dominating source→map delay (C3).</summary>
+    private static readonly TimeSpan _period = TimeSpan.FromMilliseconds(250);
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -83,8 +84,9 @@ public sealed partial class MapDeltaTicker(
             return;
         }
 
-        await hub.Clients.Client(subscription.ConnectionId).SendAsync(ClientMethod, delta, cancellationToken);
-        metrics.DeltaPublished(delta.Added.Count, delta.Updated.Count, delta.Removed.Count);
+        var stamped = delta with { SentAt = time.GetUtcNow() };
+        await hub.Clients.Client(subscription.ConnectionId).SendAsync(ClientMethod, stamped, cancellationToken);
+        metrics.DeltaPublished(stamped.Added.Count, stamped.Updated.Count, stamped.Removed.Count);
     }
 
     /// <summary>

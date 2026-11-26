@@ -11,8 +11,8 @@ using TransitPulse.Infrastructure.Redis;
 namespace TransitPulse.Worker.Kafka;
 
 /// <summary>
-/// Reads <c>positions.enriched</c>, thins to about one point / 10 s per vehicle, writes Timescale and Redis GEO, then
-/// commits offsets (ADR-0015). Delivery stays at-least-once: a crash repeats points; the primary key and GEO member
+/// Reads <c>positions.enriched</c>, writes a hot Redis cadence and a warmer Timescale cadence (ADR-0015 / ADR-0018),
+/// then commits offsets. Delivery stays at-least-once: a crash repeats points; the primary key and GEO member
 /// overwrite collapse duplicates. A failed flush pauses further consumes until the buffer is written.
 /// </summary>
 internal sealed partial class PositionSink(
@@ -45,16 +45,19 @@ internal sealed partial class PositionSink(
             [Topics.PositionsEnriched with { Name = _kafka.PositionsTopic }],
             stopping);
 
-        var thinner = new PositionThinner(_sink.ThinningInterval);
+        var warmThinner = new PositionThinner(_sink.ThinningInterval);
+        var hotThinner = new PositionThinner(_sink.HotThinningInterval);
 
         using var consumer = BuildConsumer();
         consumer.Subscribe(_kafka.PositionsTopic);
 
         try
         {
+            var nextFlush = timeProvider.GetUtcNow() + _sink.FlushInterval;
             var nextCommit = timeProvider.GetUtcNow() + _kafka.CommitInterval;
             var pending = new List<TopicPartitionOffset>();
-            var buffer = new List<EnrichedPosition>();
+            var warmBuffer = new List<EnrichedPosition>();
+            var hotBuffer = new List<EnrichedPosition>();
             var flushBlocked = false;
             while (!stopping.IsCancellationRequested)
             {
@@ -68,18 +71,21 @@ internal sealed partial class PositionSink(
                         try
                         {
                             var enriched = EnrichedPositionMessage.Parse(result.Message.Value);
-                            // Record as soon as we buffer so later points in the same commit window are thinned;
-                            // a failed flush keeps the buffer and these records for retry.
-                            if (thinner.ShouldKeep(
-                                    enriched.Position.FeedId,
-                                    enriched.Position.VehicleId,
-                                    enriched.Position.ObservedAt))
+                            var feedId = enriched.Position.FeedId;
+                            var vehicleId = enriched.Position.VehicleId;
+                            var observedAt = enriched.Position.ObservedAt;
+
+                            // Hot Redis first so the map sees fresh points without waiting for the warm window.
+                            if (hotThinner.ShouldKeep(feedId, vehicleId, observedAt))
                             {
-                                buffer.Add(enriched);
-                                thinner.Record(
-                                    enriched.Position.FeedId,
-                                    enriched.Position.VehicleId,
-                                    enriched.Position.ObservedAt);
+                                hotBuffer.Add(enriched);
+                                hotThinner.Record(feedId, vehicleId, observedAt);
+                            }
+
+                            if (warmThinner.ShouldKeep(feedId, vehicleId, observedAt))
+                            {
+                                warmBuffer.Add(enriched);
+                                warmThinner.Record(feedId, vehicleId, observedAt);
                             }
                             else
                             {
@@ -95,13 +101,18 @@ internal sealed partial class PositionSink(
                     }
                 }
 
-                if (flushBlocked || timeProvider.GetUtcNow() >= nextCommit)
+                var now = timeProvider.GetUtcNow();
+                if (flushBlocked || now >= nextFlush)
                 {
-                    if (await TryFlushAsync(buffer, stopping))
+                    if (await TryFlushAsync(warmBuffer, hotBuffer, stopping))
                     {
-                        Commit(consumer, pending);
                         flushBlocked = false;
-                        nextCommit = timeProvider.GetUtcNow() + _kafka.CommitInterval;
+                        nextFlush = now + _sink.FlushInterval;
+                        if (now >= nextCommit)
+                        {
+                            Commit(consumer, pending);
+                            nextCommit = now + _kafka.CommitInterval;
+                        }
                     }
                     else
                     {
@@ -111,7 +122,7 @@ internal sealed partial class PositionSink(
                 }
             }
 
-            if (await TryFlushAsync(buffer, stopping))
+            if (await TryFlushAsync(warmBuffer, hotBuffer, stopping))
             {
                 Commit(consumer, pending);
             }
@@ -122,38 +133,52 @@ internal sealed partial class PositionSink(
         }
     }
 
-    private async Task<bool> TryFlushAsync(List<EnrichedPosition> buffer, CancellationToken stopping)
+    private async Task<bool> TryFlushAsync(
+        List<EnrichedPosition> warmBuffer,
+        List<EnrichedPosition> hotBuffer,
+        CancellationToken stopping)
     {
-        if (buffer.Count == 0)
+        if (warmBuffer.Count == 0 && hotBuffer.Count == 0)
         {
             return true;
         }
 
-        var flushed = buffer.Count;
-        try
+        var warmCount = warmBuffer.Count;
+        if (warmCount > 0)
         {
-            await positionStore.InsertManyAsync(buffer, stopping);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            metrics.PostgresError();
-            LogFlushFailed("postgres", ex.GetType().Name, ex.Message);
-            return false;
-        }
-
-        try
-        {
-            await geoStore.UpsertManyAsync(buffer, stopping);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            metrics.RedisError();
-            LogFlushFailed("redis", ex.GetType().Name, ex.Message);
-            return false;
+            try
+            {
+                await positionStore.InsertManyAsync(warmBuffer, stopping);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                metrics.PostgresError();
+                LogFlushFailed("postgres", ex.GetType().Name, ex.Message);
+                return false;
+            }
         }
 
-        metrics.Written(flushed);
-        buffer.Clear();
+        if (hotBuffer.Count > 0)
+        {
+            try
+            {
+                await geoStore.UpsertManyAsync(hotBuffer, stopping);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                metrics.RedisError();
+                LogFlushFailed("redis", ex.GetType().Name, ex.Message);
+                return false;
+            }
+        }
+
+        if (warmCount > 0)
+        {
+            metrics.Written(warmCount);
+            warmBuffer.Clear();
+        }
+
+        hotBuffer.Clear();
         return true;
     }
 
@@ -210,9 +235,18 @@ internal sealed partial class PositionSink(
         ClientId = "transitpulse-worker-positions",
         GroupId = _kafka.PositionsGroupId,
         EnableAutoCommit = false,
-        AutoOffsetReset = AutoOffsetReset.Earliest,
+        AutoOffsetReset = ParseAutoOffsetReset(_kafka.PositionsAutoOffsetReset),
         EnablePartitionEof = true,
     }).Build();
+
+    private static AutoOffsetReset ParseAutoOffsetReset(string value) =>
+        value.Trim().ToUpperInvariant() switch
+        {
+            "LATEST" => AutoOffsetReset.Latest,
+            "EARLIEST" => AutoOffsetReset.Earliest,
+            _ => throw new InvalidOperationException(
+                $"Kafka:PositionsAutoOffsetReset '{value}' is not Earliest or Latest."),
+        };
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Schema migrations applied: {Applied}")]
     private partial void LogMigrated(string applied);

@@ -96,9 +96,15 @@ public sealed class VehicleViewportReader(IConnectionMultiplexer connection) : I
             return false;
         }
 
-        if (!TryParseObservedAt(Optional(attrs, "observed_at"), out var observedAt))
+        if (!TryParseTimestamp(Optional(attrs, "observed_at"), out var observedAt))
         {
             return false;
+        }
+
+        DateTimeOffset? redisWrittenAt = null;
+        if (TryParseTimestamp(Optional(attrs, "redis_written_at"), out var writtenAt))
+        {
+            redisWrittenAt = writtenAt;
         }
 
         vehicle = new MapVehicle(
@@ -109,7 +115,8 @@ public sealed class VehicleViewportReader(IConnectionMultiplexer connection) : I
             EmptyToNull(Optional(attrs, "route_id")),
             EmptyToNull(Optional(attrs, "trip_id")),
             ParseInt(Optional(attrs, "delay_sec")),
-            observedAt);
+            observedAt,
+            redisWrittenAt);
         return true;
     }
 
@@ -139,8 +146,8 @@ public sealed class VehicleViewportReader(IConnectionMultiplexer connection) : I
     private static int? ParseInt(string? value) =>
         int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : null;
 
-    private static bool TryParseObservedAt(string? value, out DateTimeOffset observedAt) =>
-        DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out observedAt);
+    private static bool TryParseTimestamp(string? value, out DateTimeOffset timestamp) =>
+        DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out timestamp);
 
     private static double DegreesToRadians(double degrees) => degrees * (Math.PI / 180d);
 }
