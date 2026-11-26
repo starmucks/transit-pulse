@@ -20,6 +20,8 @@ type UseVehicleHubOptions = {
   /** When set, Subscribe filters to this route (city covering box on the server). */
   routeId?: string | null
   enabled?: boolean
+  /** Called for deltas that pass the generation filter (stage 3.8 latency bench). */
+  onAcceptedDelta?: (delta: MapVehicleDelta) => void
 }
 
 type UseVehicleHubResult = {
@@ -42,6 +44,7 @@ export function useVehicleHub({
   viewport,
   routeId = null,
   enabled = true,
+  onAcceptedDelta,
 }: UseVehicleHubOptions): UseVehicleHubResult {
   const [vehicles, setVehicles] = useState<ReadonlyMap<string, MapVehicle>>(() => new Map())
   const [status, setStatus] = useState<ConnectionStatus>('disconnected')
@@ -51,6 +54,8 @@ export function useVehicleHub({
   viewportRef.current = viewport
   const routeIdRef = useRef(routeId)
   routeIdRef.current = routeId
+  const onAcceptedDeltaRef = useRef(onAcceptedDelta)
+  onAcceptedDeltaRef.current = onAcceptedDelta
   /** Generation from the last successful Subscribe; null while a Subscribe is in flight. */
   const acceptedGenerationRef = useRef<number | null>(null)
   /** Bumps on every Subscribe attempt so a stale invoke cannot win. */
@@ -74,6 +79,7 @@ export function useVehicleHub({
       if (delta.generation !== acceptedGenerationRef.current) {
         return
       }
+      onAcceptedDeltaRef.current?.(delta)
       setVehicles((prev) => applyDelta(prev, delta))
     })
 

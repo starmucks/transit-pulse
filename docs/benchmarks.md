@@ -797,3 +797,32 @@ cycles are lower).
 | Cold Parquet (full HSL) | ~1.4 GB/day | Measured (brief section 5.1) |
 | Warm Timescale (1/10 s) | ~0.14 GB/day | Brief-derived estimate |
 | Hot Redis GEO | one member + hash / active vehicle; hash TTL 120 s | Design (ADR-0015) |
+
+## Source to map latency (stage 3.8, local Aspire)
+
+End-to-end delay for goal C3: wall clock when a live map vehicle update arrives in the browser minus
+`VehiclePosition.ObservedAt` (source measurement time carried through Ingestor, Kafka, Processor, Worker, Redis and
+SignalR).
+
+**Stack:** Aspire AppHost + Vite `web/` on the author PC, live HSL, 2026-11-26 about 18:45-18:47 UTC. Processor
+cold-started with `Kafka:AutoOffsetReset=Latest` so Redis GEO/attrs were populated (stale GEO alone shows zero
+vehicles). The Worker position sink still uses `AutoOffsetReset=Earliest`; this window was taken in **steady state**
+after Redis attrs were non-zero and the map showed ~100 vehicles (not during catch-up of an empty GEO).
+
+**How:** open the Aspire `web` URL with `?bench=1`. The client records a sample only when SignalR delivers an
+`updated` vehicle whose `observedAt` changed (Subscribe snapshots and 1 Hz repeats of the same observation are
+ignored). Percentiles use linear interpolation on the sorted sample buffer. Negative delays (client clock behind the
+source) and delays above 120 s are dropped.
+
+| Metric | Value |
+|---|---:|
+| Samples (n) | 1 141 |
+| p50 | **7.3 s** |
+| p95 | **10.1 s** |
+| Vehicles in viewport (steady) | ~100 |
+
+**Vs goal C3 (p95 < 2 s):** not met on this run. Honest floor from source age alone (HSL `vp` `tsi`, archive hour
+2026-11-04) is already p50 0.55 s / p95 1.16 s - see "Source delay" above. The remainder is our path (Kafka + Processor +
+Worker thin/write + Redis + 1 Hz SignalR tick + client). Follow-up: break the same samples into segment ages (ingest
+receive, consumer lag, Redis write, tick delay); consider push-on-write map ticks and whether hot-path thinning should be
+tighter than 10 s for the live map only.

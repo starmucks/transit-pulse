@@ -275,6 +275,27 @@ body,
   color: var(--ink);
 }
 
+.latency-bench {
+  position: absolute;
+  right: 1.25rem;
+  bottom: 1.75rem;
+  z-index: 2;
+  max-width: min(20rem, calc(100vw - 2.5rem));
+  padding: 0.65rem 0.85rem 0.7rem;
+  pointer-events: none;
+  background: linear-gradient(145deg, var(--paper-glass), rgba(243, 239, 230, 0.72));
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(15, 28, 26, 0.08);
+  animation: chrome-in 0.85s ease-out 0.12s both;
+}
+
+.latency-bench-line {
+  margin: 0;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
 .punctuality-grid {
   margin: 0;
   display: grid;

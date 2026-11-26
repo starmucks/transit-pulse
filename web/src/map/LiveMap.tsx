@@ -11,6 +11,7 @@ import Map, {
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { fetchRouteShapes, fetchStops } from '../api/catalogue'
 import type { StopDto } from '../api/types'
+import { isLatencyBenchEnabled, useLatencyBench } from '../perf/useLatencyBench'
 import { RoutePanel } from '../panels/RoutePanel'
 import { StopPanel } from '../panels/StopPanel'
 import { shapesToGeoJson } from './shapesToGeoJson'
@@ -74,11 +75,14 @@ export function LiveMap({ feedId = 'hsl' }: LiveMapProps) {
   const [viewport, setViewport] = useState<GeoBoundingBox | null>(HELSINKI_VIEWPORT)
   const [selection, setSelection] = useState<Selection | null>(null)
   const routeId = selection?.kind === 'route' ? selection.routeId : null
+  const benchEnabled = isLatencyBenchEnabled()
+  const { stats: latencyStats, noteSample } = useLatencyBench(benchEnabled)
 
   const { vehicles, status, error, vehicleCount } = useVehicleHub({
     feedId,
     viewport,
     routeId,
+    onAcceptedDelta: noteSample,
   })
 
   const stopsQuery = useQuery({
@@ -283,11 +287,34 @@ export function LiveMap({ feedId = 'hsl' }: LiveMapProps) {
         </ul>
       </aside>
 
+      {benchEnabled ? (
+        <aside className="latency-bench" aria-label="Source to map latency">
+          <p className="map-legend-title">Source → map</p>
+          <p className="latency-bench-line">
+            n={latencyStats.count}
+            {' · '}
+            p50={formatLatencyMs(latencyStats.p50Ms)}
+            {' · '}
+            p95={formatLatencyMs(latencyStats.p95Ms)}
+          </p>
+        </aside>
+      ) : null}
+
       <footer className="map-attribution">
         <span>© HSL (CC BY 4.0) · map © OpenFreeMap · © OpenStreetMap contributors</span>
       </footer>
     </div>
   )
+}
+
+function formatLatencyMs(value: number | null): string {
+  if (value === null) {
+    return '—'
+  }
+  if (value < 1000) {
+    return `${Math.round(value)} ms`
+  }
+  return `${(value / 1000).toFixed(2)} s`
 }
 
 function boundsFromMap(map: {
