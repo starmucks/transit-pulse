@@ -2,21 +2,23 @@
 
 > Обновляется в конце каждой сессии. Не длиннее одного экрана.
 
-**Обновлено:** 2026-11-26 · **Этап:** 3 · следующая задача **3.9 (#87)** (после merge 3.8)
+**Обновлено:** 2026-11-26 · **Этап:** 3 · следующая задача **3.9 (#87)** (отложена) или follow-up C3
 
 ## Сделано (сессия 2026-11-26)
-- **3.7 (#85)** смержен (#98): stop panel + route mode.
-- **C3 follow-up (ADR-0018):** hot Redis 250 ms; remasure p50 **3.00 s** / p95 **3.73 s**. Segment ages: **to Redis** p95 **3.41 s**, Redis→send **513 ms**, send→browser **9 ms** — gap is before Redis.
+- **3.7 (#85)** → #98; **3.8 (#86)** → #99 (`?bench=1`, demo, screenshot).
+- **C3 path (#100):** ADR-0018 hot Redis 250 ms + segment ages; remasure total p50 **3.00 s** / p95 **3.73 s**; to Redis p95 **3.41 s**, Redis→send **513 ms**, send→browser **9 ms**.
 
 ## Следующий шаг
-1. Довести PR 3.8 (зелёный CI / merge).
-2. **3.9 (#87)** — публичный compose+HTTPS по ADR-0016 (когда локальное демо устойчиво; провайдер pay-per-use).
+1. **3.9 (#87)** — compose+HTTPS по ADR-0016, когда демо устойчиво и есть провайдер/домен.
+2. Опционально: дальше резать C3 через `lag_time` / ingest (не тик); принять ADR-0018.
 
 ## Известные проблемы
 - Сеть хостера сборщика теряет пакеты (инцидент 25.11 ~06Z→…; как 22.11).
 - Фаза A: добить оплаченный период и свернуть always-on сбор (без замены VPS) — ADR-0016.
 - `StopEventSink` пока не пишет `delay_sec` → CAGG on-time/avg часто нули/`null`.
-- C3 p95 < 2 s **не достигнута** (~3.7 s); сегменты показывают ~3.4 s до Redis — дальше `lag_time` / ingest, не тик.
+- C3 p95 < 2 s **не достигнута** (~3.7 s); ~3.4 s до Redis — дальше ingest/Kafka/Processor, не SignalR.
+- CI: `Replay.Tests` иногда SIGSEGV (exit 139) — flake, rerun; изолирован в workflow.
+- Локально `localhost:19092` может уходить в IPv6 (::1) — для Kafka предпочтителен `127.0.0.1`.
 - Хук перед коммитом смотрит `$CLAUDE_PROJECT_DIR`, а не worktree.
 - До route-keyed repartitioning (ADR-0013) Processor — singleton для слипания.
 - Привязка (ADR-0011): двусторонние улицы, скачки вперёд, поезда вне маршрута.
