@@ -15,8 +15,10 @@ const SUBSCRIBE_DEBOUNCE_MS = 280
 
 type UseVehicleHubOptions = {
   feedId?: string
-  /** Latest map viewport; Subscribe is debounced on change. */
+  /** Latest map viewport; used when not filtering by route. */
   viewport: GeoBoundingBox | null
+  /** When set, Subscribe filters to this route (city covering box on the server). */
+  routeId?: string | null
   enabled?: boolean
 }
 
@@ -27,14 +29,18 @@ type UseVehicleHubResult = {
   vehicleCount: number
 }
 
+type SubscribeEpoch = { current: number }
+
 /**
  * Maintains one SignalR connection to /hubs/vehicles, re-subscribes on viewport
- * change and after reconnect, and folds vehicleDelta frames into a local map.
- * Frames whose generation does not match the last Subscribe result are ignored.
+ * or route filter change and after reconnect, and folds vehicleDelta frames into
+ * a local map. Frames whose generation does not match the last Subscribe result
+ * are ignored. Pan/zoom does not re-subscribe while a route filter is active.
  */
 export function useVehicleHub({
   feedId = DEFAULT_FEED,
   viewport,
+  routeId = null,
   enabled = true,
 }: UseVehicleHubOptions): UseVehicleHubResult {
   const [vehicles, setVehicles] = useState<ReadonlyMap<string, MapVehicle>>(() => new Map())
@@ -43,8 +49,12 @@ export function useVehicleHub({
   const connectionRef = useRef<HubConnection | null>(null)
   const viewportRef = useRef(viewport)
   viewportRef.current = viewport
+  const routeIdRef = useRef(routeId)
+  routeIdRef.current = routeId
   /** Generation from the last successful Subscribe; null while a Subscribe is in flight. */
   const acceptedGenerationRef = useRef<number | null>(null)
+  /** Bumps on every Subscribe attempt so a stale invoke cannot win. */
+  const subscribeEpochRef = useRef(0)
 
   useEffect(() => {
     if (!enabled) {
@@ -76,7 +86,15 @@ export function useVehicleHub({
       setStatus('connected')
       setError(null)
       setVehicles(new Map())
-      await subscribeCurrent(connection, feedId, viewportRef.current, setError, acceptedGenerationRef)
+      await subscribeCurrent(
+        connection,
+        feedId,
+        viewportRef.current,
+        routeIdRef.current,
+        setError,
+        acceptedGenerationRef,
+        subscribeEpochRef,
+      )
     })
 
     connection.onclose(() => {
@@ -95,7 +113,15 @@ export function useVehicleHub({
         }
         setStatus('connected')
         setError(null)
-        await subscribeCurrent(connection, feedId, viewportRef.current, setError, acceptedGenerationRef)
+        await subscribeCurrent(
+          connection,
+          feedId,
+          viewportRef.current,
+          routeIdRef.current,
+          setError,
+          acceptedGenerationRef,
+          subscribeEpochRef,
+        )
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -108,6 +134,7 @@ export function useVehicleHub({
       cancelled = true
       connectionRef.current = null
       acceptedGenerationRef.current = null
+      subscribeEpochRef.current += 1
       void (async () => {
         try {
           if (connection.state === HubConnectionState.Connected) {
@@ -121,8 +148,9 @@ export function useVehicleHub({
     }
   }, [enabled, feedId])
 
+  // City mode: follow the viewport. Skip while a route filter owns the subscription.
   useEffect(() => {
-    if (!enabled || !viewport) {
+    if (!enabled || routeId || !viewport) {
       return
     }
 
@@ -132,14 +160,49 @@ export function useVehicleHub({
     }
 
     const handle = window.setTimeout(() => {
-      // Clear markers and reject in-flight deltas until the new Subscribe generation arrives.
       acceptedGenerationRef.current = null
       setVehicles(new Map())
-      void subscribeCurrent(connection, feedId, viewport, setError, acceptedGenerationRef)
+      void subscribeCurrent(
+        connection,
+        feedId,
+        viewport,
+        null,
+        setError,
+        acceptedGenerationRef,
+        subscribeEpochRef,
+      )
     }, SUBSCRIBE_DEBOUNCE_MS)
 
     return () => window.clearTimeout(handle)
-  }, [enabled, feedId, viewport])
+  }, [enabled, feedId, viewport, routeId])
+
+  // Route mode: city covering box on the server; ignore pan/zoom.
+  useEffect(() => {
+    if (!enabled || !routeId) {
+      return
+    }
+
+    const connection = connectionRef.current
+    if (!connection || connection.state !== HubConnectionState.Connected) {
+      return
+    }
+
+    const handle = window.setTimeout(() => {
+      acceptedGenerationRef.current = null
+      setVehicles(new Map())
+      void subscribeCurrent(
+        connection,
+        feedId,
+        null,
+        routeId,
+        setError,
+        acceptedGenerationRef,
+        subscribeEpochRef,
+      )
+    }, SUBSCRIBE_DEBOUNCE_MS)
+
+    return () => window.clearTimeout(handle)
+  }, [enabled, feedId, routeId])
 
   return {
     vehicles,
@@ -153,28 +216,54 @@ async function subscribeCurrent(
   connection: HubConnection,
   feedId: string,
   viewport: GeoBoundingBox | null,
+  routeId: string | null | undefined,
   setError: (message: string | null) => void,
   acceptedGenerationRef: { current: number | null },
+  subscribeEpochRef: SubscribeEpoch,
 ): Promise<void> {
-  if (!viewport) {
+  const filteredRoute = routeId?.trim() ? routeId.trim() : null
+
+  if (!filteredRoute && !viewport) {
     return
   }
 
-  const box = clampBbox(viewport)
+  const epoch = ++subscribeEpochRef.current
   acceptedGenerationRef.current = null
   try {
-    const generation = await connection.invoke<number>(
-      'Subscribe',
-      feedId,
-      box.west,
-      box.south,
-      box.east,
-      box.north,
-      null,
-    )
+    let generation: number
+    if (filteredRoute) {
+      generation = await connection.invoke<number>(
+        'Subscribe',
+        feedId,
+        null,
+        null,
+        null,
+        null,
+        filteredRoute,
+      )
+    } else {
+      const box = clampBbox(viewport!)
+      generation = await connection.invoke<number>(
+        'Subscribe',
+        feedId,
+        box.west,
+        box.south,
+        box.east,
+        box.north,
+        null,
+      )
+    }
+
+    if (epoch !== subscribeEpochRef.current) {
+      return
+    }
+
     acceptedGenerationRef.current = generation
     setError(null)
   } catch (err: unknown) {
+    if (epoch !== subscribeEpochRef.current) {
+      return
+    }
     acceptedGenerationRef.current = null
     setError(err instanceof Error ? err.message : 'Subscribe failed')
   }
