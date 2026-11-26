@@ -66,12 +66,13 @@ API (+ статика web/) ──► локально Aspire / Vite; позже
 - ✅ 2026-11-26: `StopEventReader` + `PunctualityReader`, index `stop_events_feed_stop_at`; `RealtimeEndpoints`; unit + Postgres tests; Aspire — stop `1113131` events for 2026-11-23, route `1009` punctuality arrivals=50 (`delay_sec` still null from sink → on-time 0).
 
 ### 3.5 SignalR: дельты по видимой области (#83)
-- [ ] Hub: подписка на bbox и/или `routeId`; тик ~1 с; в кадре — только машины в подписке (добавление/обновление/удаление).
-- [ ] Источник правды для тика — Redis GEO (+ атрибуты); backplane Redis, если процессов API > 1 (на демо может быть один процесс — backplane всё равно заложить).
-- [ ] ADR «SignalR: viewport deltas, not broadcast» (бриф ADR 7).
-- [ ] Защита: лимит подписок/размера bbox; метрика размера дельты и числа подписчиков.
+- [x] Hub: подписка на bbox и/или `routeId`; тик ~1 с; в кадре — только машины в подписке (добавление/обновление/удаление).
+- [x] Источник правды для тика — Redis GEO (+ атрибуты); backplane Redis заложен сразу.
+- [x] ADR «SignalR: viewport deltas, not broadcast» (бриф ADR 7) → [ADR-0017](../adr/0017-stream-map-vehicles-as-viewport-deltas.md).
+- [x] Защита: лимит span bbox 0.5°, max 500 машин/кадр; метрики подписчиков / размера дельты / truncations.
 
 **Готово, когда:** два клиента с разными bbox получают разные множества; нагрузка «весь город широковещанием» не используется; ADR Accepted.
+- ✅ 2026-11-26: `VehicleMapHub` + `MapDeltaTicker` + `VehicleViewportReader`; unit + Redis + two-client SignalR tests; ADR-0017 Accepted.
 
 ### 3.6 Фронт: живая карта MapLibre (#84)
 - [ ] `web/`: React + TypeScript + Vite, MapLibre (`react-map-gl`), TanStack Query, `@microsoft/signalr`.
@@ -116,7 +117,7 @@ API (+ статика web/) ──► локально Aspire / Vite; позже
 ## ADR этапа
 
 - Бриф ADR 5 → [ADR-0015](../adr/0015-store-thinned-positions-in-redis-geo-and-timescale.md): многоуровневое хранение и прореживание позиций (горячий Redis GEO, тёплый Timescale, холодный Parquet) — задача 3.2 (#80).
-- Бриф ADR 7 → новый файл: SignalR, дельты по видимой области / линии, не broadcast — с задачей 3.5 (#83).
+- Бриф ADR 7 → [ADR-0017](../adr/0017-stream-map-vehicles-as-viewport-deltas.md): SignalR viewport/route deltas, not broadcast — задача 3.5 (#83).
 - Форма деплоя демо — [ADR-0016](../adr/0016-run-the-public-demo-on-demand-with-archive-replay.md) (Accepted 2026-11-25); реализация — в задаче 3.9.
 
 ## Решения, принятые в этой спецификации (утверждены 2026-11-22; п. 6 уточнён и п. 9 добавлен 2026-11-25)
