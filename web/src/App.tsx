@@ -10,10 +10,7 @@ const queryClient = new QueryClient({
   },
 })
 
-/**
- * Stage 3.6 shell: live map only. Stop panel and route page arrive in 3.7;
- * TanStack Query is wired for those REST reads.
- */
+/** App shell: TanStack Query + live map with stop/route panels (stage 3.7). */
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>

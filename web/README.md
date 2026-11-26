@@ -1,12 +1,22 @@
 # Transit Pulse web
 
-React + TypeScript + Vite live map (stage 3.6). MapLibre GL JS **v5** (`react-map-gl`) shows Helsinki
-vehicles over SignalR viewport deltas from `TransitPulse.Api` (`/hubs/vehicles`, ADR-0017). Marker
-colours encode delay; the client drops deltas whose `generation` does not match the last `Subscribe`.
-TanStack Query is scaffolded for stop/route REST reads in 3.7 (no map queries yet).
+React + TypeScript + Vite live map (stage 3.6–3.7). MapLibre GL JS **v5**
+(`react-map-gl`) shows Helsinki vehicles over SignalR viewport deltas from
+`TransitPulse.Api` (`/hubs/vehicles`, ADR-0017). Marker colours encode delay; the
+client drops deltas whose `generation` does not match the last `Subscribe`.
 
-MapLibre **v6** is not used yet: under Vite its separate ESM worker fails to fetch vector tiles
-(blank map). Stay on `maplibre-gl@5` until a verified `setWorkerUrl` setup lands.
+Stage 3.7 adds:
+
+- GTFS stop markers (boarding stops) → click opens a panel of **observed** stop
+  events from `GET /api/v1/feeds/{feed}/stops/{id}/events`.
+- Vehicle or route-link click → **route mode**: SignalR `Subscribe` with
+  `routeId`, optional shape polyline, and punctuality from
+  `GET /api/v1/feeds/{feed}/routes/{id}/punctuality`.
+- Loading / empty / error copy in the panels (no silent failure).
+
+MapLibre **v6** is not used yet: under Vite its separate ESM worker fails to fetch
+vector tiles (blank map). Stay on `maplibre-gl@5` until a verified `setWorkerUrl`
+setup lands.
 
 This app is separate from `tools/map-spot-check` (offline stage-2 acceptance).
 
@@ -18,13 +28,15 @@ From the repository root, with Docker and user-secrets already set:
 dotnet run --project src/TransitPulse.AppHost
 ```
 
-The AppHost starts the API and a Vite resource (`web`). Open the `web` endpoint from the Aspire
-dashboard. Vite proxies `/api`, `/hubs`, `/health` and `/openapi` to the API (including WebSockets),
-so the browser stays same-origin and needs no CORS.
+The AppHost starts the API and a Vite resource (`web`). Open the `web` endpoint
+from the Aspire dashboard. Vite proxies `/api`, `/hubs`, `/health` and `/openapi`
+to the API (including WebSockets), so the browser stays same-origin and needs no
+CORS.
 
 ## Dev pair without Aspire Vite
 
-With the API already listening (e.g. Aspire without the frontend, or a direct API run):
+With the API already listening (e.g. Aspire without the frontend, or a direct API
+run):
 
 ```powershell
 cd web
@@ -43,11 +55,12 @@ npm ci
 npm run build
 ```
 
-Output is `web/dist/`. Serve that folder with Caddy (stage 3.9) or any static host that forwards
-`/api` and `/hubs` (WebSocket) to the API. Relative hub URL `/hubs/vehicles` keeps the same origin.
+Output is `web/dist/`. Serve that folder with Caddy (stage 3.9) or any static host
+that forwards `/api` and `/hubs` (WebSocket) to the API. Relative hub URL
+`/hubs/vehicles` keeps the same origin.
 
-`npm run preview` also proxies `/api` and `/hubs` when `VITE_API_PROXY` (or Aspire env) is set — same
-as `dev`. Without a proxy target, SignalR will not reach the API.
+`npm run preview` also proxies `/api` and `/hubs` when `VITE_API_PROXY` (or Aspire
+env) is set — same as `dev`. Without a proxy target, SignalR will not reach the API.
 
 ## Attribution
 

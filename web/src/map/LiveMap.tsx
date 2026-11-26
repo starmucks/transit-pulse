@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import Map, {
   Layer,
@@ -8,6 +9,12 @@ import Map, {
   type ViewStateChangeEvent,
 } from 'react-map-gl/maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import { fetchRouteShapes, fetchStops } from '../api/catalogue'
+import type { StopDto } from '../api/types'
+import { RoutePanel } from '../panels/RoutePanel'
+import { StopPanel } from '../panels/StopPanel'
+import { shapesToGeoJson } from './shapesToGeoJson'
+import { stopsToGeoJson } from './stopsToGeoJson'
 import type { GeoBoundingBox, MapVehicle } from './types'
 import { useVehicleHub } from './useVehicleHub'
 
@@ -20,9 +27,13 @@ const HELSINKI_VIEWPORT: GeoBoundingBox = {
   north: 60.2,
 }
 const STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty'
-const SOURCE_ID = 'vehicles'
+const VEHICLE_SOURCE_ID = 'vehicles'
 const CIRCLE_LAYER_ID = 'vehicles-circle'
 const LABEL_LAYER_ID = 'vehicles-label'
+const STOP_SOURCE_ID = 'stops'
+const STOP_LAYER_ID = 'stops-circle'
+const SHAPE_SOURCE_ID = 'route-shapes'
+const SHAPE_LAYER_ID = 'route-shapes-line'
 
 /** Matches circle-color thresholds in the vehicles layer. */
 const DELAY_LEGEND = [
@@ -34,6 +45,10 @@ const DELAY_LEGEND = [
 type LiveMapProps = {
   feedId?: string
 }
+
+type Selection =
+  | { kind: 'stop'; stop: StopDto }
+  | { kind: 'route'; routeId: string }
 
 type VehicleFeatureCollection = {
   type: 'FeatureCollection'
@@ -51,15 +66,48 @@ type VehicleFeatureCollection = {
 }
 
 /**
- * Full-bleed Helsinki map: viewport-following SignalR subscription, circle markers
- * for live vehicles, brand chrome and data-source attribution.
+ * Full-bleed Helsinki map: viewport-following SignalR subscription, stop click
+ * → arrivals panel, vehicle/route click → route mode with punctuality.
  */
 export function LiveMap({ feedId = 'hsl' }: LiveMapProps) {
   const mapRef = useRef<MapRef>(null)
   const [viewport, setViewport] = useState<GeoBoundingBox | null>(HELSINKI_VIEWPORT)
-  const { vehicles, status, error, vehicleCount } = useVehicleHub({ feedId, viewport })
+  const [selection, setSelection] = useState<Selection | null>(null)
+  const routeId = selection?.kind === 'route' ? selection.routeId : null
 
-  const geojson = useMemo(() => vehiclesToGeoJson(vehicles), [vehicles])
+  const { vehicles, status, error, vehicleCount } = useVehicleHub({
+    feedId,
+    viewport,
+    routeId,
+  })
+
+  const stopsQuery = useQuery({
+    queryKey: ['stops', feedId],
+    queryFn: ({ signal }) => fetchStops(feedId, signal),
+    staleTime: 10 * 60_000,
+  })
+
+  const shapesQuery = useQuery({
+    queryKey: ['route-shapes', feedId, routeId],
+    queryFn: ({ signal }) => fetchRouteShapes(feedId, routeId!, signal),
+    enabled: routeId !== null,
+    staleTime: 10 * 60_000,
+  })
+
+  const stopById = useMemo(() => {
+    const byId = new globalThis.Map<string, StopDto>()
+    for (const stop of stopsQuery.data ?? []) {
+      byId.set(stop.stopId, stop)
+    }
+    return byId
+  }, [stopsQuery.data])
+
+  const vehicleGeoJson = useMemo(() => vehiclesToGeoJson(vehicles), [vehicles])
+  const stopGeoJson = useMemo(() => stopsToGeoJson(stopsQuery.data ?? []), [stopsQuery.data])
+  const shapeGeoJson = useMemo(
+    () => shapesToGeoJson(shapesQuery.data ?? []),
+    [shapesQuery.data],
+  )
 
   const onLoad = useCallback(() => {
     const map = mapRef.current
@@ -73,9 +121,44 @@ export function LiveMap({ feedId = 'hsl' }: LiveMapProps) {
     setViewport(boundsFromMap(event.target))
   }, [])
 
-  const onClick = useCallback((_event: MapLayerMouseEvent) => {
-    // Stage 3.7: stop / route panel from clicked feature.
+  const openRoute = useCallback((nextRouteId: string) => {
+    setSelection({ kind: 'route', routeId: nextRouteId })
   }, [])
+
+  const onClick = useCallback(
+    (event: MapLayerMouseEvent) => {
+      const vehicleHit = event.features?.find((feature) => feature.layer?.id === CIRCLE_LAYER_ID)
+      if (vehicleHit) {
+        const nextRouteId = vehicleHit.properties?.routeId
+        if (typeof nextRouteId === 'string' && nextRouteId.length > 0) {
+          openRoute(nextRouteId)
+          return
+        }
+      }
+
+      const stopHit = event.features?.find((feature) => feature.layer?.id === STOP_LAYER_ID)
+      if (stopHit) {
+        const stopId = stopHit.properties?.stopId
+        if (typeof stopId === 'string') {
+          const stop = stopById.get(stopId)
+          if (stop) {
+            setSelection({ kind: 'stop', stop })
+          }
+        }
+        return
+      }
+
+      setSelection(null)
+    },
+    [openRoute, stopById],
+  )
+
+  const tagline =
+    selection?.kind === 'route'
+      ? `Route ${selection.routeId} · live vehicles + punctuality`
+      : selection?.kind === 'stop'
+        ? `Stop ${selection.stop.name ?? selection.stop.stopId}`
+        : 'Live Helsinki · click a stop or a vehicle'
 
   return (
     <div className="live-map">
@@ -84,14 +167,45 @@ export function LiveMap({ feedId = 'hsl' }: LiveMapProps) {
         initialViewState={HELSINKI}
         mapStyle={STYLE_URL}
         attributionControl={false}
-        interactiveLayerIds={[CIRCLE_LAYER_ID]}
+        interactiveLayerIds={[CIRCLE_LAYER_ID, STOP_LAYER_ID]}
         onLoad={onLoad}
         onMoveEnd={onMoveEnd}
         onClick={onClick}
+        cursor="pointer"
         style={{ width: '100%', height: '100%' }}
       >
         <NavigationControl position="bottom-right" showCompass={false} />
-        <Source id={SOURCE_ID} type="geojson" data={geojson}>
+
+        {routeId && shapeGeoJson.features.length > 0 ? (
+          <Source id={SHAPE_SOURCE_ID} type="geojson" data={shapeGeoJson}>
+            <Layer
+              id={SHAPE_LAYER_ID}
+              type="line"
+              paint={{
+                'line-color': '#0f7a6e',
+                'line-width': 3.5,
+                'line-opacity': 0.55,
+              }}
+            />
+          </Source>
+        ) : null}
+
+        <Source id={STOP_SOURCE_ID} type="geojson" data={stopGeoJson}>
+          <Layer
+            id={STOP_LAYER_ID}
+            type="circle"
+            minzoom={13}
+            paint={{
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 2.2, 16, 4.5],
+              'circle-color': '#f3efe6',
+              'circle-stroke-width': 1,
+              'circle-stroke-color': '#4a6570',
+              'circle-opacity': 0.9,
+            }}
+          />
+        </Source>
+
+        <Source id={VEHICLE_SOURCE_ID} type="geojson" data={vehicleGeoJson}>
           <Layer
             id={CIRCLE_LAYER_ID}
             type="circle"
@@ -133,11 +247,29 @@ export function LiveMap({ feedId = 'hsl' }: LiveMapProps) {
 
       <header className="map-chrome">
         <p className="brand">Transit Pulse</p>
-        <p className="tagline">Live Helsinki · HSL positions over SignalR</p>
+        <p className="tagline">{tagline}</p>
         <p className={`status status-${status}`} aria-live="polite">
-          {statusLabel(status, vehicleCount, error)}
+          {statusLabel(status, vehicleCount, error, stopsQuery)}
         </p>
       </header>
+
+      {selection?.kind === 'stop' ? (
+        <StopPanel
+          feedId={feedId}
+          stop={selection.stop}
+          onClose={() => setSelection(null)}
+          onOpenRoute={openRoute}
+        />
+      ) : null}
+
+      {selection?.kind === 'route' ? (
+        <RoutePanel
+          feedId={feedId}
+          routeId={selection.routeId}
+          vehicleCount={vehicleCount}
+          onClose={() => setSelection(null)}
+        />
+      ) : null}
 
       <aside className="map-legend" aria-label="Vehicle delay colours">
         <p className="map-legend-title">Delay</p>
@@ -191,9 +323,20 @@ function vehiclesToGeoJson(vehicles: ReadonlyMap<string, MapVehicle>): VehicleFe
   return { type: 'FeatureCollection', features }
 }
 
-function statusLabel(status: string, count: number, error: string | null): string {
+function statusLabel(
+  status: string,
+  count: number,
+  error: string | null,
+  stopsQuery: { isPending: boolean; isError: boolean },
+): string {
   if (error) {
     return error
+  }
+  if (stopsQuery.isError) {
+    return 'Stop catalogue failed to load'
+  }
+  if (stopsQuery.isPending) {
+    return 'Loading stops…'
   }
   switch (status) {
     case 'connecting':
