@@ -6,10 +6,10 @@
 
 ## Сделано (сессия 2026-11-26)
 - **3.4 (#82)** / **3.5 (#83)** смержены (#95, #96).
-- **3.6 (#84):** `web/` MapLibre v5 + SignalR; Aspire `AddViteApp`; generation-guard `ReplaceLastSent`; живой HSL на карте (~214 в viewport). Ветка `feature/84-live-map` на `main`.
+- **3.6 (#84):** `web/` MapLibre v5 + SignalR; Aspire `AddViteApp`; CAS/`IsCurrent` + `generation` в delta; легенда задержки; живой HSL (~214). PR **#97**.
 
 ## Следующий шаг
-1. Довести PR **#97** (3.6): CAS на `ReplaceLastSent`, зелёный CI.
+1. Зелёный CI / merge PR **#97** (3.6).
 2. **3.7 (#85)** — остановка → прибытия; страница линии + пунктуальность.
 3. 3.9 (#87) — после локального демо; провайдер pay-per-use по ADR-0016.
 

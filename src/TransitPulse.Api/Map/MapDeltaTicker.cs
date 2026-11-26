@@ -60,7 +60,7 @@ public sealed partial class MapDeltaTicker(
             metrics.Truncated();
         }
 
-        var delta = MapDeltaCalculator.Diff(lastSent, current);
+        var delta = MapDeltaCalculator.Diff(lastSent, current, generation);
         if (delta.Added.Count == 0 && delta.Updated.Count == 0 && delta.Removed.Count == 0)
         {
             // Still CAS last-sent so a mid-tick Subscribe is not overwritten with the old viewport.
@@ -74,6 +74,9 @@ public sealed partial class MapDeltaTicker(
             return;
         }
 
+        // Tests inject Subscribe here to cover the CAS-ok → IsCurrent-false window.
+        AfterSuccessfulCasForTests?.Invoke();
+
         // Subscribe may have landed after CAS; do not push a delta for the superseded viewport.
         if (!registry.IsCurrent(subscription.ConnectionId, generation))
         {
@@ -83,6 +86,19 @@ public sealed partial class MapDeltaTicker(
         await hub.Clients.Client(subscription.ConnectionId).SendAsync(ClientMethod, delta, cancellationToken);
         metrics.DeltaPublished(delta.Added.Count, delta.Updated.Count, delta.Removed.Count);
     }
+
+    /// <summary>
+    /// Runs one tick for tests. Production uses <see cref="ExecuteAsync"/> with a periodic timer.
+    /// </summary>
+    internal Task TickOnceForTestsAsync(
+        MapSubscription subscription,
+        IReadOnlyDictionary<string, MapVehicle> lastSent,
+        long generation,
+        CancellationToken cancellationToken) =>
+        TickOneAsync(subscription, lastSent, generation, cancellationToken);
+
+    /// <summary>Test hook: runs after a successful <see cref="MapSubscriptionRegistry.ReplaceLastSent"/>.</summary>
+    internal Action? AfterSuccessfulCasForTests { get; set; }
 
     [LoggerMessage(EventId = 1, Level = LogLevel.Warning, Message = "Map tick failed for connection {ConnectionId}")]
     private static partial void LogTickFailed(ILogger logger, Exception exception, string connectionId);

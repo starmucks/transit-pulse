@@ -30,6 +30,7 @@ type UseVehicleHubResult = {
 /**
  * Maintains one SignalR connection to /hubs/vehicles, re-subscribes on viewport
  * change and after reconnect, and folds vehicleDelta frames into a local map.
+ * Frames whose generation does not match the last Subscribe result are ignored.
  */
 export function useVehicleHub({
   feedId = DEFAULT_FEED,
@@ -42,6 +43,8 @@ export function useVehicleHub({
   const connectionRef = useRef<HubConnection | null>(null)
   const viewportRef = useRef(viewport)
   viewportRef.current = viewport
+  /** Generation from the last successful Subscribe; null while a Subscribe is in flight. */
+  const acceptedGenerationRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (!enabled) {
@@ -58,23 +61,28 @@ export function useVehicleHub({
     connectionRef.current = connection
 
     connection.on('vehicleDelta', (delta: MapVehicleDelta) => {
+      if (delta.generation !== acceptedGenerationRef.current) {
+        return
+      }
       setVehicles((prev) => applyDelta(prev, delta))
     })
 
     connection.onreconnecting(() => {
       setStatus('reconnecting')
+      acceptedGenerationRef.current = null
     })
 
     connection.onreconnected(async () => {
       setStatus('connected')
       setError(null)
       setVehicles(new Map())
-      await subscribeCurrent(connection, feedId, viewportRef.current, setError)
+      await subscribeCurrent(connection, feedId, viewportRef.current, setError, acceptedGenerationRef)
     })
 
     connection.onclose(() => {
       if (!cancelled) {
         setStatus('disconnected')
+        acceptedGenerationRef.current = null
       }
     })
 
@@ -87,7 +95,7 @@ export function useVehicleHub({
         }
         setStatus('connected')
         setError(null)
-        await subscribeCurrent(connection, feedId, viewportRef.current, setError)
+        await subscribeCurrent(connection, feedId, viewportRef.current, setError, acceptedGenerationRef)
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -99,6 +107,7 @@ export function useVehicleHub({
     return () => {
       cancelled = true
       connectionRef.current = null
+      acceptedGenerationRef.current = null
       void (async () => {
         try {
           if (connection.state === HubConnectionState.Connected) {
@@ -123,10 +132,10 @@ export function useVehicleHub({
     }
 
     const handle = window.setTimeout(() => {
-      // Subscribe resets server last-sent; clear local markers so vehicles that left the
-      // new box are not stale until the first delta arrives as "added".
+      // Clear markers and reject in-flight deltas until the new Subscribe generation arrives.
+      acceptedGenerationRef.current = null
       setVehicles(new Map())
-      void subscribeCurrent(connection, feedId, viewport, setError)
+      void subscribeCurrent(connection, feedId, viewport, setError, acceptedGenerationRef)
     }, SUBSCRIBE_DEBOUNCE_MS)
 
     return () => window.clearTimeout(handle)
@@ -145,14 +154,16 @@ async function subscribeCurrent(
   feedId: string,
   viewport: GeoBoundingBox | null,
   setError: (message: string | null) => void,
+  acceptedGenerationRef: { current: number | null },
 ): Promise<void> {
   if (!viewport) {
     return
   }
 
   const box = clampBbox(viewport)
+  acceptedGenerationRef.current = null
   try {
-    await connection.invoke(
+    const generation = await connection.invoke<number>(
       'Subscribe',
       feedId,
       box.west,
@@ -161,8 +172,10 @@ async function subscribeCurrent(
       box.north,
       null,
     )
+    acceptedGenerationRef.current = generation
     setError(null)
   } catch (err: unknown) {
+    acceptedGenerationRef.current = null
     setError(err instanceof Error ? err.message : 'Subscribe failed')
   }
 }

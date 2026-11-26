@@ -75,9 +75,9 @@ API (+ статика web/) ──► локально Aspire / Vite; позже
 - ✅ 2026-11-26: `VehicleMapHub` + `MapDeltaTicker` + `VehicleViewportReader`; unit + Redis + two-client SignalR tests; ADR-0017 Accepted.
 
 ### 3.6 Фронт: живая карта MapLibre (#84)
-- [x] `web/`: React + TypeScript + Vite, MapLibre v5 (`react-map-gl`), TanStack Query, `@microsoft/signalr`.
-- [x] Первый экран: карта Хельсинки, машины движутся по SignalR на **живом HSL**; атрибуция источников данных.
-- [x] Подписка следует за viewport (пан/зум); отписка при уходе (generation-guard на last-sent против гонки tick/Subscribe).
+- [x] `web/`: React + TypeScript + Vite, MapLibre v5 (`react-map-gl`), `@microsoft/signalr`; TanStack Query scaffold (`QueryClientProvider`) for 3.7 REST — no map queries yet.
+- [x] Первый экран: карта Хельсинки, машины движутся по SignalR на **живом HSL**; атрибуция источников данных; легенда цветов по задержке.
+- [x] Подписка следует за viewport (пан/зум); отписка при уходе (CAS + `IsCurrent` на last-sent; `generation` в delta + фильтр на клиенте).
 - [x] Сборка статики под раздачу Caddy/Aspire; не смешивать с `tools/map-spot-check` (тот остаётся офлайн-приёмкой этапа 2).
 
 **Готово, когда:** `dotnet run` AppHost (или documented dev pair API+Vite) показывает движущиеся маркеры на живом HSL; обрыв SignalR переподключается без ручного F5.

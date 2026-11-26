@@ -15,6 +15,8 @@ export type MapVehicleDelta = {
   added: MapVehicle[]
   updated: MapVehicle[]
   removed: string[]
+  /** Must match the generation returned by the last successful Subscribe. */
+  generation: number
 }
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected'

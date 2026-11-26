@@ -14,4 +14,8 @@
     <ProjectReference Include="..\TransitPulse.ServiceDefaults\TransitPulse.ServiceDefaults.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="TransitPulse.Api.Tests" />
+  </ItemGroup>
+
 </Project>

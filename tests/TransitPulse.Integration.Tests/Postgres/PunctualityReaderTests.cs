@@ -47,11 +47,7 @@ public sealed class PunctualityReaderTests(PostgresFixture postgres) : IClassFix
             await insert.ExecuteNonQueryAsync(Ct);
         }
 
-        await using (var refresh = database.CreateCommand(
-            "CALL refresh_continuous_aggregate('public.punctuality_by_route_day', NULL, NULL)"))
-        {
-            await refresh.ExecuteNonQueryAsync(Ct);
-        }
+        await ContinuousAggregateRefresh.RefreshPunctualityByRouteDayAsync(database, Ct);
 
         var reader = new PunctualityReader(database);
         var summary = await reader.GetRouteDayAsync("hsl", "1009", new DateOnly(2026, 11, 5), Ct);

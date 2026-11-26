@@ -24,6 +24,13 @@ const SOURCE_ID = 'vehicles'
 const CIRCLE_LAYER_ID = 'vehicles-circle'
 const LABEL_LAYER_ID = 'vehicles-label'
 
+/** Matches circle-color thresholds in the vehicles layer. */
+const DELAY_LEGEND = [
+  { color: '#0f7a6e', label: 'On time (≤1 min)' },
+  { color: '#c98a1a', label: 'Delayed (1–3 min)' },
+  { color: '#b33b5a', label: 'Late (>3 min)' },
+] as const
+
 type LiveMapProps = {
   feedId?: string
 }
@@ -131,6 +138,18 @@ export function LiveMap({ feedId = 'hsl' }: LiveMapProps) {
           {statusLabel(status, vehicleCount, error)}
         </p>
       </header>
+
+      <aside className="map-legend" aria-label="Vehicle delay colours">
+        <p className="map-legend-title">Delay</p>
+        <ul className="map-legend-list">
+          {DELAY_LEGEND.map((item) => (
+            <li key={item.label}>
+              <span className="map-legend-swatch" style={{ background: item.color }} aria-hidden />
+              <span>{item.label}</span>
+            </li>
+          ))}
+        </ul>
+      </aside>
 
       <footer className="map-attribution">
         <span>© HSL (CC BY 4.0) · map © OpenFreeMap · © OpenStreetMap contributors</span>
