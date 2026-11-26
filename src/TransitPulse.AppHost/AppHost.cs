@@ -68,6 +68,8 @@ builder.AddProject<Projects.TransitPulse_Processor>("processor")
     .WithReference(database)
     .WithReference(redis)
     .WithEnvironment("Kafka__BootstrapServers", redpanda.GetEndpoint("kafka").Property(EndpointProperty.HostAndPort))
+    // Local Aspire demos: skip the cold backlog so Redis GEO/attrs refill within seconds (stage 3.6/3.8).
+    .WithEnvironment("Kafka__AutoOffsetReset", "Latest")
     .WaitFor(redpanda)
     .WaitFor(database)
     .WaitFor(redis);

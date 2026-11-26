@@ -2,26 +2,25 @@
 
 > Обновляется в конце каждой сессии. Не длиннее одного экрана.
 
-**Обновлено:** 2026-11-26 · **Этап:** 3 · следующая задача **3.7 (#85)** (после коммита/PR 3.6)
+**Обновлено:** 2026-11-26 · **Этап:** 3 · следующая задача **3.9 (#87)** (после merge 3.8)
 
 ## Сделано (сессия 2026-11-26)
-- **3.4 (#82)** / **3.5 (#83)** смержены (#95, #96).
-- **3.6 (#84):** `web/` MapLibre v5 + SignalR; Aspire `AddViteApp`; CAS/`IsCurrent` + `generation` в delta; легенда задержки; живой HSL (~214). PR **#97**.
+- **3.7 (#85)** смержен (#98): stop panel + route mode.
+- **3.8 (#86) in progress:** `?bench=1` source→map; p50 **7.3 s** / p95 **10.1 s** (n=1 141); README screenshot + `docs/demo-stage-3.md`; AppHost Processor `AutoOffsetReset=Latest` for local cold start.
 
 ## Следующий шаг
-1. Зелёный CI / merge PR **#97** (3.6).
-2. **3.7 (#85)** — остановка → прибытия; страница линии + пунктуальность.
-3. 3.9 (#87) — после локального демо; провайдер pay-per-use по ADR-0016.
+1. Довести PR 3.8 (зелёный CI / merge).
+2. **3.9 (#87)** — публичный compose+HTTPS по ADR-0016 (когда локальное демо устойчиво; провайдер pay-per-use).
 
 ## Известные проблемы
 - Сеть хостера сборщика теряет пакеты (инцидент 25.11 ~06Z→…; как 22.11).
 - Фаза A: добить оплаченный период и свернуть always-on сбор (без замены VPS) — ADR-0016.
 - `StopEventSink` пока не пишет `delay_sec` → CAGG on-time/avg часто нули/`null`.
+- C3 p95 < 2 s **не достигнута** на локальном замере 3.8 (~10 s) — разложить по участкам (benchmarks).
 - Хук перед коммитом смотрит `$CLAUDE_PROJECT_DIR`, а не worktree.
 - До route-keyed repartitioning (ADR-0013) Processor — singleton для слипания.
 - Привязка (ADR-0011): двусторонние улицы, скачки вперёд, поезда вне маршрута.
 - `PublishAot` выключает EventSource.
-- Локальный Processor: старые Kafka offsets / schedule mismatch → fail-closed; cold start: новая group + `Kafka:AutoOffsetReset=Latest` (или сброс checkpoint+группы).
 - Aspire AppHost: для user-secrets нужен Development / launch profile `https`.
 - MapLibre **v6** под Vite — пустая карта; в `web/` зафиксирован **v5**.
 

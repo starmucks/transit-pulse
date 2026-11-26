@@ -14,6 +14,10 @@ Stage 3.7 adds:
   `GET /api/v1/feeds/{feed}/routes/{id}/punctuality`.
 - Loading / empty / error copy in the panels (no silent failure).
 
+Stage 3.8: open the app with `?bench=1` to sample source→map latency
+(`observedAt` → browser) on accepted SignalR updates. Method and numbers live in
+`docs/benchmarks.md`.
+
 MapLibre **v6** is not used yet: under Vite its separate ESM worker fails to fetch
 vector tiles (blank map). Stay on `maplibre-gl@5` until a verified `setWorkerUrl`
 setup lands.
