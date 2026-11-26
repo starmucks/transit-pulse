@@ -97,7 +97,7 @@ API (+ статика web/) ──► локально Aspire / Vite; позже
 - [x] Укороченный демо-скрипт этапа 3 на локальном URL (полный §12 — к этапу 9): карта, остановка, линия, цифра задержки.
 
 **Готово, когда:** цифры задержки в benchmarks и README; демо «карта → остановка → линия» стабильно воспроизводится локально за ≤ 2 минуты.
-- ✅ 2026-11-26: `?bench=1` → p50 **7.3 s** / p95 **10.1 s** (n=1 141); C3 not met — cause/plan in benchmarks; screenshot + `docs/demo-stage-3.md`.
+- ✅ 2026-11-26: `?bench=1` baseline → p50 **7.3 s** / p95 **10.1 s** (n=1 141); after ADR-0018 → p50 **3.06 s** / p95 **3.75 s** (n=2 000); C3 still open — cause/plan in benchmarks; screenshot + `docs/demo-stage-3.md`.
 
 ### 3.9 Публичный деплой (compose + HTTPS) — позже (#87)
 - [ ] Отложено решением автора 2026-11-22: сначала локальный прогон `web/` + API. Задачу открываем, когда локальное демо устойчиво.
@@ -122,6 +122,7 @@ API (+ статика web/) ──► локально Aspire / Vite; позже
 - Бриф ADR 5 → [ADR-0015](../adr/0015-store-thinned-positions-in-redis-geo-and-timescale.md): многоуровневое хранение и прореживание позиций (горячий Redis GEO, тёплый Timescale, холодный Parquet) — задача 3.2 (#80).
 - Бриф ADR 7 → [ADR-0017](../adr/0017-stream-map-vehicles-as-viewport-deltas.md): SignalR viewport/route deltas, not broadcast — задача 3.5 (#83).
 - Форма деплоя демо — [ADR-0016](../adr/0016-run-the-public-demo-on-demand-with-archive-replay.md) (Accepted 2026-11-25); реализация — в задаче 3.9.
+- C3 latency path → [ADR-0018](../adr/0018-separate-hot-redis-cadence-from-warm-timescale-thinning.md) (Proposed): hot Redis 250 ms + 250 ms flush/tick vs warm 10 s; remasure p95 ~3.8 s.
 
 ## Решения, принятые в этой спецификации (утверждены 2026-11-22; п. 6 уточнён и п. 9 добавлен 2026-11-25)
 

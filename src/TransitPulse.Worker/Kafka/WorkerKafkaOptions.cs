@@ -28,4 +28,9 @@ internal sealed class WorkerKafkaOptions
     /// interval costs throughput. Shared by both sinks.
     /// </summary>
     public TimeSpan CommitInterval { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Offset reset for the position sink only (<c>Earliest</c> or <c>Latest</c>). Stop-event sink stays Earliest.
+    /// </summary>
+    public string PositionsAutoOffsetReset { get; set; } = "Earliest";
 }

@@ -32,10 +32,18 @@ builder.Services.AddOptions<WorkerKafkaOptions>()
         o => !string.Equals(o.GroupId, o.PositionsGroupId, StringComparison.Ordinal),
         "Kafka:PositionsGroupId must differ from Kafka:GroupId.")
     .Validate(o => o.CommitInterval > TimeSpan.Zero, "Kafka:CommitInterval must be positive.")
+    .Validate(
+        o => o.PositionsAutoOffsetReset is "Earliest" or "Latest",
+        "Kafka:PositionsAutoOffsetReset must be Earliest or Latest.")
     .ValidateOnStart();
 builder.Services.AddOptions<PositionSinkOptions>()
     .BindConfiguration(PositionSinkOptions.SectionName)
     .Validate(o => o.ThinningInterval > TimeSpan.Zero, "PositionSink:ThinningInterval must be positive.")
+    .Validate(o => o.HotThinningInterval > TimeSpan.Zero, "PositionSink:HotThinningInterval must be positive.")
+    .Validate(
+        o => o.HotThinningInterval <= o.ThinningInterval,
+        "PositionSink:HotThinningInterval must be ≤ ThinningInterval.")
+    .Validate(o => o.FlushInterval > TimeSpan.Zero, "PositionSink:FlushInterval must be positive.")
     .Validate(o => o.GeoAttributeTtl > TimeSpan.Zero, "PositionSink:GeoAttributeTtl must be positive.")
     .ValidateOnStart();
 builder.Services.AddSingleton(provider => new GtfsImporter(provider.GetRequiredService<NpgsqlDataSource>()));

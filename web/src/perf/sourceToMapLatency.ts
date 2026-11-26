@@ -29,7 +29,14 @@ export class SourceToMapLatencyBuffer {
       return null
     }
 
-    const delayMs = receivedAtMs - observedMs
+    return this.recordDelayMs(receivedAtMs - observedMs)
+  }
+
+  /**
+   * Records a precomputed delay in ms. Negative and &gt; 120 s samples are dropped
+   * (same rules as {@link record}).
+   */
+  recordDelayMs(delayMs: number): number | null {
     if (delayMs < 0 || delayMs > 120_000) {
       return null
     }

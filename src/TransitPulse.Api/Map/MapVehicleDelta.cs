@@ -10,11 +10,15 @@ namespace TransitPulse.Api.Map;
 /// Subscription generation this frame belongs to. Clients ignore frames whose generation does not match
 /// the value returned by the last successful <c>Subscribe</c> (closes the SendAsync TOCTOU after pan/zoom).
 /// </param>
+/// <param name="SentAt">
+/// UTC wall clock when the API is about to push this frame (C3 segment ages). Default until the ticker stamps it.
+/// </param>
 public sealed record MapVehicleDelta(
     IReadOnlyList<MapVehicle> Added,
     IReadOnlyList<MapVehicle> Updated,
     IReadOnlyList<string> Removed,
-    long Generation);
+    long Generation,
+    DateTimeOffset SentAt = default);
 
 /// <summary>Computes added/updated/removed against the last frame sent to a connection.</summary>
 public static class MapDeltaCalculator

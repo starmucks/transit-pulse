@@ -104,8 +104,10 @@ public sealed class PositionSinkTests :
         var sink = StartSink(database, topic, groupId, new VehiclePositionStore(database), faultingGeo);
         try
         {
+            // Unique vehicle id: RedisFixture is shared and GEO members outlive a failed hash write.
+            const string vehicleId = "40/499-fail";
             var one = new EnrichedPosition(
-                new VehiclePosition("hsl", "40/415", "1009_trip", "1009", 60.17, 24.94, 8f, 180f, 0, null, _t0),
+                new VehiclePosition("hsl", vehicleId, "1009_trip", "1009", 60.17, 24.94, 8f, 180f, 0, null, _t0),
                 null,
                 0);
             Publish(topic, [one]);
@@ -113,12 +115,12 @@ public sealed class PositionSinkTests :
             await WaitUntilAsync(async () => await CountPositionsAsync(database) >= 1, TimeSpan.FromSeconds(20));
             await WaitUntilAsync(() => Task.FromResult(faultingGeo.Attempts >= 2), TimeSpan.FromSeconds(10));
             Assert.Equal(0, await CommittedTotalAsync(groupId, topic));
-            Assert.Null(await _redisConnection!.GetDatabase().GeoPositionAsync(VehicleGeoStore.GeoKey("hsl"), "40/415"));
+            Assert.Null(await _redisConnection!.GetDatabase().GeoPositionAsync(VehicleGeoStore.GeoKey("hsl"), vehicleId));
 
             faultingGeo.AllowSuccess();
             await WaitUntilAsync(
                 async () => await _redisConnection!.GetDatabase()
-                    .GeoPositionAsync(VehicleGeoStore.GeoKey("hsl"), "40/415") is not null,
+                    .GeoPositionAsync(VehicleGeoStore.GeoKey("hsl"), vehicleId) is not null,
                 TimeSpan.FromSeconds(20));
             await WaitUntilAsync(async () => await CommittedTotalAsync(groupId, topic) >= 1, TimeSpan.FromSeconds(20));
             Assert.True(faultingGeo.Attempts >= 3);
@@ -149,6 +151,8 @@ public sealed class PositionSinkTests :
             Options.Create(new PositionSinkOptions
             {
                 ThinningInterval = TimeSpan.FromSeconds(10),
+                HotThinningInterval = TimeSpan.FromMilliseconds(250),
+                FlushInterval = TimeSpan.FromMilliseconds(200),
                 GeoAttributeTtl = TimeSpan.FromSeconds(120),
             }),
             database,

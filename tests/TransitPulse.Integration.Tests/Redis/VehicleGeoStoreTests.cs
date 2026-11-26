@@ -41,6 +41,7 @@ public sealed class VehicleGeoStoreTests(RedisFixture redis) : IClassFixture<Red
         var hash = await db.HashGetAllAsync(VehicleGeoStore.AttributeKey("hsl", "40/415"));
         Assert.Contains(hash, entry => entry.Name == "route_id" && entry.Value == "1009");
         Assert.Contains(hash, entry => entry.Name == "delay_sec" && entry.Value == "45");
+        Assert.Contains(hash, entry => entry.Name == "redis_written_at" && !entry.Value.IsNullOrEmpty);
         var ttl = await db.KeyTimeToLiveAsync(VehicleGeoStore.AttributeKey("hsl", "40/415"));
         Assert.NotNull(ttl);
         Assert.True(ttl.Value > TimeSpan.FromSeconds(60));

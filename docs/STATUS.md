@@ -6,7 +6,7 @@
 
 ## Сделано (сессия 2026-11-26)
 - **3.7 (#85)** смержен (#98): stop panel + route mode.
-- **3.8 (#86) in progress:** `?bench=1` source→map; p50 **7.3 s** / p95 **10.1 s** (n=1 141); README screenshot + `docs/demo-stage-3.md`; AppHost Processor `AutoOffsetReset=Latest` for local cold start.
+- **C3 follow-up (ADR-0018):** hot Redis 250 ms; remasure p50 **3.00 s** / p95 **3.73 s**. Segment ages: **to Redis** p95 **3.41 s**, Redis→send **513 ms**, send→browser **9 ms** — gap is before Redis.
 
 ## Следующий шаг
 1. Довести PR 3.8 (зелёный CI / merge).
@@ -16,7 +16,7 @@
 - Сеть хостера сборщика теряет пакеты (инцидент 25.11 ~06Z→…; как 22.11).
 - Фаза A: добить оплаченный период и свернуть always-on сбор (без замены VPS) — ADR-0016.
 - `StopEventSink` пока не пишет `delay_sec` → CAGG on-time/avg часто нули/`null`.
-- C3 p95 < 2 s **не достигнута** на локальном замере 3.8 (~10 s) — разложить по участкам (benchmarks).
+- C3 p95 < 2 s **не достигнута** (~3.7 s); сегменты показывают ~3.4 s до Redis — дальше `lag_time` / ingest, не тик.
 - Хук перед коммитом смотрит `$CLAUDE_PROJECT_DIR`, а не worktree.
 - До route-keyed repartitioning (ADR-0013) Processor — singleton для слипания.
 - Привязка (ADR-0011): двусторонние улицы, скачки вперёд, поезда вне маршрута.

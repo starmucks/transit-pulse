@@ -21,11 +21,16 @@ public sealed class VehicleGeoStore : IVehicleGeoStore
 
     private readonly IDatabase _database;
     private readonly TimeSpan _attributeTtl;
+    private readonly TimeProvider _time;
 
     /// <summary>Creates a store over a Redis connection.</summary>
     /// <param name="connection">Shared multiplexer from Aspire or tests.</param>
     /// <param name="attributeTtl">TTL refreshed on each vehicle hash write; must be positive.</param>
-    public VehicleGeoStore(IConnectionMultiplexer connection, TimeSpan? attributeTtl = null)
+    /// <param name="time">Clock for <c>redis_written_at</c> (C3 segment ages); defaults to the system clock.</param>
+    public VehicleGeoStore(
+        IConnectionMultiplexer connection,
+        TimeSpan? attributeTtl = null,
+        TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(connection);
         _attributeTtl = attributeTtl ?? DefaultAttributeTtl;
@@ -35,6 +40,7 @@ public sealed class VehicleGeoStore : IVehicleGeoStore
         }
 
         _database = connection.GetDatabase();
+        _time = time ?? TimeProvider.System;
     }
 
     /// <summary>GEO key for one feed's current vehicle set.</summary>
@@ -67,6 +73,7 @@ public sealed class VehicleGeoStore : IVehicleGeoStore
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        var writtenAt = _time.GetUtcNow().UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
         var batch = _database.CreateBatch();
         var pending = new List<Task>(positions.Count * 3);
 
@@ -100,6 +107,7 @@ public sealed class VehicleGeoStore : IVehicleGeoStore
                     new HashEntry(
                         "observed_at",
                         position.ObservedAt.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)),
+                    new HashEntry("redis_written_at", writtenAt),
                 ]));
             pending.Add(batch.KeyExpireAsync(attrKey, _attributeTtl));
         }

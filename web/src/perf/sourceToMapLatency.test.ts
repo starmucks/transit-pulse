@@ -23,6 +23,8 @@ describe('SourceToMapLatencyBuffer', () => {
     const now = Date.parse('2026-11-26T18:00:00.000Z')
     expect(buffer.record(new Date(now + 5_000).toISOString(), now)).toBeNull()
     expect(buffer.record(new Date(now - 200_000).toISOString(), now)).toBeNull()
+    expect(buffer.recordDelayMs(-1)).toBeNull()
+    expect(buffer.recordDelayMs(200_000)).toBeNull()
     expect(buffer.size).toBe(0)
   })
 })

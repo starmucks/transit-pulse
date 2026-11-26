@@ -8,6 +8,8 @@ export type MapVehicle = {
   tripId: string | null
   delaySec: number | null
   observedAt: string
+  /** When Worker wrote the Redis hash; absent on stale hashes. */
+  redisWrittenAt?: string | null
 }
 
 /** One SignalR frame — mirrors API MapVehicleDelta. */
@@ -17,6 +19,8 @@ export type MapVehicleDelta = {
   removed: string[]
   /** Must match the generation returned by the last successful Subscribe. */
   generation: number
+  /** UTC when the API stamped this frame before SendAsync (C3 segment ages). */
+  sentAt?: string
 }
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected'

@@ -804,15 +804,16 @@ End-to-end delay for goal C3: wall clock when a live map vehicle update arrives 
 `VehiclePosition.ObservedAt` (source measurement time carried through Ingestor, Kafka, Processor, Worker, Redis and
 SignalR).
 
-**Stack:** Aspire AppHost + Vite `web/` on the author PC, live HSL, 2026-11-26 about 18:45-18:47 UTC. Processor
-cold-started with `Kafka:AutoOffsetReset=Latest` so Redis GEO/attrs were populated (stale GEO alone shows zero
-vehicles). The Worker position sink still uses `AutoOffsetReset=Earliest`; this window was taken in **steady state**
-after Redis attrs were non-zero and the map showed ~100 vehicles (not during catch-up of an empty GEO).
-
 **How:** open the Aspire `web` URL with `?bench=1`. The client records a sample only when SignalR delivers an
-`updated` vehicle whose `observedAt` changed (Subscribe snapshots and 1 Hz repeats of the same observation are
-ignored). Percentiles use linear interpolation on the sorted sample buffer. Negative delays (client clock behind the
-source) and delays above 120 s are dropped.
+`updated` vehicle whose `observedAt` changed (Subscribe snapshots and repeats of the same observation are ignored).
+Percentiles use linear interpolation on the sorted sample buffer (capacity 2 000). Negative delays (client clock behind
+the source) and delays above 120 s are dropped.
+
+### Baseline (before ADR-0018)
+
+**Stack:** Aspire AppHost + Vite `web/`, live HSL, 2026-11-26 about 18:45–18:47 UTC. Processor cold-started with
+`Kafka:AutoOffsetReset=Latest`. Steady state after Redis attrs were non-zero (~100 vehicles). Worker still used a single
+10 s thinner and flushed on the 5 s Kafka commit interval; SignalR tick ~1 Hz.
 
 | Metric | Value |
 |---|---:|
@@ -821,8 +822,41 @@ source) and delays above 120 s are dropped.
 | p95 | **10.1 s** |
 | Vehicles in viewport (steady) | ~100 |
 
-**Vs goal C3 (p95 < 2 s):** not met on this run. Honest floor from source age alone (HSL `vp` `tsi`, archive hour
-2026-11-04) is already p50 0.55 s / p95 1.16 s - see "Source delay" above. The remainder is our path (Kafka + Processor +
-Worker thin/write + Redis + 1 Hz SignalR tick + client). Follow-up: break the same samples into segment ages (ingest
-receive, consumer lag, Redis write, tick delay); consider push-on-write map ticks and whether hot-path thinning should be
-tighter than 10 s for the live map only.
+### After ADR-0018 (hot Redis 250 ms + flush/tick 250 ms)
+
+**Stack:** same machine, live HSL, 2026-11-26 about 19:32–19:34 UTC. AppHost Ingestor `full`, Processor/Worker
+dedicated Aspire consumer groups with `AutoOffsetReset=Latest`, `PositionSink:HotThinningInterval` /
+`FlushInterval` 250 ms, `MapDeltaTicker` 250 ms. Steady state ~165 vehicles in the Helsinki viewport; buffer filled to
+capacity within ~90 s.
+
+| Metric | Value |
+|---|---:|
+| Samples (n) | 2 000 |
+| p50 | **3.06 s** |
+| p95 | **3.75 s** |
+| Vehicles in viewport (steady) | ~165 |
+
+(Intermediate check with hot thin 1 s earlier the same evening: p50 3.42 s / p95 4.64 s, n=2 000.)
+
+**Vs goal C3 (p95 < 2 s):** still not met. Honest floor from source age alone (HSL `vp` `tsi`, archive hour
+2026-11-04) is already p50 0.55 s / p95 1.16 s — see "Source delay" above; `tsi` is whole seconds so the floor reads up
+to 1 s high. After ADR-0018 the path dropped ~6 s at p95 vs the baseline, but ~2 s of our path remain above the
+budget.
+
+### Segment ages (after ADR-0018)
+
+Same stack and method, 2026-11-26 about 19:55–19:57 UTC, steady state (~90 vehicles). Worker writes
+`redis_written_at` on each Redis hash; API stamps `sentAt` on each SignalR delta. `?bench=1` records four delays on
+the same samples (only when stamps are present):
+
+| Segment | Formula | p50 | p95 | n |
+|---|---|---:|---:|---:|
+| **total** | browser − `observedAt` | **3.00 s** | **3.73 s** | 2 000 |
+| **to Redis** | `redisWrittenAt` − `observedAt` | **2.73 s** | **3.41 s** | 2 000 |
+| **Redis → send** | `sentAt` − `redisWrittenAt` | **285 ms** | **513 ms** | 2 000 |
+| **send → browser** | browser − `sentAt` | **2 ms** | **9 ms** | 2 000 |
+
+**Reading:** almost all of the remaining C3 gap sits **before Redis** (source age + Ingestor + Kafka + Processor +
+Worker hot thin/flush). The 250 ms map tick is a few hundred milliseconds at p95; SignalR and the browser are
+negligible. Next cut should refine “to Redis” with existing `lag_time` metrics / ingest receive time — not further
+tick shrinkage. Push-on-write SignalR stays deferred (ADR-0018).
