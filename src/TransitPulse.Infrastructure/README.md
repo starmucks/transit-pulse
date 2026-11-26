@@ -14,6 +14,8 @@
   deletes any prior row for that id in a ±2 day window, then inserts. Kafka `events.stop` retention is 24 h, so
   repeats land in uncompressed chunks (compress after 7 days); do not expect delete+insert against compressed history.
   Nullable `delay_sec` feeds `punctuality_by_route_day`; the sink may leave it null until events carry delay.
+  API stop-panel reads use `StopEventReader` (index `stop_events_feed_stop_at` on `(feed_id, stop_id, at DESC)`).
+  Route punctuality uses `PunctualityReader` against the CAGG; missing days return zeros, not null.
 - **`vehicle_positions` is the warm thinned series** (hypertable by `observed_at`, 14-day retention, compress after 2 days).
   `VehiclePositionStore` batch-inserts with `ON CONFLICT DO NOTHING` on `(feed_id, vehicle_id, observed_at)`.
   `VehicleGeoStore` keeps the hot map layer: GEO `transitpulse:geo:{feedId}` plus hash `transitpulse:vehicle:{feedId}:{vehicleId}`
