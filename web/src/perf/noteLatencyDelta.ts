@@ -1,10 +1,12 @@
 import type { MapVehicle, MapVehicleDelta } from '../map/types'
 import type { SourceToMapLatencyBuffer } from './sourceToMapLatency'
 
-/** Per-segment buffers for C3: total and three pipeline cuts. */
+/** Per-segment buffers for C3: total and pipeline cuts including ingest split. */
 export type SegmentLatencyBuffers = {
   total: SourceToMapLatencyBuffer
   toRedis: SourceToMapLatencyBuffer
+  sourceAge: SourceToMapLatencyBuffer
+  ingestToRedis: SourceToMapLatencyBuffer
   redisToSend: SourceToMapLatencyBuffer
   sendToBrowser: SourceToMapLatencyBuffer
 }
@@ -17,6 +19,8 @@ export type SegmentLatencyBuffers = {
  * Segments (when stamps are present):
  * - total: browser − observedAt
  * - toRedis: redisWrittenAt − observedAt
+ * - sourceAge: ingestedAt − observedAt
+ * - ingestToRedis: redisWrittenAt − ingestedAt
  * - redisToSend: sentAt − redisWrittenAt
  * - sendToBrowser: browser − sentAt
  */
@@ -58,6 +62,14 @@ function recordIfNew(
   const redisMs = vehicle.redisWrittenAt ? Date.parse(vehicle.redisWrittenAt) : Number.NaN
   if (!Number.isNaN(redisMs)) {
     buffers.toRedis.recordDelayMs(redisMs - observedMs)
+  }
+
+  const ingestedMs = vehicle.ingestedAt ? Date.parse(vehicle.ingestedAt) : Number.NaN
+  if (!Number.isNaN(ingestedMs)) {
+    buffers.sourceAge.recordDelayMs(ingestedMs - observedMs)
+  }
+  if (!Number.isNaN(redisMs) && !Number.isNaN(ingestedMs)) {
+    buffers.ingestToRedis.recordDelayMs(redisMs - ingestedMs)
   }
 
   const sentMs = sentAtIso ? Date.parse(sentAtIso) : Number.NaN

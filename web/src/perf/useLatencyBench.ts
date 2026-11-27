@@ -8,6 +8,8 @@ const empty: LatencyStats = { count: 0, p50Ms: null, p95Ms: null, maxMs: null }
 export type SegmentLatencyStats = {
   total: LatencyStats
   toRedis: LatencyStats
+  sourceAge: LatencyStats
+  ingestToRedis: LatencyStats
   redisToSend: LatencyStats
   sendToBrowser: LatencyStats
 }
@@ -15,6 +17,8 @@ export type SegmentLatencyStats = {
 const emptySegments: SegmentLatencyStats = {
   total: empty,
   toRedis: empty,
+  sourceAge: empty,
+  ingestToRedis: empty,
   redisToSend: empty,
   sendToBrowser: empty,
 }
@@ -31,6 +35,8 @@ function createBuffers(): SegmentLatencyBuffers {
   return {
     total: new SourceToMapLatencyBuffer(),
     toRedis: new SourceToMapLatencyBuffer(),
+    sourceAge: new SourceToMapLatencyBuffer(),
+    ingestToRedis: new SourceToMapLatencyBuffer(),
     redisToSend: new SourceToMapLatencyBuffer(),
     sendToBrowser: new SourceToMapLatencyBuffer(),
   }
@@ -60,6 +66,8 @@ export function useLatencyBench(enabled: boolean): {
       setStats({
         total: b.total.stats(),
         toRedis: b.toRedis.stats(),
+        sourceAge: b.sourceAge.stats(),
+        ingestToRedis: b.ingestToRedis.stats(),
         redisToSend: b.redisToSend.stats(),
         sendToBrowser: b.sendToBrowser.stats(),
       })

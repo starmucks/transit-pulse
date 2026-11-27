@@ -22,6 +22,10 @@ namespace TransitPulse.Domain;
 /// <param name="DelaySec">Deviation from schedule in seconds (positive = late), if known.</param>
 /// <param name="Occupancy">How full the vehicle is, if reported.</param>
 /// <param name="ObservedAt">When the source measured the position; must be in UTC.</param>
+/// <param name="IngestedAt">
+/// When the Ingestor received the raw record (UTC). Optional on the wire so older messages and unit fixtures stay
+/// valid; set by <c>PositionRouter</c> for C3 segment ages (source age vs pipeline).
+/// </param>
 public sealed record VehiclePosition(
     string FeedId,
     string VehicleId,
@@ -33,7 +37,8 @@ public sealed record VehiclePosition(
     float? Bearing,
     int? DelaySec,
     OccupancyLevel? Occupancy,
-    DateTimeOffset ObservedAt)
+    DateTimeOffset ObservedAt,
+    DateTimeOffset? IngestedAt = null)
 {
     /// <summary>Source feed, e.g. <c>hsl</c>, <c>entur-sky</c>, <c>mbta</c>.</summary>
     public string FeedId { get; } = RequireText(FeedId);
@@ -55,6 +60,9 @@ public sealed record VehiclePosition(
 
     /// <summary>When the source measured the position; always UTC.</summary>
     public DateTimeOffset ObservedAt { get; } = RequireUtc(ObservedAt);
+
+    /// <summary>When the Ingestor received the raw record; UTC when set.</summary>
+    public DateTimeOffset? IngestedAt { get; } = RequireUtcOrNull(IngestedAt);
 
     private static string RequireText(string value, [CallerArgumentExpression(nameof(value))] string? name = null)
     {
@@ -81,4 +89,9 @@ public sealed record VehiclePosition(
             : value.Offset == TimeSpan.Zero
                 ? value
                 : throw new ArgumentException($"Must be UTC, got offset {value.Offset}.", name);
+
+    private static DateTimeOffset? RequireUtcOrNull(
+        DateTimeOffset? value,
+        [CallerArgumentExpression(nameof(value))] string? name = null) =>
+        value is null ? null : RequireUtc(value.Value, name);
 }

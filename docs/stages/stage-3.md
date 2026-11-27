@@ -122,7 +122,7 @@ API (+ статика web/) ──► локально Aspire / Vite; позже
 - Бриф ADR 5 → [ADR-0015](../adr/0015-store-thinned-positions-in-redis-geo-and-timescale.md): многоуровневое хранение и прореживание позиций (горячий Redis GEO, тёплый Timescale, холодный Parquet) — задача 3.2 (#80).
 - Бриф ADR 7 → [ADR-0017](../adr/0017-stream-map-vehicles-as-viewport-deltas.md): SignalR viewport/route deltas, not broadcast — задача 3.5 (#83).
 - Форма деплоя демо — [ADR-0016](../adr/0016-run-the-public-demo-on-demand-with-archive-replay.md) (Accepted 2026-11-25); реализация — в задаче 3.9.
-- C3 latency path → [ADR-0018](../adr/0018-separate-hot-redis-cadence-from-warm-timescale-thinning.md) (Proposed): hot Redis 250 ms + 250 ms flush/tick vs warm 10 s; remasure p95 ~3.8 s.
+- C3 latency path → [ADR-0018](../adr/0018-separate-hot-redis-cadence-from-warm-timescale-thinning.md) (Accepted): hot Redis 250 ms + 250 ms flush/tick vs warm 10 s; remasure p95 ~3.8 s; ingest receive stamp splits source age vs pipeline.
 
 ## Решения, принятые в этой спецификации (утверждены 2026-11-22; п. 6 уточнён и п. 9 добавлен 2026-11-25)
 

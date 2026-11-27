@@ -1,6 +1,6 @@
 # 0018. Separate hot Redis cadence from warm Timescale thinning
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-26
 
 ## Context
