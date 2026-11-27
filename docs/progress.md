@@ -63,7 +63,22 @@ Short notes per stage or week: what was done, what was learned about the system,
 - Live lag acceptance used a Saturday evening window; a weekday morning peak re-check remains optional.
 - Local Processor fail-closes if Redpanda has committed offsets but Redis has no matching checkpoint (reset the volume or the group).
 
-## Stage 3 — Storage, API, map (from 2026-11-22)
+## Stage 3 — Storage, API, map (2026-11-22 … 2026-11-27)
+
+**Done**
+- Timescale warm hypertables + Redis GEO position sink ([ADR-0015](adr/0015-store-thinned-positions-in-redis-geo-and-timescale.md)); API catalogue, stop events, punctuality REST; SignalR viewport deltas ([ADR-0017](adr/0017-stream-map-vehicles-as-viewport-deltas.md)); React MapLibre map with stop/route UI; local latency bench and README screenshot.
+- [ADR-0018](adr/0018-separate-hot-redis-cadence-from-warm-timescale-thinning.md) Accepted: hot Redis 250 ms vs warm 10 s; remasured source→map **p50 3.00 s / p95 3.73 s** (goal C3 &lt; 2 s still open). Ingest receive stamp splits source age vs pipeline in `?bench=1`.
+- Local demo compose scaffold under `deploy/demo/` ([docs/demo-compose.md](demo-compose.md)); public HTTPS URL deferred to a hoster/domain follow-up (not the collector VPS).
+- Merged PRs: #94–#100 (API/map/latency path); C3 stamp + demo scaffold on close branch.
+
+**Learned**
+- After hot Redis/tick cuts, almost all remaining C3 lag sits **before Redis** (source age + ingest + Kafka + Processor + Worker). Further tick shrinkage has little budget left; push-on-write SignalR stays deferred.
+- Phase-A collector host (~1–2 GB) cannot host the ~4 GB demo stack; ADR-0016’s separate pay-per-use session is the right shape.
+
+**Problems**
+- C3 p95 &lt; 2 s not met (~3.7 s); honest HSL source-age floor already ~1.2 s p95.
+- Collector hoster network flaps continue (22.11, 25.11); phase A ends after the paid period without a replacement always-on VPS.
+- Public C8 URL still needs an author-chosen hoster/domain.
 
 **Decisions (2026-11-25)**
 - [ADR-0016](adr/0016-run-the-public-demo-on-demand-with-archive-replay.md): end always-on archive VPS after the paid period; public demo is a pay-per-use compose session with **archive replay by default** (live feeds optional); full Parquet history and ML stay on the PC; C8 does not require 24/7 uptime.

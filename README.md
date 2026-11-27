@@ -4,7 +4,7 @@ Real-time public transport monitoring on open data from Helsinki (HSL), Bergen (
 
 ## Status
 
-Early development. Stages 1–2 are done: live data from the three cities has been collected since October 2026 (always-on archive VPS, phase A), and Helsinki positions are turned into stop events, delays and bunching anomalies. Stage 3 is storage, API and a live map (first demo locally; public compose is on-demand with archive replay — [ADR-0016](docs/adr/0016-run-the-public-demo-on-demand-with-archive-replay.md)). Progress is tracked in [milestones](https://github.com/starmucks/transit-pulse/milestones) and [docs/progress.md](docs/progress.md).
+Early development. Stages 1–3 are done locally: live data from the three cities has been collected since October 2026 (always-on archive VPS, phase A), Helsinki positions become stop events / delays / bunching, and a live map runs over Timescale + Redis + SignalR. Public compose is on-demand with archive replay ([ADR-0016](docs/adr/0016-run-the-public-demo-on-demand-with-archive-replay.md); local scaffold in [`deploy/demo/`](deploy/demo/)). Next: stage 4 (all three cities in the product). Progress: [milestones](https://github.com/starmucks/transit-pulse/milestones), [docs/progress.md](docs/progress.md).
 
 ## What works today
 
@@ -14,7 +14,7 @@ Early development. Stages 1–2 are done: live data from the three cities has be
 - **Processor** (Helsinki) matches each position to its scheduled trip and route shape, detects stop arrivals/departures/passes, enriches delay, and emits bunching anomalies. State is checkpointed in Redis before Kafka offsets are committed; a kill/restart leaves the same `stop_events`. Unprocessable records go to a DLQ.
 - **Replay** plays the archive back through the same pipeline at ×1…×50 or as fast as possible; a CI regression compares a tram-9 hour slice to golden stop events.
 - Measured weekday peak: HSL ~1,540 MQTT messages/s, ~1,240 published positions/s across the three cities. Stop detection vs HSL ground truth and live Processor lag are in [docs/benchmarks.md](docs/benchmarks.md).
-- **Live Helsinki map** (local Aspire + `web/`): vehicles over SignalR, stop arrivals, route punctuality. Source→map latency on 2026-11-27 after C3 cuts: **p50 402 ms / p95 1.22 s** (n=2 000; earlier post–ADR-0018 was 3.00 / 3.73 s — method in [docs/benchmarks.md](docs/benchmarks.md)). Demo script: [docs/demo-stage-3.md](docs/demo-stage-3.md).
+- **Live Helsinki map** (local Aspire + `web/`): vehicles over SignalR, stop arrivals, route punctuality. Source→map latency on 2026-11-27 after C3 cuts: **p50 402 ms / p95 1.22 s** (n=2 000; earlier post–ADR-0018 was 3.00 / 3.73 s — method in [docs/benchmarks.md](docs/benchmarks.md)). Demo script: [docs/demo-stage-3.md](docs/demo-stage-3.md). Compose replay scaffold: [docs/demo-compose.md](docs/demo-compose.md).
 
 ![Live Helsinki map](docs/images/live-map-helsinki.png)
 

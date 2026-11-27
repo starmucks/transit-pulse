@@ -1,6 +1,6 @@
 # Этап 3. Хранение, API, карта — первое демо
 
-> **Статус:** утверждена автором 2026-11-22 · **Срок:** ~1 неделя (бриф: неделя 4) · **Бриф:** §10 «Этап 3», §5.1, §6.5–6.6, §6.10 · **Milestone:** `Stage 3 — Storage, API, live map`
+> **Статус:** закрыт 2026-11-27 (локальная приёмка 3.1–3.8 + каркас compose) · публичный URL — follow-up · **Бриф:** §10 «Этап 3», §5.1, §6.5–6.6, §6.10 · **Milestone:** `Stage 3 — Storage, API, live map`
 
 ## Цель
 
@@ -97,7 +97,8 @@ API (+ статика web/) ──► локально Aspire / Vite; позже
 - [x] Укороченный демо-скрипт этапа 3 на локальном URL (полный §12 — к этапу 9): карта, остановка, линия, цифра задержки.
 
 **Готово, когда:** цифры задержки в benchmarks и README; демо «карта → остановка → линия» стабильно воспроизводится локально за ≤ 2 минуты.
-- ✅ 2026-11-26: merged #99 (baseline p50 **7.3 s** / p95 **10.1 s**) and #100 (ADR-0018 + segments: total **3.00 / 3.73 s**, to Redis p95 **3.41 s**); C3 still open — plan in benchmarks; screenshot + `docs/demo-stage-3.md`.
+- ✅ 2026-11-26: merged #99 (baseline p50 **7.3 s** / p95 **10.1 s**) and #100 (ADR-0018 + segments: total **3.00 / 3.73 s**, to Redis p95 **3.41 s**); screenshot + `docs/demo-stage-3.md`.
+- ✅ 2026-11-27: ingest stamp + Redis-first / 100 ms path; live Aspire `?bench=1` total p95 **1.22 s** (C3 met) — `docs/benchmarks.md`.
 
 ### 3.9 Публичный деплой (compose + HTTPS) — позже (#87)
 - [x] Локальный каркас (2026-11-27): `deploy/demo/` compose + Dockerfile + Caddy + `prepare-golden.ps1` + runbook [`docs/demo-compose.md`](../demo-compose.md); replay `hsl-tram-9-hour` по умолчанию; **не** на VPS сборщика.
@@ -115,14 +116,14 @@ API (+ статика web/) ──► локально Aspire / Vite; позже
 - [x] Демо показывается за 2 минуты (карта + остановка + линия).
 - [x] ADR брифа 5 и 7 приняты (новые номера в `docs/adr/`, не путать с уже существующими ADR-0005/0007 на другие темы).
 - [x] README содержит GIF/скрин (публичная ссылка — когда будет 3.9).
-- [ ] *(Follow-up / бриф)* Публичная ссылка с живой картой — задача 3.9 (#87).
+- [ ] *(Follow-up / бриф C8)* Публичная ссылка с живой картой — [#101](https://github.com/starmucks/transit-pulse/issues/101) (каркас `deploy/demo/` готов; нужен хост/домен).
 
 ## ADR этапа
 
 - Бриф ADR 5 → [ADR-0015](../adr/0015-store-thinned-positions-in-redis-geo-and-timescale.md): многоуровневое хранение и прореживание позиций (горячий Redis GEO, тёплый Timescale, холодный Parquet) — задача 3.2 (#80).
 - Бриф ADR 7 → [ADR-0017](../adr/0017-stream-map-vehicles-as-viewport-deltas.md): SignalR viewport/route deltas, not broadcast — задача 3.5 (#83).
-- Форма деплоя демо — [ADR-0016](../adr/0016-run-the-public-demo-on-demand-with-archive-replay.md) (Accepted 2026-11-25); реализация — в задаче 3.9.
-- C3 latency path → [ADR-0018](../adr/0018-separate-hot-redis-cadence-from-warm-timescale-thinning.md) (Accepted): hot Redis 250 ms + 250 ms flush/tick vs warm 10 s; remasure p95 ~3.8 s; ingest receive stamp splits source age vs pipeline.
+- Форма деплоя демо — [ADR-0016](../adr/0016-run-the-public-demo-on-demand-with-archive-replay.md) (Accepted 2026-11-25); локальный каркас — `deploy/demo/` / [#87](https://github.com/starmucks/transit-pulse/issues/87); публичный хост — [#101](https://github.com/starmucks/transit-pulse/issues/101).
+- C3 latency path → [ADR-0018](../adr/0018-separate-hot-redis-cadence-from-warm-timescale-thinning.md) (Accepted): Redis-first flush, 100 ms tick; live remasure total p95 **1.22 s** (C3 &lt; 2 s met, 2026-11-27).
 
 ## Решения, принятые в этой спецификации (утверждены 2026-11-22; п. 6 уточнён и п. 9 добавлен 2026-11-25)
 
