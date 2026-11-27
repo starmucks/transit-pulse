@@ -14,7 +14,7 @@ Early development. Stages 1–2 are done: live data from the three cities has be
 - **Processor** (Helsinki) matches each position to its scheduled trip and route shape, detects stop arrivals/departures/passes, enriches delay, and emits bunching anomalies. State is checkpointed in Redis before Kafka offsets are committed; a kill/restart leaves the same `stop_events`. Unprocessable records go to a DLQ.
 - **Replay** plays the archive back through the same pipeline at ×1…×50 or as fast as possible; a CI regression compares a tram-9 hour slice to golden stop events.
 - Measured weekday peak: HSL ~1,540 MQTT messages/s, ~1,240 published positions/s across the three cities. Stop detection vs HSL ground truth and live Processor lag are in [docs/benchmarks.md](docs/benchmarks.md).
-- **Live Helsinki map** (local Aspire + `web/`): vehicles over SignalR, stop arrivals, route punctuality. Source→map latency on 2026-11-26 after ADR-0018: **p50 3.06 s / p95 3.75 s** (n=2 000; baseline before hot path was 7.3 / 10.1 s; goal C3 p95 &lt; 2 s not met yet — method in [docs/benchmarks.md](docs/benchmarks.md)). Demo script: [docs/demo-stage-3.md](docs/demo-stage-3.md).
+- **Live Helsinki map** (local Aspire + `web/`): vehicles over SignalR, stop arrivals, route punctuality. Source→map latency on 2026-11-27 after C3 cuts: **p50 402 ms / p95 1.22 s** (n=2 000; earlier post–ADR-0018 was 3.00 / 3.73 s — method in [docs/benchmarks.md](docs/benchmarks.md)). Demo script: [docs/demo-stage-3.md](docs/demo-stage-3.md).
 
 ![Live Helsinki map](docs/images/live-map-helsinki.png)
 

@@ -112,8 +112,9 @@ public sealed class PositionSinkTests :
                 0);
             Publish(topic, [one]);
 
-            await WaitUntilAsync(async () => await CountPositionsAsync(database) >= 1, TimeSpan.FromSeconds(20));
-            await WaitUntilAsync(() => Task.FromResult(faultingGeo.Attempts >= 2), TimeSpan.FromSeconds(10));
+            // Redis is flushed before Timescale: a Redis failure keeps both buffers and blocks commit.
+            await WaitUntilAsync(() => Task.FromResult(faultingGeo.Attempts >= 2), TimeSpan.FromSeconds(20));
+            Assert.Equal(0, await CountPositionsAsync(database));
             Assert.Equal(0, await CommittedTotalAsync(groupId, topic));
             Assert.Null(await _redisConnection!.GetDatabase().GeoPositionAsync(VehicleGeoStore.GeoKey("hsl"), vehicleId));
 
@@ -122,6 +123,7 @@ public sealed class PositionSinkTests :
                 async () => await _redisConnection!.GetDatabase()
                     .GeoPositionAsync(VehicleGeoStore.GeoKey("hsl"), vehicleId) is not null,
                 TimeSpan.FromSeconds(20));
+            await WaitUntilAsync(async () => await CountPositionsAsync(database) >= 1, TimeSpan.FromSeconds(20));
             await WaitUntilAsync(async () => await CommittedTotalAsync(groupId, topic) >= 1, TimeSpan.FromSeconds(20));
             Assert.True(faultingGeo.Attempts >= 3);
         }

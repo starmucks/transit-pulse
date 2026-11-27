@@ -597,7 +597,7 @@ internal sealed partial class PositionConsumer(
         ClientId = "transitpulse-processor",
         // Retries cannot duplicate or reorder messages within a partition; implies acks=all.
         EnableIdempotence = true,
-        LingerMs = 20,
+        LingerMs = 0,
         CompressionType = CompressionType.Lz4,
         // The Ingestor's partitioner: a vehicle keeps its partition number from topic to topic.
         Partitioner = Partitioner.Murmur2Random,
