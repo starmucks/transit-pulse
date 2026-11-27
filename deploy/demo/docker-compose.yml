@@ -122,7 +122,7 @@ services:
       Kafka__PositionsAutoOffsetReset: Earliest
       GtfsImport__SnapshotDirectory: /data/gtfs
       PositionSink__HotThinningInterval: 00:00:00.250
-      PositionSink__FlushInterval: 00:00:00.250
+      PositionSink__FlushInterval: 00:00:00.100
     volumes:
       - ./data/gtfs:/data/gtfs:ro
     mem_limit: 512m
