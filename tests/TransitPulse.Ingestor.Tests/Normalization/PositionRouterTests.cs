@@ -94,6 +94,17 @@ public sealed class PositionRouterTests
     }
 
     [Fact]
+    public void Accepted_position_carries_record_received_at_as_ingested_at()
+    {
+        var router = Create(new FakeNormalizer("hsl", "hsl"));
+        var record = FakeNormalizer.Record("hsl", seconds: 5);
+
+        var position = Assert.Single(router.Route(record));
+
+        Assert.Equal(record.ReceivedAt, position.IngestedAt);
+    }
+
+    [Fact]
     public void Position_from_the_future_is_dropped_and_does_not_silence_the_vehicle()
     {
         var router = Create(new FakeNormalizer("hsl", "hsl"));

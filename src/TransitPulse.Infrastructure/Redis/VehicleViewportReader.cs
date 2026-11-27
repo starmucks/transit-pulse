@@ -107,6 +107,12 @@ public sealed class VehicleViewportReader(IConnectionMultiplexer connection) : I
             redisWrittenAt = writtenAt;
         }
 
+        DateTimeOffset? ingestedAt = null;
+        if (TryParseTimestamp(EmptyToNull(Optional(attrs, "ingested_at")), out var receivedAt))
+        {
+            ingestedAt = receivedAt;
+        }
+
         vehicle = new MapVehicle(
             vehicleId,
             lon.Value,
@@ -116,7 +122,8 @@ public sealed class VehicleViewportReader(IConnectionMultiplexer connection) : I
             EmptyToNull(Optional(attrs, "trip_id")),
             ParseInt(Optional(attrs, "delay_sec")),
             observedAt,
-            redisWrittenAt);
+            redisWrittenAt,
+            ingestedAt);
         return true;
     }
 

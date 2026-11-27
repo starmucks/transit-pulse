@@ -860,3 +860,18 @@ the same samples (only when stamps are present):
 Worker hot thin/flush). The 250 ms map tick is a few hundred milliseconds at p95; SignalR and the browser are
 negligible. Next cut should refine “to Redis” with existing `lag_time` metrics / ingest receive time — not further
 tick shrinkage. Push-on-write SignalR stays deferred (ADR-0018).
+
+### Ingest receive stamp (source age vs pipeline)
+
+**Instrumentation (2026-11-27):** `VehiclePosition.IngestedAt` carries `RawRecord.ReceivedAt` from `PositionRouter`
+through Kafka JSON → Redis hash `ingested_at` → SignalR `ingestedAt`. `?bench=1` splits **to Redis** into:
+
+| Segment | Formula |
+|---|---|
+| **source age** | `ingestedAt` − `observedAt` |
+| **ingest → Redis** | `redisWrittenAt` − `ingestedAt` |
+
+Kafka `CreateTime` / `lag_time` semantics are unchanged (produce enqueue, not ingest receive). Live Aspire remasure
+of the new segments was **not** run in the same session as the code change — re-open `?bench=1` after deploy and paste
+p50/p95 here; correlate `ingest→Redis` with `transitpulse.processor.lag_time` and
+`transitpulse.worker.positions_lag_time` when available.

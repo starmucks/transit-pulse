@@ -24,9 +24,10 @@ public sealed class VehicleGeoStoreTests(RedisFixture redis) : IClassFixture<Red
     {
         var store = new VehicleGeoStore(_connection!, TimeSpan.FromSeconds(120));
         var at = new DateTimeOffset(2026, 11, 23, 12, 0, 0, TimeSpan.Zero);
+        var ingested = at.AddMilliseconds(800);
         var enriched = new EnrichedPosition(
             new VehiclePosition(
-                "hsl", "40/415", "1009_trip", "1009", 60.17, 24.94, 8f, 180f, 45, null, at),
+                "hsl", "40/415", "1009_trip", "1009", 60.17, 24.94, 8f, 180f, 45, null, at, ingested),
             new ScheduledProgress("1009_trip", "1009", 0, new DateOnly(2026, 11, 23), 100, null),
             45);
 
@@ -41,6 +42,10 @@ public sealed class VehicleGeoStoreTests(RedisFixture redis) : IClassFixture<Red
         var hash = await db.HashGetAllAsync(VehicleGeoStore.AttributeKey("hsl", "40/415"));
         Assert.Contains(hash, entry => entry.Name == "route_id" && entry.Value == "1009");
         Assert.Contains(hash, entry => entry.Name == "delay_sec" && entry.Value == "45");
+        Assert.Contains(
+            hash,
+            entry => entry.Name == "ingested_at"
+                && entry.Value == ingested.UtcDateTime.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
         Assert.Contains(hash, entry => entry.Name == "redis_written_at" && !entry.Value.IsNullOrEmpty);
         var ttl = await db.KeyTimeToLiveAsync(VehicleGeoStore.AttributeKey("hsl", "40/415"));
         Assert.NotNull(ttl);

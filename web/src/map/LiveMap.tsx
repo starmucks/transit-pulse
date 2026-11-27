@@ -305,6 +305,20 @@ export function LiveMap({ feedId = 'hsl' }: LiveMapProps) {
             p95={formatLatencyMs(latencyStats.toRedis.p95Ms)}
           </p>
           <p className="latency-bench-line">
+            source age n={latencyStats.sourceAge.count}
+            {' · '}
+            p50={formatLatencyMs(latencyStats.sourceAge.p50Ms)}
+            {' · '}
+            p95={formatLatencyMs(latencyStats.sourceAge.p95Ms)}
+          </p>
+          <p className="latency-bench-line">
+            ingest→Redis n={latencyStats.ingestToRedis.count}
+            {' · '}
+            p50={formatLatencyMs(latencyStats.ingestToRedis.p50Ms)}
+            {' · '}
+            p95={formatLatencyMs(latencyStats.ingestToRedis.p95Ms)}
+          </p>
+          <p className="latency-bench-line">
             Redis→send n={latencyStats.redisToSend.count}
             {' · '}
             p50={formatLatencyMs(latencyStats.redisToSend.p50Ms)}

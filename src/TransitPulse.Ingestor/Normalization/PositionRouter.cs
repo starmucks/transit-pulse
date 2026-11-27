@@ -113,7 +113,9 @@ internal sealed partial class PositionRouter
 
             if (_deduplicator.TryAccept(position))
             {
-                accepted.Add(position);
+                // Stamp ingest receive once here so every adapter stays free of C3 plumbing; replay uses archive ReceivedAt.
+                // Rebuild rather than `with`: IngestedAt is a validated get-only property like ObservedAt.
+                accepted.Add(WithIngestedAt(position, record.ReceivedAt));
             }
             else
             {
@@ -126,6 +128,21 @@ internal sealed partial class PositionRouter
     }
 
     private static string VehicleKey(VehiclePosition position) => $"{position.FeedId}/{position.VehicleId}";
+
+    private static VehiclePosition WithIngestedAt(VehiclePosition position, DateTimeOffset ingestedAt) =>
+        new(
+            position.FeedId,
+            position.VehicleId,
+            position.TripId,
+            position.RouteId,
+            position.Lat,
+            position.Lon,
+            position.SpeedMps,
+            position.Bearing,
+            position.DelaySec,
+            position.Occupancy,
+            position.ObservedAt,
+            ingestedAt);
 
     // One instance re-pointed at each record's feed rather than one per call: no allocation per HSL message, and the
     // router is single-threaded, so the feed cannot change while a normalizer reports.
