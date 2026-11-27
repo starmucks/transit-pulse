@@ -19,7 +19,7 @@ internal sealed class PositionSinkOptions
     /// How often a non-empty buffer is written to Timescale/Redis. Kept short for C3; Kafka offset commits still
     /// follow <c>Kafka:CommitInterval</c>.
     /// </summary>
-    public TimeSpan FlushInterval { get; set; } = TimeSpan.FromMilliseconds(250);
+    public TimeSpan FlushInterval { get; set; } = TimeSpan.FromMilliseconds(100);
 
     /// <summary>TTL refreshed on each vehicle attribute hash write.</summary>
     public TimeSpan GeoAttributeTtl { get; set; } = TimeSpan.FromSeconds(120);

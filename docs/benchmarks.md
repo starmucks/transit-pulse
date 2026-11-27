@@ -875,3 +875,17 @@ Kafka `CreateTime` / `lag_time` semantics are unchanged (produce enqueue, not in
 of the new segments was **not** run in the same session as the code change — re-open `?bench=1` after deploy and paste
 p50/p95 here; correlate `ingest→Redis` with `transitpulse.processor.lag_time` and
 `transitpulse.worker.positions_lag_time` when available.
+
+### Pipeline cuts toward C3 (2026-11-27, awaiting live remasure)
+
+Code changes aimed at the remaining ~2 s above the source-age floor (see ADR-0018 follow-up):
+
+| Change | Expected segment |
+|---|---|
+| Redis flush **before** Timescale in `PositionSink` | ingest→Redis |
+| `FlushInterval` 250 → **100 ms**; Kafka `LingerMs` **0** | ingest→Redis |
+| Pipelined Redis `HashGetAll` + map tick **100 ms** | Redis→send |
+
+**Vs goal C3 (p95 &lt; 2 s):** still needs a live `?bench=1` window after these land. HSL source-age floor alone is
+already ~1.2 s p95 (whole-second `tsi`), so the budget for our path is tight; if remasure still misses, next options
+are push-on-write SignalR (deferred) or accepting that whole-second source stamps inflate the metric.

@@ -15,8 +15,8 @@ public sealed partial class MapDeltaTicker(
     /// <summary>SignalR client method name for a delta frame.</summary>
     public const string ClientMethod = "vehicleDelta";
 
-    /// <summary>Map tick period; 250 ms keeps SignalR from dominating source→map delay (C3).</summary>
-    private static readonly TimeSpan _period = TimeSpan.FromMilliseconds(250);
+    /// <summary>Map tick period; 100 ms after pipelined Redis reads (C3 Redis→send).</summary>
+    private static readonly TimeSpan _period = TimeSpan.FromMilliseconds(100);
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

@@ -38,3 +38,13 @@ alone for HSL is already ~0.5–1.2 s (benchmarks “Source delay”), so the re
 - Remeasured 2026-11-26 (`?bench=1`, n=2 000): p50 **3.00 s** / p95 **3.73 s** vs baseline 7.3 / 10.1 s. Segment ages
   (same window): to Redis p95 **3.41 s**, Redis→send **513 ms**, send→browser **9 ms** — remaining gap is before Redis
   (see `docs/benchmarks.md`).
+
+## Follow-up cuts (2026-11-27)
+
+Still aiming at C3 p95 &lt; 2 s without push-on-write:
+
+1. **Hot Redis flush before warm Timescale** in `PositionSink` (amends ADR-0015 “Postgres then Redis” for the map path).
+2. **Pipelined** `HashGetAll` after GEOSEARCH in `VehicleViewportReader`; map tick **100 ms**.
+3. Kafka producer **`LingerMs = 0`** on Ingestor and Processor; Worker **`FlushInterval` 100 ms**.
+
+Live remasure of the new numbers belongs in `docs/benchmarks.md` after an Aspire `?bench=1` run.
