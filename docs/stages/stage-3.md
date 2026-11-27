@@ -100,11 +100,11 @@ API (+ статика web/) ──► локально Aspire / Vite; позже
 - ✅ 2026-11-26: merged #99 (baseline p50 **7.3 s** / p95 **10.1 s**) and #100 (ADR-0018 + segments: total **3.00 / 3.73 s**, to Redis p95 **3.41 s**); C3 still open — plan in benchmarks; screenshot + `docs/demo-stage-3.md`.
 
 ### 3.9 Публичный деплой (compose + HTTPS) — позже (#87)
-- [ ] Отложено решением автора 2026-11-22: сначала локальный прогон `web/` + API. Задачу открываем, когда локальное демо устойчиво.
+- [x] Локальный каркас (2026-11-27): `deploy/demo/` compose + Dockerfile + Caddy + `prepare-golden.ps1` + runbook [`docs/demo-compose.md`](../demo-compose.md); replay `hsl-tram-9-hour` по умолчанию; **не** на VPS сборщика.
 - [ ] Форма деплоя зафиксирована 2026-11-25 ([ADR-0016](../adr/0016-run-the-public-demo-on-demand-with-archive-replay.md)): pay-per-use хост, стек **на сеанс**; Ingestor **replay** golden-среза по умолчанию; live-фиды — опциональный профиль; полный архив остаётся на ПК; фаза A не продлевается ради демо.
-- [ ] Тогда: compose демо-стека, домен, Caddy HTTPS, runbook start → health → warm → URL и надёжный stop (биллинг → 0); образы + маленький golden в registry/артефакте.
+- [ ] Домен + публичный HTTPS URL на сеанс; registry/образы на хосте; proof billing → 0 — когда автор выберет провайдера.
 
-**Готово, когда:** (после снятия отложения) публичный URL на сеанс; выкатка и гашение по runbook; RAM/диск в бюджете ~4 ГБ без сырого bulk-архива.
+**Готово, когда:** (после снятия отложения) публичный URL на сеанс; выкатка и гашение по runbook; RAM/диск в бюджете ~4 ГБ без сырого bulk-архива. Каркас compose проверяется локально до выбора хоста.
 
 ## Критерии приёмки этапа (бриф §10)
 

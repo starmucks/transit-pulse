@@ -1,0 +1,176 @@
+# On-demand demo stack (ADR-0016): replay golden HSL hour by default.
+# From repo root after prepare-golden.ps1 and a web build into deploy/demo/web-dist:
+#   docker compose -f deploy/demo/docker-compose.yml --env-file deploy/demo/.env up --build
+#
+# Optional live city feeds belong in a future `live` profile — not required for the 2-minute script.
+name: transitpulse-demo
+
+services:
+  postgres:
+    image: timescale/timescaledb-ha:pg17.11-ts2.30.2
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-transitpulse-demo}
+      POSTGRES_USER: postgres
+      POSTGRES_DB: transitpulse
+    volumes:
+      - demo-postgres:/home/postgres/pgdata
+      - ./init/01-extensions.sql:/docker-entrypoint-initdb.d/01-extensions.sql:ro
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d transitpulse"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:8.8.3-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--requirepass", "${REDIS_PASSWORD:-transitpulse-demo}"]
+    volumes:
+      - demo-redis:/data
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-transitpulse-demo}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redpanda:
+    image: redpandadata/redpanda:v26.2.4
+    command:
+      - redpanda
+      - start
+      - --smp
+      - "1"
+      - --memory
+      - 1G
+      - --overprovisioned
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
+    volumes:
+      - demo-redpanda:/var/lib/redpanda/data
+    mem_limit: 1536m
+    ports:
+      - "19092:19092"
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy'"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+
+  ingestor:
+    build:
+      context: ../..
+      dockerfile: deploy/demo/Dockerfile
+      args:
+        PROJECT: src/TransitPulse.Ingestor/TransitPulse.Ingestor.csproj
+        ASSEMBLY: TransitPulse.Ingestor
+    environment:
+      Ingestor__Mode: replay
+      Archive__RootDirectory: /data/archive
+      Replay__From: ${REPLAY_FROM:-2026-11-04T06:00:00Z}
+      Replay__To: ${REPLAY_TO:-2026-11-04T07:00:00Z}
+      Replay__Feeds__0: hsl
+      Replay__Speed: ${REPLAY_SPEED:-10}
+      Kafka__BootstrapServers: redpanda:9092
+    volumes:
+      - ./data/archive:/data/archive:ro
+    mem_limit: 384m
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+  processor:
+    build:
+      context: ../..
+      dockerfile: deploy/demo/Dockerfile
+      args:
+        PROJECT: src/TransitPulse.Processor/TransitPulse.Processor.csproj
+        ASSEMBLY: TransitPulse.Processor
+    environment:
+      ConnectionStrings__transitpulse: Host=postgres;Port=5432;Database=transitpulse;Username=postgres;Password=${POSTGRES_PASSWORD:-transitpulse-demo}
+      ConnectionStrings__redis: redis:6379,password=${REDIS_PASSWORD:-transitpulse-demo}
+      Kafka__BootstrapServers: redpanda:9092
+      Kafka__GroupId: transitpulse-processor-demo
+      Kafka__AutoOffsetReset: Earliest
+      Schedule__FeedId: hsl
+      Schedule__TimeZone: Europe/Helsinki
+      Schedule__ServiceDate: ${SCHEDULE_SERVICE_DATE:-2026-11-04}
+    mem_limit: 512m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: deploy/demo/Dockerfile
+      args:
+        PROJECT: src/TransitPulse.Worker/TransitPulse.Worker.csproj
+        ASSEMBLY: TransitPulse.Worker
+    environment:
+      ConnectionStrings__transitpulse: Host=postgres;Port=5432;Database=transitpulse;Username=postgres;Password=${POSTGRES_PASSWORD:-transitpulse-demo}
+      ConnectionStrings__redis: redis:6379,password=${REDIS_PASSWORD:-transitpulse-demo}
+      Kafka__BootstrapServers: redpanda:9092
+      Kafka__PositionsGroupId: transitpulse-worker-positions-demo
+      Kafka__PositionsAutoOffsetReset: Earliest
+      GtfsImport__SnapshotDirectory: /data/gtfs
+      PositionSink__HotThinningInterval: 00:00:00.250
+      PositionSink__FlushInterval: 00:00:00.250
+    volumes:
+      - ./data/gtfs:/data/gtfs:ro
+    mem_limit: 512m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/demo/Dockerfile
+      args:
+        PROJECT: src/TransitPulse.Api/TransitPulse.Api.csproj
+        ASSEMBLY: TransitPulse.Api
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__transitpulse: Host=postgres;Port=5432;Database=transitpulse;Username=postgres;Password=${POSTGRES_PASSWORD:-transitpulse-demo}
+      ConnectionStrings__redis: redis:6379,password=${REDIS_PASSWORD:-transitpulse-demo}
+    mem_limit: 384m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  caddy:
+    image: caddy:2.10-alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./web-dist:/srv:ro
+    mem_limit: 128m
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  demo-postgres:
+  demo-redis:
+  demo-redpanda:
