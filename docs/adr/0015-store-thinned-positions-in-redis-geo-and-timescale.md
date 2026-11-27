@@ -24,8 +24,10 @@ Keep three tiers for vehicle positions:
 3. **Cold — Parquet:** unchanged full-resolution archive.
 
 Thinning state lives in the Worker process. After a restart the first points may be denser until the in-memory map
-refills; that is accepted for the demo. Write order is Postgres, then Redis, then Kafka offset commit (at-least-once,
-same bar as ADR-0014). The sink stays in the Worker (ADR-0009).
+refills; that is accepted for the demo. Write order at acceptance was Postgres, then Redis, then Kafka offset commit
+(at-least-once, same bar as ADR-0014). **Amended by [ADR-0018](0018-separate-hot-redis-cadence-from-warm-timescale-thinning.md)
+(2026-11-27):** on each flush the map path writes **Redis (hot) first**, then Timescale (warm), then Kafka offset
+commit, so a slow warm insert cannot delay the live layer. The sink stays in the Worker (ADR-0009).
 
 ## Alternatives considered
 

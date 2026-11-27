@@ -871,21 +871,26 @@ through Kafka JSON → Redis hash `ingested_at` → SignalR `ingestedAt`. `?benc
 | **source age** | `ingestedAt` − `observedAt` |
 | **ingest → Redis** | `redisWrittenAt` − `ingestedAt` |
 
-Kafka `CreateTime` / `lag_time` semantics are unchanged (produce enqueue, not ingest receive). Live Aspire remasure
-of the new segments was **not** run in the same session as the code change — re-open `?bench=1` after deploy and paste
-p50/p95 here; correlate `ingest→Redis` with `transitpulse.processor.lag_time` and
-`transitpulse.worker.positions_lag_time` when available.
+Kafka `CreateTime` / `lag_time` semantics are unchanged (produce enqueue, not ingest receive). Live numbers for the
+new segments are in the pipeline-cuts table below; correlate `ingest→Redis` with
+`transitpulse.processor.lag_time` and `transitpulse.worker.positions_lag_time` when available.
 
-### Pipeline cuts toward C3 (2026-11-27, awaiting live remasure)
+### Pipeline cuts toward C3 (2026-11-27)
 
-Code changes aimed at the remaining ~2 s above the source-age floor (see ADR-0018 follow-up):
+Code changes (see ADR-0018 follow-up): Redis flush **before** Timescale; `FlushInterval` **100 ms**; Kafka
+`LingerMs` **0**; pipelined Redis `HashGetAll`; map tick **100 ms**.
 
-| Change | Expected segment |
-|---|---|
-| Redis flush **before** Timescale in `PositionSink` | ingest→Redis |
-| `FlushInterval` 250 → **100 ms**; Kafka `LingerMs` **0** | ingest→Redis |
-| Pipelined Redis `HashGetAll` + map tick **100 ms** | Redis→send |
+**Live remasure:** Aspire AppHost + Vite `web/?bench=1`, live HSL, 2026-11-27 about 19:28–19:31 UTC. Processor/Worker
+consumer groups reset to empty so `AutoOffsetReset=Latest` took the tip (otherwise a multi-hour backlog aged the map).
+Steady ~100+ vehicles; buffer filled to capacity.
 
-**Vs goal C3 (p95 &lt; 2 s):** still needs a live `?bench=1` window after these land. HSL source-age floor alone is
-already ~1.2 s p95 (whole-second `tsi`), so the budget for our path is tight; if remasure still misses, next options
-are push-on-write SignalR (deferred) or accepting that whole-second source stamps inflate the metric.
+| Segment | p50 | p95 | n |
+|---|---:|---:|---:|
+| **total** | **402 ms** | **1.22 s** | 2 000 |
+| **to Redis** | 320 ms | 1.15 s | 2 000 |
+| **source age** | 142 ms | 281 ms | 2 000 |
+| **ingest → Redis** | 134 ms | 1.00 s | 2 000 |
+| **Redis → send** | 70 ms | 126 ms | 2 000 |
+| **send → browser** | 3 ms | 13 ms | 2 000 |
+
+**Vs goal C3 (p95 &lt; 2 s):** **met** on this window (1.22 s). Prior post–ADR-0018 total p95 was ~3.7 s.

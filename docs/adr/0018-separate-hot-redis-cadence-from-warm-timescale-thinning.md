@@ -14,10 +14,13 @@ alone for HSL is already ~0.5–1.2 s (benchmarks “Source delay”), so the re
 
 1. Keep **warm** Timescale thinning at 10 s event time (ADR-0015 volume target).
 2. Add a **hot** Redis thinner (~250 ms event time) so the map layer updates more often than the warm series.
-3. Flush non-empty hot/warm buffers on a short `FlushInterval` (~250 ms); commit Kafka offsets on the existing
+3. Flush non-empty hot/warm buffers on a short `FlushInterval` (**100 ms**; first shipped at 250 ms); on each flush write
+   **Redis before Timescale** (amends ADR-0015 write order for the map path), then commit Kafka offsets on the existing
    `CommitInterval` after successful flushes.
-4. Run the SignalR map ticker at **250 ms** so the tick is not the dominant remaining delay (amends the “~1 Hz” wording
-   in ADR-0017 for the live demo).
+4. Run the SignalR map ticker at **100 ms** (first shipped at 250 ms) so the tick is not the dominant remaining delay
+   (amends the “~1 Hz” wording in ADR-0017 for the live demo).
+5. Kafka producers on the map path use **`LingerMs = 0`** (Ingestor and Processor); viewport Redis reads **pipeline**
+   `HashGetAll` after GEOSEARCH.
 
 ## Alternatives considered
 
@@ -32,19 +35,10 @@ alone for HSL is already ~0.5–1.2 s (benchmarks “Source delay”), so the re
 
 - Redis write rate and SignalR frame rate rise (still viewport-scoped deltas, not city broadcast).
 - Warm series density and retention math stay as in ADR-0015.
-- ADR-0017’s “~1 Hz” becomes “≤ 250 ms tick” for this demo; backplane and per-connection subscription rules unchanged.
+- ADR-0017’s “~1 Hz” becomes “≤ 100 ms tick” for this demo; backplane and per-connection subscription rules unchanged.
 - Local Aspire sets Processor/Worker position consumers to a dedicated group with `AutoOffsetReset=Latest` so a cold
   Redpanda backlog cannot refill Redis with hours-old `observed_at` (which the bench correctly rejects as &gt; 120 s).
-- Remeasured 2026-11-26 (`?bench=1`, n=2 000): p50 **3.00 s** / p95 **3.73 s** vs baseline 7.3 / 10.1 s. Segment ages
-  (same window): to Redis p95 **3.41 s**, Redis→send **513 ms**, send→browser **9 ms** — remaining gap is before Redis
-  (see `docs/benchmarks.md`).
-
-## Follow-up cuts (2026-11-27)
-
-Still aiming at C3 p95 &lt; 2 s without push-on-write:
-
-1. **Hot Redis flush before warm Timescale** in `PositionSink` (amends ADR-0015 “Postgres then Redis” for the map path).
-2. **Pipelined** `HashGetAll` after GEOSEARCH in `VehicleViewportReader`; map tick **100 ms**.
-3. Kafka producer **`LingerMs = 0`** on Ingestor and Processor; Worker **`FlushInterval` 100 ms**.
-
-Live remasure of the new numbers belongs in `docs/benchmarks.md` after an Aspire `?bench=1` run.
+- Remeasured 2026-11-26 (`?bench=1`, n=2 000, 250 ms flush/tick): p50 **3.00 s** / p95 **3.73 s** vs baseline 7.3 /
+  10.1 s. Segment ages (same window): to Redis p95 **3.41 s**, Redis→send **513 ms**, send→browser **9 ms**.
+- Remeasured 2026-11-27 after Decision items 3–5 (`?bench=1`, n=2 000): total p50 **402 ms** / p95 **1.22 s** — goal C3
+  (p95 &lt; 2 s) **met** on that window (see `docs/benchmarks.md`).
