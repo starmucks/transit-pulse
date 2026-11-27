@@ -46,12 +46,24 @@ public sealed class VehicleViewportReader(IConnectionMultiplexer connection) : I
             return [];
         }
 
-        var vehicles = new List<MapVehicle>(hits.Length);
-        foreach (var hit in hits)
+        // One pipeline round-trip for all attribute hashes — sequential HashGetAll dominated Redis→send (C3).
+        cancellationToken.ThrowIfCancellationRequested();
+        var batch = _database.CreateBatch();
+        var pending = new (GeoRadiusResult Hit, string VehicleId, Task<HashEntry[]> Hash)[hits.Length];
+        for (var i = 0; i < hits.Length; i++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var hit = hits[i];
             var vehicleId = (string)hit.Member!;
-            var hash = await _database.HashGetAllAsync(VehicleGeoStore.AttributeKey(feedId, vehicleId));
+            pending[i] = (hit, vehicleId, batch.HashGetAllAsync(VehicleGeoStore.AttributeKey(feedId, vehicleId)));
+        }
+
+        batch.Execute();
+        await Task.WhenAll(pending.Select(entry => entry.Hash));
+
+        var vehicles = new List<MapVehicle>(hits.Length);
+        foreach (var (hit, vehicleId, hashTask) in pending)
+        {
+            var hash = await hashTask;
             if (hash.Length == 0)
             {
                 // GEO member outlived the TTL hash — treat as departed (ADR-0015).
@@ -107,6 +119,12 @@ public sealed class VehicleViewportReader(IConnectionMultiplexer connection) : I
             redisWrittenAt = writtenAt;
         }
 
+        DateTimeOffset? ingestedAt = null;
+        if (TryParseTimestamp(EmptyToNull(Optional(attrs, "ingested_at")), out var receivedAt))
+        {
+            ingestedAt = receivedAt;
+        }
+
         vehicle = new MapVehicle(
             vehicleId,
             lon.Value,
@@ -116,7 +134,8 @@ public sealed class VehicleViewportReader(IConnectionMultiplexer connection) : I
             EmptyToNull(Optional(attrs, "trip_id")),
             ParseInt(Optional(attrs, "delay_sec")),
             observedAt,
-            redisWrittenAt);
+            redisWrittenAt,
+            ingestedAt);
         return true;
     }
 

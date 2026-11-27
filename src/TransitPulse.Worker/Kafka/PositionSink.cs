@@ -11,9 +11,10 @@ using TransitPulse.Infrastructure.Redis;
 namespace TransitPulse.Worker.Kafka;
 
 /// <summary>
-/// Reads <c>positions.enriched</c>, writes a hot Redis cadence and a warmer Timescale cadence (ADR-0015 / ADR-0018),
-/// then commits offsets. Delivery stays at-least-once: a crash repeats points; the primary key and GEO member
-/// overwrite collapse duplicates. A failed flush pauses further consumes until the buffer is written.
+/// Reads <c>positions.enriched</c>, writes a hot Redis cadence then a warmer Timescale cadence (ADR-0015 / ADR-0018),
+/// then commits offsets. Redis is flushed first so the map is not blocked on Postgres. Delivery stays at-least-once:
+/// a crash repeats points; the primary key and GEO member overwrite collapse duplicates. A failed flush pauses further
+/// consumes until the remaining buffer is written.
 /// </summary>
 internal sealed partial class PositionSink(
     IOptions<WorkerKafkaOptions> kafkaOptions,
@@ -143,6 +144,23 @@ internal sealed partial class PositionSink(
             return true;
         }
 
+        // Hot Redis first so the map is not blocked on Timescale per-row inserts (C3; amends ADR-0015 write order).
+        if (hotBuffer.Count > 0)
+        {
+            try
+            {
+                await geoStore.UpsertManyAsync(hotBuffer, stopping);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                metrics.RedisError();
+                LogFlushFailed("redis", ex.GetType().Name, ex.Message);
+                return false;
+            }
+
+            hotBuffer.Clear();
+        }
+
         var warmCount = warmBuffer.Count;
         if (warmCount > 0)
         {
@@ -156,29 +174,11 @@ internal sealed partial class PositionSink(
                 LogFlushFailed("postgres", ex.GetType().Name, ex.Message);
                 return false;
             }
-        }
 
-        if (hotBuffer.Count > 0)
-        {
-            try
-            {
-                await geoStore.UpsertManyAsync(hotBuffer, stopping);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                metrics.RedisError();
-                LogFlushFailed("redis", ex.GetType().Name, ex.Message);
-                return false;
-            }
-        }
-
-        if (warmCount > 0)
-        {
             metrics.Written(warmCount);
             warmBuffer.Clear();
         }
 
-        hotBuffer.Clear();
         return true;
     }
 

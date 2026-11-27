@@ -121,4 +121,25 @@ public sealed class VehiclePositionTests
         Assert.Equal(300, delayed.DelaySec);
         Assert.Equal(60.202731, delayed.Lat);
     }
+
+    [Fact]
+    public void Ingested_at_defaults_to_null_and_accepts_utc()
+    {
+        Assert.Null(Create().IngestedAt);
+
+        var stamped = new VehiclePosition(
+            "hsl", "40/415", "1009-1-2026-10-02-21:31", "1009", 60.202731, 24.924969,
+            8.03f, 254f, -195, OccupancyLevel.Empty, _utcNow, _utcNow.AddMilliseconds(400));
+        Assert.Equal(_utcNow.AddMilliseconds(400), stamped.IngestedAt);
+    }
+
+    [Fact]
+    public void Non_utc_ingested_at_is_rejected()
+    {
+        var helsinkiLocal = new DateTimeOffset(2026, 10, 2, 22, 10, 52, TimeSpan.FromHours(3));
+
+        Assert.Throws<ArgumentException>(() => new VehiclePosition(
+            "hsl", "40/415", null, "1009", 60.202731, 24.924969,
+            null, null, null, null, _utcNow, helsinkiLocal));
+    }
 }

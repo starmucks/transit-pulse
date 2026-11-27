@@ -10,6 +10,8 @@ export type MapVehicle = {
   observedAt: string
   /** When Worker wrote the Redis hash; absent on stale hashes. */
   redisWrittenAt?: string | null
+  /** When Ingestor received the raw record; absent on older hashes. */
+  ingestedAt?: string | null
 }
 
 /** One SignalR frame — mirrors API MapVehicleDelta. */

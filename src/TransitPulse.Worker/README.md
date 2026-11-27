@@ -6,7 +6,7 @@
 - **Upsert by event id** (`StopEventStore`). Kafka delivery is at-least-once, so a Processor restart may repeat an event;
   the id is deterministic and the second write must not create a second row (ADR-0014).
 - **Thinned positions** (`PositionSink`, ADR-0015 / ADR-0018): hot Redis thinner (~250 ms event time) and warm Timescale
-  thinner (10 s) share one consume loop; buffers flush about every 250 ms (Postgres then Redis); Kafka offsets still
+  thinner (10 s) share one consume loop; buffers flush about every 100 ms (**Redis then Postgres**); Kafka offsets still
   commit on `Kafka:CommitInterval`. `ON CONFLICT DO NOTHING` on warm PK; GEO member overwrite on Redis.
 - **Commit offsets only after a successful write.** An automatic commit would lose an event that never reached storage.
 - **Kafka and Redis are required.** The AppHost passes `Kafka:BootstrapServers` and the `redis` connection; without them

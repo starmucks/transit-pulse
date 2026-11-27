@@ -107,6 +107,9 @@ public sealed class VehicleGeoStore : IVehicleGeoStore
                     new HashEntry(
                         "observed_at",
                         position.ObservedAt.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)),
+                    new HashEntry(
+                        "ingested_at",
+                        position.IngestedAt?.UtcDateTime.ToString("O", CultureInfo.InvariantCulture) ?? ""),
                     new HashEntry("redis_written_at", writtenAt),
                 ]));
             pending.Add(batch.KeyExpireAsync(attrKey, _attributeTtl));

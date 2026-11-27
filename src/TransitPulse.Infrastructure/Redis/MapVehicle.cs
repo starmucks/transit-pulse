@@ -12,6 +12,9 @@ namespace TransitPulse.Infrastructure.Redis;
 /// <param name="RedisWrittenAt">
 /// When the Worker last wrote this hash (C3 segment ages). Null when the field is missing (stale hash).
 /// </param>
+/// <param name="IngestedAt">
+/// When the Ingestor received the raw record (C3 source-age vs pipeline). Null when the field is missing.
+/// </param>
 public sealed record MapVehicle(
     string VehicleId,
     double Lon,
@@ -21,4 +24,5 @@ public sealed record MapVehicle(
     string? TripId,
     int? DelaySec,
     DateTimeOffset ObservedAt,
-    DateTimeOffset? RedisWrittenAt = null);
+    DateTimeOffset? RedisWrittenAt = null,
+    DateTimeOffset? IngestedAt = null);
